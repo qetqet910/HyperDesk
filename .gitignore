@@ -1,0 +1,70 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+DEVLOG.md
+.agents
+
+# ── GSD baseline (auto-generated) ──
+.gsd
+.gsd-id
+.gsd.migrating/
+.mcp.json
+.bg-shell/
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+target/
+vendor/
+coverage/
+.cache/
+tmp/
+
+# Scratch / one-off debug files — never commit these
+scratch/
+Untitled-*.txt
+devlog.txt
+
+# Agent tooling state — internal run metadata, not project source
+.agent-blackbox/
+
+# Tauri updater signing key — NEVER commit. Lives only as GitHub secrets
+# (TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in CI.
+src-tauri/*.key
+src-tauri/*.key.pub

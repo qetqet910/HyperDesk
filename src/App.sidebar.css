@@ -1,0 +1,847 @@
+/* ─────────────────────────────────────────────────────────────
+   HyperDesk — Sidebar + Topbar layout additions
+   Append these rules to the BOTTOM of src/App.css
+   ───────────────────────────────────────────────────────────── */
+
+/* ─── New App Shell (replaces .app-container flex-column) ─── */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ─── Sidebar ─── */
+.hd-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: rgba(21, 22, 30, 0.55);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px;
+  gap: 2px;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.hd-sidebar--collapsed {
+  width: 58px;
+}
+
+/* Brand row */
+.hd-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  min-height: 42px;
+}
+.hd-sidebar__logo-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-secondary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 900;
+  font-size: 14px;
+  flex-shrink: 0;
+  box-shadow: 0 0 14px rgba(91, 130, 190, 0.35);
+}
+.hd-sidebar__logo-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.16s ease;
+}
+.hd-sidebar--collapsed .hd-sidebar__logo-text {
+  opacity: 0;
+  pointer-events: none;
+}
+.hd-sidebar__logo-name {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  background: linear-gradient(135deg, var(--accent-faint) 0%, var(--accent-soft) 60%, var(--accent-blue) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.hd-sidebar__version {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent-soft);
+  background: var(--accent-wash);
+  padding: 1px 6px;
+  border-radius: 20px;
+}
+
+/* Eyebrow label */
+.hd-sidebar__eyebrow {
+  position: relative;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--font);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 10px 10px 4px;
+  white-space: nowrap;
+  max-height: 24px;
+  opacity: 1;
+  transition: opacity 0.18s ease, max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              padding 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hd-sidebar__eyebrow::before {
+  content: "";
+  position: absolute;
+  bottom: -4px;
+  display: block;
+  width: 88%;
+  height: 1px;
+  background: var(--border);
+  margin-bottom: 4px;
+}
+.hd-sidebar__eyebrow--system {
+  margin-top: 8px;
+}
+.hd-sidebar--collapsed .hd-sidebar__eyebrow {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Nav */
+.hd-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Nav item */
+.hd-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+  white-space: nowrap;
+  width: 100%;
+}
+.hd-nav-item:hover {
+  background: var(--accent-wash);
+  color: var(--text-main);
+}
+.hd-nav-item--active {
+  background: linear-gradient(90deg, var(--accent-wash-strong), rgba(143, 171, 212, 0.04));
+  color: var(--cream);
+  font-weight: 700;
+  border-left: 2px solid var(--accent-blue);
+  padding-left: 8px;
+  box-shadow: inset 0 0 0 1px rgba(143, 171, 212, 0.14);
+}
+/* Collapsed: the icon must NOT move. Keep the same padding/border as the expanded
+   state so the icon x-position is pixel-identical; the label just fades out and is
+   clipped by the sidebar's overflow:hidden. (Previously this centered the icon and
+   zeroed padding, which is what made the icons jump/"밀림" during collapse.) */
+.hd-nav-item__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+.hd-nav-item--active .hd-nav-item__icon {
+  opacity: 1;
+  color: var(--accent-blue);
+}
+.hd-nav-item__label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.16s ease;
+}
+.hd-nav-item__count,
+.hd-nav-item__badge {
+  flex-shrink: 0;
+  opacity: 1;
+  transition: opacity 0.16s ease;
+}
+/* Fade-only: trailing text/badges disappear while the icon stays put.
+   The sidebar's overflow:hidden clips whatever extends past the collapsed width. */
+.hd-sidebar--collapsed .hd-nav-item__label,
+.hd-sidebar--collapsed .hd-nav-item__count,
+.hd-sidebar--collapsed .hd-nav-item__badge {
+  opacity: 0;
+  pointer-events: none;
+}
+.hd-nav-item__count {
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--text-muted);
+  background: var(--accent-wash);
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: auto;
+}
+.hd-nav-item--active .hd-nav-item__count {
+  background: var(--accent-wash-strong);
+  color: var(--cream);
+}
+.hd-nav-item__badge {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+  background: rgba(34, 197, 94, 0.08);
+  margin-left: auto;
+}
+
+/* Footer — keeps the status row pinned to the very bottom (justify-content:flex-end),
+   so the dot's position is identical whether expanded or collapsed:
+   - Expanded: the collapse button is absolutely positioned, inline with the
+     "Core Online" row on the right. The status is the only flow child → sits at
+     the bottom.
+   - Collapsed: the button drops into the flow ABOVE the status (it's DOM-first).
+     The footer grows UPWARD (it's bottom-anchored), so the status/dot stay put. */
+.hd-sidebar__footer {
+  position: relative;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.hd-sidebar__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* padding-left 10px puts the dot at x=20px — the same column as the nav-item icons
+     (sidebar 10px + nav-item 10px). */
+  padding: 0 10px;
+  min-height: 28px;
+  min-width: 0;
+}
+.hd-sidebar__status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 8px var(--accent-green);
+  flex-shrink: 0;
+  animation: dotPulse 1.5s ease-in-out infinite;
+}
+.hd-sidebar__status-text {
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.16s ease;
+}
+.hd-sidebar--collapsed .hd-sidebar__status-text {
+  opacity: 0;
+  pointer-events: none;
+}
+.hd-sidebar__status-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-green);
+}
+.hd-sidebar__status-sub {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.hd-sidebar__collapse-btn {
+  /* Expanded: inline with the "Core Online" row, pinned to the footer's bottom-right. */
+  position: absolute;
+  bottom: 1px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 26px;
+  width: 26px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--duration-calm, 0.15s) var(--ease-calm, ease),
+              color var(--duration-calm, 0.15s) var(--ease-calm, ease),
+              border-color var(--duration-calm, 0.15s) var(--ease-calm, ease);
+}
+/* Collapsed: rejoin the flow ABOVE the status, centered in the narrow rail. */
+.hd-sidebar--collapsed .hd-sidebar__collapse-btn {
+  position: static;
+  align-self: center;
+}
+.hd-sidebar__collapse-btn:hover {
+  background: var(--accent-wash);
+  color: var(--accent-soft);
+  border-color: var(--glass-border);
+}
+
+/* ─── Main area ─── */
+.hd-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ─── Topbar (Refined & Compact) ─── */
+.hd-topbar {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(20, 25, 35, 0.55);
+  backdrop-filter: blur(12px);
+  position: relative;
+  z-index: 1000;
+  overflow: visible;
+}
+
+.hd-topbar__left, .hd-topbar__center, .hd-topbar__right {
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.hd-topbar__left { padding-left: 8px; gap: 10px; }
+.hd-topbar__center { flex: 1; justify-content: center; }
+.hd-topbar__right { gap: 8px; padding-right: 4px; }
+
+.hd-topbar__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+}
+.hd-topbar__subtitle {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+/* 모든 버튼에 클릭 이벤트 강제 활성화 */
+.tool-btn, .window-control-btn, .add-btn, .refresh-btn {
+  pointer-events: auto !important;
+}
+
+.hd-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+}
+
+.hd-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Window Controls */
+.hd-topbar__window-controls {
+  display: flex;
+  align-items: center;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.tool-btn, .window-control-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tool-btn:hover, .window-control-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+}
+
+.window-control-btn--close:hover {
+  background: #e81123 !important;
+  color: white !important;
+}
+
+/* Fix app border for frameless */
+.app-layout {
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+
+/* ─── Content area ─── */
+.hd-content {
+  flex: 1;
+  min-height: 0; /* prevents flex child from growing beyond parent */
+  overflow-y: auto;
+  padding: 24px;
+  scrollbar-width: none;
+}
+.hd-content::-webkit-scrollbar {
+  display: none;
+}
+
+/* Multiview gets no padding (fills edge-to-edge) */
+.hd-content--multiview {
+  padding: 0;
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Unified page-enter animation. Every non-multiview page is wrapped in .hd-page
+   with key={page}, so switching pages remounts this wrapper and replays the
+   fade+rise — giving all pages one consistent transition feel.
+   MultiView is INTENTIONALLY excluded: it hosts swallowed Win32 child windows
+   that are not DOM descendants, so an opacity/transform animation on an ancestor
+   can't move the native window with it — it would desync and flicker. */
+.hd-page {
+  animation: hd-page-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes hd-page-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hd-page { animation: none; }
+}
+
+/* Light theme overrides */
+[data-theme="light"] .hd-sidebar {
+  background: rgba(244, 246, 250, 0.88);
+  border-right-color: var(--border);
+}
+[data-theme="light"] .hd-topbar {
+  background: rgba(255, 255, 255, 0.88);
+  border-bottom-color: var(--border);
+}
+[data-theme="light"] .hd-nav-item--active {
+  background: linear-gradient(90deg, rgba(58, 106, 170, 0.12), rgba(58, 106, 170, 0.04));
+  border-left-color: var(--accent-blue);
+}
+
+/* ─── 앰비언트 배경 (파스텔 블루 방사형 안개) ──────────────────── */
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 18% 0%, rgba(143, 171, 212, 0.09), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 95% 100%, rgba(91, 130, 190, 0.07), transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+.app-layout { position: relative; z-index: 1; }
+
+/* ─── BentoCell ─── */
+.bento-cell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 40%),
+    var(--bg-card) !important;
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
+}
+/* 상단 악센트 그라디언트 라인 */
+.bento-cell::before {
+  content: "";
+  position: absolute; top: 0; left: 16px; right: 16px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
+  opacity: 0.7;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 2;
+}
+/* 코너 HUD 브래킷 4개 */
+.bento-cell::after {
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(var(--accent-blue), var(--accent-blue)) top 8px left 8px / 10px 1px no-repeat,
+    linear-gradient(var(--accent-blue), var(--accent-blue)) top 8px left 8px / 1px 10px no-repeat,
+    linear-gradient(var(--accent-blue), var(--accent-blue)) top 8px right 8px / 10px 1px no-repeat,
+    linear-gradient(var(--accent-blue), var(--accent-blue)) top 8px right 8px / 1px 10px no-repeat,
+    linear-gradient(var(--accent-blue), var(--accent-blue)) bottom 8px left 8px / 10px 1px no-repeat,
+    linear-gradient(var(--accent-blue), var(--accent-blue)) bottom 8px left 8px / 1px 10px no-repeat,
+    linear-gradient(var(--accent-blue), var(--accent-blue)) bottom 8px right 8px / 10px 1px no-repeat,
+    linear-gradient(var(--accent-blue), var(--accent-blue)) bottom 8px right 8px / 1px 10px no-repeat;
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: inherit;
+}
+
+/* ─── MST 라인 아이템 — 서버 랙 슬레드 스타일 ───────────────── */
+.mst-rack-row {
+  display: flex;
+  align-items: stretch;
+  height: 48px;
+  overflow: hidden;
+  margin-bottom: 6px;
+  background: linear-gradient(180deg, #1A2130 0%, #141923 50%, #0E1217 100%);
+  border: 1px solid rgba(143, 171, 212, 0.18);
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(0,0,0,0.4);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.mst-rack-row:hover {
+  border-color: var(--accent-blue);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 0 12px rgba(91,130,190,0.18);
+}
+.mst-rack-row.dead {
+  opacity: 0.5;
+  filter: saturate(0.2);
+}
+/* 랙 귀(ear) */
+.mst-rack-ear {
+  width: 18px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, #1E2633 0%, #19202B 50%, #1E2633 100%);
+  border-right: 1px solid rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+}
+.mst-rack-ear::before,
+.mst-rack-ear::after {
+  content: "";
+  display: block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #7A7D8F 0%, #3A3C48 55%, #1A1B22 100%);
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.6);
+}
+.mst-rack-stripe {
+  width: 2px; flex: 1; margin: 3px 0;
+  background: var(--accent-blue);
+  opacity: 0.75;
+  box-shadow: 0 0 6px var(--accent-blue);
+}
+.mst-rack-row.dead .mst-rack-stripe {
+  background: #3A3C48;
+  box-shadow: none;
+}
+/* 상태 컬럼 */
+.mst-rack-status {
+  width: 72px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 8px 0 10px;
+  border-right: 1px solid rgba(0,0,0,0.5);
+  background: linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0.05));
+}
+.mst-rack-led {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.8);
+  flex-shrink: 0;
+}
+.mst-rack-led.online { background: var(--accent-green); box-shadow: 0 0 7px var(--accent-green), inset 0 0 2px rgba(255,255,255,0.5); }
+.mst-rack-led.offline { background: var(--accent-red); box-shadow: 0 0 6px rgba(244,63,94,0.4); }
+.mst-rack-latency {
+  font-family: var(--font);
+  font-size: 10px; font-weight: 900; letter-spacing: 0.5px;
+}
+.mst-rack-latency.online { color: var(--accent-green); }
+.mst-rack-latency.offline { color: var(--text-muted); }
+/* 네임플레이트 */
+.mst-rack-name {
+  flex: 0 0 auto; min-width: 200px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 16px;
+  border-right: 1px solid rgba(0,0,0,0.5);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+  white-space: nowrap;
+}
+.mst-rack-hostname {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.mst-rack-row.dead .mst-rack-hostname { color: var(--text-muted); }
+/* 주소 컬럼 */
+.mst-rack-addr {
+  flex: 1; min-width: 0;
+  padding: 0 16px;
+  border-right: 1px solid rgba(0,0,0,0.5);
+  display: flex; align-items: center;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 부하 게이지 */
+.mst-rack-gauge {
+  width: 180px; flex-shrink: 0;
+  padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
+  border-right: 1px solid rgba(0,0,0,0.5);
+  background: repeating-linear-gradient(90deg, rgba(0,0,0,0.25) 0 1px, transparent 1px 4px);
+}
+.mst-rack-track {
+  flex: 1; height: 4px;
+  background: rgba(0,0,0,0.55);
+  border-radius: 1px; overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(0,0,0,0.6);
+}
+.mst-rack-fill {
+  height: 100%;
+  background: linear-gradient(to right, var(--accent-green), var(--accent-blue));
+  box-shadow: 0 0 6px var(--accent-blue);
+}
+.mst-rack-pct {
+  font-family: var(--font);
+  font-size: 11px; font-weight: 900; width: 34px; text-align: right;
+}
+/* 연결 버튼 */
+.mst-rack-actions { display: flex; align-items: center; padding: 0 10px; }
+.mst-rack-connect {
+  height: 30px; padding: 0 14px;
+  border: none; border-radius: 3px;
+  background: linear-gradient(180deg, var(--accent-soft) 0%, var(--accent-blue) 50%, var(--accent-secondary) 100%);
+  color: #fff;
+  font-family: var(--font);
+  font-size: 10px; font-weight: 900; letter-spacing: 1px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    0 0 10px rgba(91,130,190,0.30);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.mst-rack-connect:hover { opacity: 0.9; }
+.mst-rack-connect.disabled {
+  background: #1C2433;
+  color: var(--text-muted);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  cursor: not-allowed;
+}
+/* 프로토콜 태그 */
+.mst-proto-tag {
+  font-size: 8px; padding: 2px 5px;
+  border-radius: 2px; font-weight: 900; letter-spacing: 0.5px;
+  font-family: var(--font);
+}
+.mst-proto-tag.rdp     { background: rgba(143,171,212,0.12); color: var(--accent-soft);  border: 1px solid rgba(143,171,212,0.28); }
+.mst-proto-tag.horizon { background: rgba(143,171,212,0.08); color: var(--accent-faint); border: 1px solid rgba(143,171,212,0.20); }
+.mst-proto-tag.auto    { background: rgba(95,176,138,0.10);  color: var(--accent-green); border: 1px solid rgba(95,176,138,0.25); }
+
+/* ─── KPI 타일 ───────────────────────────────────────────────── */
+.hd-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 4px;
+}
+.hd-kpi-tile {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.12)),
+    var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+.hd-kpi-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.hd-kpi-value {
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.hd-kpi-delta {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font);
+  opacity: 0.8;
+}
+.hd-kpi-delta.up { color: var(--accent-green); }
+.hd-kpi-delta.dn { color: var(--accent-red); }
+
+/* ─── 가상 머신 페이지 필터 세그먼트 ───────────────────────── */
+.hd-segment-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.hd-segment-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  letter-spacing: 0.3px;
+}
+.hd-segment-btn:hover {
+  background: var(--accent-wash);
+  border-color: rgba(143, 171, 212, 0.28);
+  color: var(--text-main);
+}
+.hd-segment-btn.active {
+  background: linear-gradient(135deg, var(--accent-wash-strong), var(--accent-wash));
+  border-color: rgba(143, 171, 212, 0.44);
+  color: var(--cream);
+  box-shadow: 0 0 10px rgba(91, 130, 190, 0.15);
+}
+.hd-segment-count {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 900;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-family: var(--font);
+}
+.hd-segment-btn.active .hd-segment-count {
+  background: var(--accent-wash-strong);
+  color: var(--cream);
+}
+.hd-segment-btn--danger:hover {
+  background: rgba(217, 76, 76, 0.12);
+  border-color: rgba(217, 76, 76, 0.35);
+  color: var(--accent-red);
+}
+
+/* ─── 원격 자산 페이지 — 편집/삭제 아이콘 버튼 ─────────────── */
+.mst-rack-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+.mst-rack-icon-btn:hover {
+  background: var(--accent-wash);
+  border-color: var(--accent-soft);
+  color: var(--text-main);
+}
+.mst-rack-icon-btn--del:hover {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
+/* ─── Command Hub 하단 통계 바 ─────────────────────────────── */
+.hub-stat-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border);
+}
+.hub-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  padding: 0 16px;
+}
+.hub-stat-item:first-child { padding-left: 0; }
+.hub-stat-item:last-child  { padding-right: 0; }
+.hub-stat-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  width: 76px;
+  flex-shrink: 0;
+}
+.hub-stat-track {
+  flex: 1;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.hub-stat-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.hub-stat-value {
+  font-size: 11px;
+  font-weight: 900;
+  font-family: var(--font);
+  white-space: nowrap;
+  width: 56px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.hub-stat-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}

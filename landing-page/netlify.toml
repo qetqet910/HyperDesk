@@ -1,0 +1,11 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# App.tsx routes "/docs" via window.history.pushState (no react-router), so there is
+# no physical /docs/index.html — a direct visit or refresh on that path needs to fall
+# back to index.html and let the client-side router take over, or Netlify 404s it.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
