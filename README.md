@@ -12,6 +12,9 @@
 
 ---
 
+<img width="1374" height="778" alt="image" src="https://github.com/user-attachments/assets/55b4536e-b19a-480e-9d1c-b72467904955" />
+
+
 ## Overview
 
 **HyperDesk**는 Hyper-V 가상 머신과 원격 데스크톱(RDP, Horizon) 세션을 단일 인터페이스에서 통합 모니터링하는 데스크톱 애플리케이션입니다. 
