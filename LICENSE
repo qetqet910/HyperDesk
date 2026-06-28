@@ -1,46 +1,29 @@
-HyperDesk End-User License Agreement (EULA) — DRAFT
-Copyright © 2026 HyperDesk. All rights reserved.
+PolyForm Noncommercial License 1.0.0
 
-이 문서는 상용 배포를 위한 초안이며, 실제 판매/배포 전 변호사 등 법률 전문가의
-검토를 받아야 합니다. 아래 조항은 일반적인 상용 소프트웨어 라이선스의 틀을
-따른 placeholder이며, 회사명/관할법원/환불 정책 등 실제 사업 정보로 교체가
-필요합니다.
+Copyright (c) 2026 HyperDesk
 
-1. 라이선스 부여
-   본 라이선스 보유자("사용자")는 HyperDesk("소프트웨어")를 본 계약에 명시된
-   조건에 따라 사용할 수 있는 비독점적, 양도 불가능한 권리를 부여받습니다.
-   소프트웨어의 소스 코드, 컴파일된 바이너리에 대한 소유권은 HyperDesk에
-   있으며, 본 라이선스는 사용 권한만을 부여합니다.
+This license applies to any software and associated documentation (the "Software") that is distributed under this PolyForm Noncommercial License 1.0.0.
 
-2. 금지 행위
-   사용자는 다음 행위를 할 수 없습니다:
-   - 소프트웨어의 역공학(reverse engineering), 디컴파일, 디스어셈블
-   - 소프트웨어 또는 그 일부의 재배포, 재판매, 서브라이선스
-   - 라이선스 키/인증 메커니즘의 우회 또는 변경
+1. Acceptance
+In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
 
-3. 제3자 구성요소
-   본 소프트웨어는 Tauri, React 등 오픈소스 구성요소를 포함합니다. 각
-   구성요소의 라이선스 조건은 THIRD-PARTY-NOTICES.md 문서를 참고하십시오.
+2. Copyright License
+The licensor grants you a copyright license for the Software to do everything you might do with the Software that would otherwise infringe the licensor's copyright in it for any permitted purpose. However, you may only distribute the Software according to these terms.
 
-4. 관리자 권한 및 시스템 접근에 대한 동의
-   소프트웨어는 Win32 API를 통한 외부 프로세스 윈도우 제어(SetParent 등)와
-   Hyper-V/원격 데스크톱 제어를 위해 Windows 관리자 권한으로 실행됩니다.
-   사용자는 이에 동의하고 소프트웨어를 실행합니다.
+3. Patent License
+The licensor grants you a patent license for the Software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the Software.
 
-5. 데이터 수집
-   소프트웨어는 사용자 PC의 레지스트리(RDP 접속 기록, Horizon 서버 목록)를
-   읽어 대시보드에 표시하는 데 사용합니다. 이 데이터는 외부로 전송되지
-   않으며 로컬에만 저장됩니다. 자세한 내용은 PRIVACY.md를 참고하십시오.
+4. Noncommercial Purposes
+Any purposes are permitted purposes, except for commercial purposes.
 
-6. 무보증
-   소프트웨어는 "있는 그대로(AS IS)" 제공되며, 명시적이든 묵시적이든 어떠한
-   형태의 보증도 하지 않습니다. HyperDesk는 소프트웨어 사용으로 인해 발생하는
-   직접적/간접적 손해에 대해 책임을 지지 않습니다.
+5. Commercial Purposes
+Commercial purposes include running the Software as part of a service, selling the Software, or using the Software for any other revenue-generating purpose.
 
-7. 책임의 한계
-   HyperDesk는 가상 머신 데이터 손실, RDP/Horizon 세션 중단 등으로 인한
-   손해에 대해 사용자가 지불한 라이선스 비용을 초과하여 책임지지 않습니다.
+6. Notices
+You must ensure that anyone who gets a copy of any part of the Software from you also gets a copy of these terms or the URL for them: https://polyformproject.org/licenses/noncommercial/1.0.0.
 
-8. 종료
-   사용자가 본 계약을 위반할 경우 라이선스는 즉시 종료되며, 사용자는
-   소프트웨어의 모든 복사본을 삭제해야 합니다.
+7. No Other Rights
+Each license is granted only for the Software in the exact state it was in when you received it. The licensor does not license you to use its trademarks or other intellectual property.
+
+8. As Is
+As far as the law allows, the Software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the Software, under any kind of legal claim.
