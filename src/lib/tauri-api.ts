@@ -78,6 +78,8 @@ export const api = {
   connectVm: (host: string, protocol: string, username?: string, slotWidth?: number, slotHeight?: number, colorDepth?: number, quality?: string) =>
     invoke<number>("connect_vm", { host, protocol, username, slotWidth, slotHeight, colorDepth, quality }),
   focusSlotWindow: (slotId: string) => invoke<void>("focus_slot_window", { slotId }),
+  setFullscreen: (on: boolean) => invoke<void>("set_fullscreen", { on }),
+  setImmersive: (on: boolean) => invoke<void>("set_immersive", { on }),
   connectConsole: (name: string) => invoke<number>("connect_console", { name }),
   setVmMemory: (name: string, memoryGb: number) => invoke<void>("set_vm_memory", { name, memoryGb }),
   setVmProcessors: (name: string, processors: number) => invoke<void>("set_vm_processors", { name, processors }),

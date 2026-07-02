@@ -207,7 +207,6 @@
 [data-theme="retro"] .control-group button,
 [data-theme="retro"] .retry-btn-sm,
 [data-theme="retro"] .slot-header-bar,
-[data-theme="retro"] .multiview-header,
 [data-theme="retro"] .hd-kpi-tile {
   border: 2px solid;
   border-color: #ffffff #000000 #000000 #ffffff;
@@ -249,7 +248,6 @@
 [data-theme="retro"] .settings-sheet,
 [data-theme="retro"] .hd-kpi-tile,
 [data-theme="retro"] .slot-header-bar,
-[data-theme="retro"] .multiview-header,
 [data-theme="retro"] .hd-segment-btn,
 [data-theme="retro"] .control-group button,
 [data-theme="retro"] .hd-btn,
@@ -1511,48 +1509,41 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   overflow: hidden;
 }
 
-/* Header floats over the grid — visible only on hover so slots get full height.
-   HEIGHT IS LOCKED TO 36px ON PURPOSE: a swallowed Win32 child renders physically
-   above the WebView2 surface, so DOM z-index does NOT lift this header over a VM.
-   The only band where HTML stays visible over a slot is the 36px .slot-header-bar
-   at each slot's top (the Win32 child fills .slot-content-area *below* it). Make
-   this header taller than 36px and its bottom edge gets eaten by the VM window
-   (the "header overlapped by VM" bug). Keep it ≤ 36px and keep its controls
-   inside that band — see .control-group sizing below. */
-/* Floating chip — a centered pill at the top instead of a full-width bar, so it
-   no longer collides with each slot's own header bar (the "v9.3"-style label).
-   HEIGHT STILL CAPPED AT 36px: a swallowed Win32 child renders physically above
-   the WebView2 surface, so the chip is only clickable where it overlaps the slots'
-   36px .slot-header-bar band at the very top. Keep it inside that band — taller and
-   its lower edge gets eaten by the VM window (the old "header overlapped by VM" bug).
-   Controls (.control-group: 2+28+2=32px) fit inside 36px. */
-.multiview-header {
+/* Immersive: the container overlays the whole viewport (covers sidebar/topbar/
+   stats) while the OS window goes fullscreen.
+   z-index MUST beat .hd-topbar (1000, App.sidebar.css) or the app's own header
+   floats over the immersive view and blocks the slot controls; stays below
+   .slot-selector-overlay (2000) and the 9999 loading/error screens. */
+.multiview-container.immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: #000;
+}
+.multiview-container.immersive .multiview-grid {
+  border: none;
+  border-radius: 0;
+}
+/* Immersive header FLOATS (absolute) so the content area — and therefore the
+   VM — keeps 100% of the screen at native resolution and never moves when the
+   bar appears. The bar is normally COVERED by the Win32 surface; on top-edge
+   hover the Rust cursor poller crops the VM's top band via SetWindowRgn
+   (swallow.rs apply_reveal), letting this bar show through and take clicks. */
+.multiview-container.immersive .slot-header-bar {
   position: absolute;
   top: 0;
-  left: 50%;
-  transform: translateX(-50%) translateY(-8px);
-  height: 36px;
-  z-index: 1000;
-  display: flex; align-items: center; gap: 10px;
-  padding: 0 8px 0 14px;
-  background: rgba(10, 11, 16, 0.92);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  border-radius: 18px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  left: 0;
+  right: 0;
+  z-index: 10;
 }
 
-.multiview-container:hover .multiview-header {
-  opacity: 1;
-  pointer-events: all;
-  transform: translateX(-50%) translateY(0);
-}
-.multiview-header h3 { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
-
-
+/* NOTE: there is deliberately NO separate multiview header. A swallowed Win32
+   child renders physically above the WebView2 surface, so the only band where
+   HTML stays visible/clickable over a slot is the 36px .slot-header-bar at the
+   slot's top (the Win32 child fills .slot-content-area *below* it). Any second
+   header floating over that band duplicates the header visually, and anything
+   below 36px gets eaten by the VM window. MultiView's controls therefore render
+   INSIDE the slot header bar (SwallowSlot headerControls). */
 .multiview-grid {
   flex: 1;
   display: grid;
@@ -1566,10 +1557,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
      lands at the new bounds in one sync. Only fade visual props. */
   transition: background 0.3s ease, border-color 0.3s ease;
 }
-
-/* Layout Variations */
-.layout-1x1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
-.layout-2x2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 
 /* SwallowSlot: flex column so header bar (36px) + content area (flex:1) stack naturally */
 .swallow-slot {
@@ -1667,7 +1654,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 
 /* Security/placeholder overlay inside slot-content-area.
    z-index: 50 beats any child content but never competes with
-   .multiview-header (1000) or .slot-selector-overlay (2000). */
+   .slot-selector-overlay (2000). */
 .slot-overlay-security {
   position: absolute;
   inset: 0;
@@ -1793,12 +1780,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 }
 
 /* --- Added SwallowSlot Control Enhancements --- */
-.swallow-slot.focused {
-  z-index: 100 !important;
-  border-color: var(--accent-blue) !important;
-  box-shadow: 0 0 40px rgba(79, 142, 247, 0.3);
-}
-
 .swallow-slot.glitched {
   border-color: var(--accent-red) !important;
 }
@@ -1832,140 +1813,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   100% { transform: translate(0, 0); }
 }
 
-/* --- Theater Mode & Enhanced Control UI --- */
-
-body.theater-active .hd-topbar,
-body.theater-active .stats-bar {
-  display: none !important;
-}
-
-body.theater-active .app-container {
-  padding: 0 !important;
-}
-
-body.theater-active .dashboard-content {
-  padding: 0 !important;
-  height: 100vh !important;
-}
-
-.multiview-container.theater-mode {
-  position: fixed;
-  inset: 0;
-  height: 100vh;
-  background: #000;
-  border-radius: 0;
-  overflow: hidden;
-  z-index: 800;
-}
-
-/* Invisible hit zone at the very top to reveal header on hover */
-.theater-hit-zone {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 52px;
-  z-index: 600;
-  background: transparent;
-}
-
-/* Theater mode: header sits above the full-screen grid AND above .theater-hit-zone (600) —
-   otherwise the invisible hover-detector intercepts clicks meant for the header buttons. */
-.multiview-container.theater-mode .multiview-header {
-  z-index: 650;
-}
-
-.multiview-container.theater-mode:hover .multiview-header,
-.multiview-container.theater-mode.header-forced .multiview-header {
-  opacity: 1;
-  pointer-events: all;
-  transform: translateX(-50%) translateY(0);
-}
-
-/* Grid always fills full container — never shifts when header shows/hides */
-.multiview-container.theater-mode .multiview-grid {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  gap: 2px;
-  border: none;
-  border-radius: 0;
-  background: #000;
-}
-
-.f11-hint-overlay {
-  position: fixed;
-  top: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(14, 18, 23, 0.88);
-  backdrop-filter: blur(15px);
-  padding: 12px 24px;
-  border-radius: 40px;
-  border: 1px solid var(--accent-soft);
-  color: var(--accent-soft);
-  font-size: 12px;
-  font-weight: 700;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  box-shadow: 0 15px 40px rgba(0,0,0,0.6), 0 0 20px rgba(91, 130, 190, 0.22);
-  pointer-events: none;
-}
-
-.onboarding-hint-overlay {
-  position: fixed;
-  top: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 420px;
-  background: rgba(14, 18, 23, 0.92);
-  backdrop-filter: blur(15px);
-  padding: 12px 14px 12px 18px;
-  border-radius: 14px;
-  border: 1px solid var(--glass-border);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.5;
-  z-index: 1000;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  box-shadow: 0 15px 40px rgba(0,0,0,0.6);
-}
-.onboarding-hint-overlay svg:first-child { color: var(--accent-soft); flex-shrink: 0; margin-top: 2px; }
-.onboarding-hint-overlay kbd {
-  font-family: var(--font);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text-main);
-  background: var(--sm-row-hover);
-  border: 1px solid var(--glass-border);
-  border-radius: 5px;
-  padding: 1px 5px;
-  margin: 0 1px;
-}
-.onboarding-hint-overlay button {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-}
-.onboarding-hint-overlay button:hover { color: var(--text-main); background: var(--sm-row-hover); }
-
-.layout-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-/* Sized to stay inside the 36px .multiview-header protected band (2px+28px+2px=32px,
+/* Sized to stay inside the 36px .slot-header-bar protected band (2px+28px+2px=32px,
    leaving ~2px breathing room top/bottom). Do not grow past this or the controls'
    bottom edge slips below 36px and a swallowed VM window covers them. */
 .control-group {
@@ -2009,51 +1857,11 @@ body.theater-active .dashboard-content {
   margin: 0 4px;
 }
 
-.theater-btn.active {
-  color: var(--accent-soft) !important;
-  background: rgba(143, 171, 212, 0.18) !important;
-  border-color: rgba(143, 171, 212, 0.36) !important;
-}
-
-.grid-return-btn {
+/* Right-side cluster in the 36px header bar: MultiView's slot switcher
+   (headerControls) + disconnect. Must stay within the 36px band. */
+.slot-header-right {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  background: var(--accent-blue);
-  color: #fff;
-  border: none;
-  border-radius: 7px;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-}
-
-.grid-return-btn:hover {
-  background: var(--accent-secondary);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(74, 112, 169, 0.4);
-}
-
-.grid-return-btn:active {
-  transform: scale(0.95);
-}
-
-.focus-badge {
-  font-size: 10px;
-  background: var(--accent-blue);
-  color: #fff;
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin-left: 15px;
-  letter-spacing: 1.5px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.slot-actions {
-  display: flex;
   gap: 8px;
 }
 
@@ -2081,6 +1889,13 @@ body.theater-active .dashboard-content {
   background: var(--accent-red);
   border-color: var(--accent-red);
   box-shadow: 0 0 15px rgba(244, 63, 94, 0.4);
+}
+
+/* Disconnect stays rendered on empty slots (dimmed, inert) so header controls
+   never shift when paging between swallowed and empty slots. */
+.slot-action-btn:disabled {
+  opacity: 0.25;
+  pointer-events: none;
 }
 
 .retry-status {
@@ -2118,16 +1933,6 @@ body.theater-active .dashboard-content {
      of the ResizeObserver when isActuallyHidden flips, with a forced
      re-measure on reveal. */
 .swallow-slot.slot-hidden {
-  display: none !important;
-}
-
-/* Optimize focus mode transitions */
-.multiview-grid.focus-grid > *:not(.focused) {
-  display: none !important;
-}
-
-/* Re-apply visibility behavior specifically for background slots */
-.multiview-grid.focus-grid > .slot-hidden {
   display: none !important;
 }
 

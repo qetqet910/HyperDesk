@@ -9,7 +9,7 @@ use commands::{
     add_remote_host, remove_remote_host, update_remote_host,
     set_vm_memory, set_vm_processors, get_horizon_path, connect_horizon, check_host,
     set_window_visibility, is_window_valid, swallow_window,
-    unswallow_window, sync_slot_bounds, toggle_fullscreen, focus_slot_window,
+    unswallow_window, sync_slot_bounds, toggle_fullscreen, set_fullscreen, set_immersive, focus_slot_window,
     list_snapshots, create_snapshot, restore_snapshot, delete_snapshot,
     get_vm_memo, set_vm_memo, set_remote_host_memo,
     get_vm_tags, set_vm_tags, set_remote_host_tags,
@@ -63,7 +63,6 @@ pub fn run() {
                         let _ = app.emit("hotkey-focus", "slot-3");
                         crate::swallow::focus_window("slot-3");
                     }
-                    Code::Digit0 => { let _ = app.emit("hotkey-focus", "grid"); }
                     _ => {}
                 }
             }
@@ -78,7 +77,6 @@ pub fn run() {
             for (name, code) in [
                 ("Alt+1", Code::Digit1), ("Alt+2", Code::Digit2),
                 ("Alt+3", Code::Digit3), ("Alt+4", Code::Digit4),
-                ("Alt+0", Code::Digit0),
             ] {
                 match shortcuts.register(Shortcut::new(Some(Modifiers::ALT), code)) {
                     Ok(()) => eprintln!("[hotkey] registered {name}"),
@@ -121,6 +119,13 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Win-key/Alt+Tab/Alt+1~4 → focused VM (see swallow.rs keyboard-hook section).
+            if let Some(win) = app.get_webview_window("main") {
+                if let Ok(h) = win.hwnd() {
+                    crate::swallow::install_keyboard_hook(app.handle().clone(), h.0 as isize);
+                }
+            }
 
             Ok(())
         })
@@ -180,6 +185,8 @@ pub fn run() {
             set_window_visibility,
             is_window_valid,
             toggle_fullscreen,
+            set_fullscreen,
+            set_immersive,
             focus_slot_window,
             list_snapshots,
             create_snapshot,

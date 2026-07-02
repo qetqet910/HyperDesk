@@ -5,7 +5,6 @@ export interface Settings {
   defaultUsername: string;
   autoRefresh: boolean;
   viewMode: "dashboard" | "multiview";
-  layout: "1x1" | "2x2";
   slotAssignments: Record<string, string>;
   theme: "dark" | "light" | "retro";
   rdpColorDepth: 16 | 32;
@@ -17,7 +16,6 @@ const DEFAULT_SETTINGS: Settings = {
   defaultUsername: "Administrator",
   autoRefresh: false,
   viewMode: "dashboard",
-  layout: "2x2",
   slotAssignments: {},
   theme: "dark",
   rdpColorDepth: 32,
@@ -32,9 +30,7 @@ function loadSettings(): Settings {
     if (!saved) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(saved);
     if (!("theme" in parsed)) parsed.theme = "dark";
-    // v1.0.2/v1.0.3 shipped with 1x2/2x1 layouts (since removed); normalize stale
-    // saved values so the layout-control buttons don't end up with none active.
-    if (parsed.layout !== "1x1" && parsed.layout !== "2x2") parsed.layout = "2x2";
+    delete parsed.layout; // removed: single-slot view only
     return { ...DEFAULT_SETTINGS, ...parsed };
   } catch {
     return DEFAULT_SETTINGS;

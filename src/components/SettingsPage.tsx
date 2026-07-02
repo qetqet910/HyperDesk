@@ -9,8 +9,9 @@ import { ConfirmModal } from "./ConfirmModal";
 type UpdateState = "idle" | "checking" | "upToDate" | "available" | "installing" | "error";
 
 const HOTKEYS: { keys: string; desc: string }[] = [
-  { keys: "Alt + 1 ~ 4", desc: "멀티뷰 슬롯 1~4번에 포커스 전환" },
-  { keys: "Alt + 0", desc: "전체 그리드 보기로 전환" },
+  { keys: "Alt + 1 ~ 4", desc: "슬롯 1~4번으로 전환 (VM에 포커스가 있어도 동작)" },
+  { keys: "Win / Alt + Tab", desc: "VM에 포커스가 있으면 VM 내부로 전달" },
+  { keys: "F11", desc: "창 전체화면 전환" },
   { keys: "Ctrl + K", desc: "검색 모달 열기" },
 ];
 
@@ -214,22 +215,6 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
                     onClick={() => updateSettings({ rdpQuality: q.id })}
                   >
                     {q.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="settings-row col">
-              <div className="settings-row-label">멀티뷰 기본 그리드</div>
-              <div className="settings-row-desc">멀티뷰 시작 시 적용되는 분할 방식</div>
-              <div className="settings-seg-row">
-                {(["1x1", "2x2"] as const).map((l) => (
-                  <button
-                    key={l}
-                    className={`hd-segment-btn ${settings.layout === l ? "active" : ""}`}
-                    style={{ flex: 1 }}
-                    onClick={() => updateSettings({ layout: l })}
-                  >
-                    {l}
                   </button>
                 ))}
               </div>

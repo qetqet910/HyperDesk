@@ -297,11 +297,19 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
     let rdp_path = temp_dir.join(rdp_filename);
 
     let host = rdp_sanitize(&host);
-    let w = slot_width.unwrap_or(1280);
-    let h = slot_height.unwrap_or(720);
+    // Classic mstsc can't renegotiate session resolution mid-session, so connect at the
+    // primary monitor's FULL resolution and let smart sizing:i:1 scale the bitmap down
+    // into the slot. Growing the slot then never exceeds the connect-time resolution, so
+    // the surface stays sharp instead of upscaling a small connect-time bitmap.
+    let (screen_w, screen_h) = unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+        (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+    };
+    let w = if screen_w > 0 { screen_w } else { slot_width.unwrap_or(1280) };
+    let h = if screen_h > 0 { screen_h } else { slot_height.unwrap_or(720) };
     let depth = color_depth.unwrap_or(32);
     #[cfg(debug_assertions)]
-    eprintln!("[rdp] desktop {}x{} (slot_width={:?} slot_height={:?})", w, h, slot_width, slot_height);
+    eprintln!("[rdp] desktop {}x{} (full-screen res; slot was {:?}x{:?})", w, h, slot_width, slot_height);
 
     // session bpp + perf flags trade visual fidelity for bandwidth on slower links
     // (disable_wallpaper, allow_font_smoothing, disable_themes, disable_drag, disable_menu_anims)
@@ -321,6 +329,11 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
     // SCALED to fill the host window, so the surface follows the slot when it grows or
     // shrinks (no off-screen overflow). dynamic resolution:i:1 + posting WM_SIZE did
     // nothing on classic mstsc and only left the surface pinned at connect-time size.
+    //
+    // keyboardhook:i:1 = Windows key combos (Win key, Alt+Tab, ...) go to the REMOTE
+    // session whenever the RDP window has focus, not just in fullscreen (i:2 default).
+    // Trade-off: while a swallowed session has keyboard focus, the global Alt+1~4
+    // hotkeys are also captured by the remote — use the header slot buttons instead.
     let mut rdp_content = format!(
         "full address:s:{}\n\
          screen mode id:i:1\n\
@@ -328,6 +341,7 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
          desktopheight:i:{}\n\
          session bpp:i:{}\n\
          smart sizing:i:1\n\
+         keyboardhook:i:1\n\
          displayconnectionbar:i:0\n\
          pinned connection bar:i:0\n\
          authentication level:i:2\n\
@@ -806,6 +820,10 @@ pub async fn connect_horizon(host: String, username: Option<String>) -> Result<u
     let clean_host = clean_host_url(&host);
     let mut cmd = Command::new(&path);
     cmd.arg("-serverURL").arg(&clean_host);
+    // NOTE: grid-embedding Horizon is disabled (SwallowSlot.tsx) — the desktop
+    // window's MKS display children stay pinned at absolute monitor coords and
+    // never follow a reparented frame, even with -desktopLayout windowLarge.
+    // This launch path is for standalone (non-swallowed) connections only.
 
     if let Some(user) = &username {
         if !user.is_empty() {
@@ -1068,6 +1086,20 @@ pub async fn swallow_window(
 pub async fn toggle_fullscreen(window: tauri::Window) -> Result<(), String> {
     let is_fullscreen = window.is_fullscreen().unwrap_or(false);
     let _ = window.set_fullscreen(!is_fullscreen);
+    Ok(())
+}
+
+/// Deterministic fullscreen (immersive VM view needs set-not-toggle so its state
+/// can't desync from the window when F11 is also used).
+#[tauri::command]
+pub async fn set_fullscreen(window: tauri::Window, on: bool) -> Result<(), String> {
+    window.set_fullscreen(on).map_err(|e| e.to_string())
+}
+
+/// Arms/disarms the immersive top-edge cursor watcher (emits "immersive-edge").
+#[tauri::command]
+pub async fn set_immersive(on: bool) -> Result<(), String> {
+    crate::swallow::set_immersive(on);
     Ok(())
 }
 

@@ -53,11 +53,15 @@ The core Win32 engine. Flow:
 
 **VMConnect ribbon**: VMConnect has a non-removable 30px client-area ribbon. Fix: position window at `y - 30`, height `+ 30`, then call `SetWindowRgn(CreateRectRgn(0, 30, w, h+30))` to mask the ribbon from view. The stabilization loop reapplies the region if VMConnect resets it.
 
-**RDP settings** (in `commands.rs` `connect_vm`): uses `screen mode id:i:2` (windowed — avoids fullscreen connection bar), `dynamic resolution:i:1` (live resize via `WM_SIZE` already sent by sync loop), `pinned connection bar:i:0`, slot dimensions instead of hardcoded 1280×720. `authentication level:i:2` (warn-but-allow) — **never set this to `i:0`**; it silently bypasses server identity verification and exposes RDP sessions to MITM.
+**RDP settings** (in `commands.rs` `connect_vm`): uses `screen mode id:i:1` (windowed — the connection bar is a fullscreen-only element, so it never exists), `smart sizing:i:1` (classic mstsc can't renegotiate resolution mid-session; the bitmap is scaled to the slot instead — connect happens at full primary-monitor resolution to minimize blur), `keyboardhook:i:1` (Win key/Alt+Tab go to the remote whenever the session has focus; Alt+1~4 slot switching survives because the LL keyboard hook intercepts those before the remote sees them). `authentication level:i:2` (warn-but-allow) — **never set this to `i:0`**; it silently bypasses server identity verification and exposes RDP sessions to MITM.
 
 **Focus forwarding**: `swallow::focus_window(slot_id)` calls `SetForegroundWindow` + `BringWindowToTop`. Called directly from Alt+1–4 hotkey handlers in `lib.rs` and via `focus_slot_window` Tauri command (triggered by `MultiView.tsx` on hotkey events).
 
-**Critical**: Does NOT use `AttachThreadInput` (deadlock risk). The Tauri main window requires admin privileges (declared in `hyperdesk.exe.manifest`) for `SetParent` to work across process boundaries.
+**Keyboard routing**: a `WH_KEYBOARD_LL` hook (`swallow::install_keyboard_hook`, installed in `lib.rs` setup) is active only while HyperDesk is foreground AND keyboard focus lives inside a swallowed child's window tree (`vm_key_target` checks every thread in the tree — mstsc keeps its input window on a different thread than its frame). It (a) eats Win-key/Alt+Tab locally and posts them to the focused child — a reparented mstsc forwards those keys to the remote but fails its own foreground check, so without the hook the HOST shell reacted too; (b) intercepts Alt+1~4 and re-emits `hotkey-focus` so slot switching keeps working even when the remote would otherwise swallow it (`keyboardhook:i:1`).
+
+**Immersive mode**: `set_immersive` arms a Rust cursor poller (`swallow::set_immersive`). In immersive the header floats `position:absolute` UNDER the VM surface so the VM keeps 100% of the screen at native resolution; top-edge hover makes the poller crop the VM's top 36-CSS-px band via `SetWindowRgn` (`apply_reveal`), letting the header show through and take clicks — the VM never moves or resizes on reveal (moving it caused visible up/down judder).
+
+**Critical**: Does NOT use `AttachThreadInput` (deadlock risk — the LL keyboard hook above is message-based and fine). The Tauri main window requires admin privileges (declared in `hyperdesk.exe.manifest`) for `SetParent` to work across process boundaries.
 
 ### Dashboard & Host Data (`src-tauri/src/commands.rs`, `hosts.rs`)
 
@@ -73,7 +77,7 @@ The core Win32 engine. Flow:
 ### Frontend State
 
 - `src/hooks/useDashboard.ts` — TanStack React Query hooks polling `get_dashboard()` and `get_system_stats()` at configurable intervals (default: 5s dashboard, 2s telemetry)
-- `src/components/MultiView.tsx` — 2×2 grid controller managing slot assignments, focus mode (expand one slot), and theater mode (hide all UI chrome)
+- `src/components/MultiView.tsx` — single-view controller: 4 slots stay mounted (sessions persist) but only one is visible; Alt+1–4 / header buttons page between them. Its slot-switcher controls render inside each slot's 36px header bar via the `headerControls` prop (never as a separate floating header)
 - `src/components/SwallowSlot.tsx` — Individual grid cell; measures its DOM position and calls `swallow_window` / `sync_slot_bounds`
 
 ### Telemetry
@@ -145,11 +149,13 @@ The core Win32 engine. Flow:
 
 - **Issue:** VmConnect 창을 Swallow 할 때 위쪽에 30px 검은 여백이 생기는 현상.
 - **Fix:** `swallow.rs`에서 창 클래스명이 `TscShellContainerClass`인 경우, Y-offset을 -30으로 강제 보정하도록 하드코딩함. 이 로직을 지우지 말 것.
+- **Issue:** Hyper-V swallow 후 몇 초 뒤 VM 화면 하단에 여백이 남는 현상 (2026-07-02 로그로 확정).
+- **Fix:** vmconnect는 접속 후 Basic→Enhanced Session으로 **자식 트리를 통째로 교체**한다. Enhanced는 RDP 트리(`UIMainClass`/`OPWindowClass`)라 `HwndWrapper[vmconnect]` 비디오 자식이 없고 상단 크롬도 0인데, swallow 시점(Basic)에 측정한 51px 오프셋/클립이 그대로 남아 화면이 밀렸던 것. 안정화 루프가 매 폴마다 크롬을 재측정해 오프셋·리전을 갱신한다(`swallow.rs` "session-mode switch" 주석 블록) — 이 재측정을 지우면 재발한다.
+- **Issue:** Omnissa/Horizon 그리드 임베드 — 창 체인(로그인→데스크톱, 180초 탐색)으로 데스크톱 창 자체는 잡히지만, 슬롯은 **검은 화면**이다 (2026-07-02 확정).
+- **Fix(결론): 그리드 임베드 비활성화.** 데스크톱 창의 MKS 표시 자식들(`MKSEmbedded`/`MKSScreenWindow` 등)은 모니터 **절대좌표에 고정**되어(로그: `rect=(1920,0 1920x1080)`) SetParent된 프레임을 전혀 따라오지 않는다. `-desktopLayout windowLarge`로 창 모드를 강제해도 동일. 다시 시도하려면 SetParent 방식이 아니라 Horizon Client SDK 수준의 임베드가 필요하다. 현재는 `SwallowSlot.tsx` 선택기에서 VDI 항목을 disabled("미지원") 처리했고, 원격 자산 페이지의 일반 연결(스왈로우 없음)은 정상. swallow 루프의 체인 추적/180초 연장/`[horizon-scan]` 덤프 코드는 재도전을 위해 남겨 둠.
 - **Issue:** React 상태 업데이트 시 창이 깜빡이는 현상.
 - **Fix:** `SwallowSlot.tsx`에서 리렌더링이 발생해도 `sync_slot_bounds` 호출을 디바운스(Debounce) 처리함. (현재 16ms)
 - **Issue:** 상단 타이틀바(`Topbar.tsx`, `data-tauri-drag-region`)를 잡고 드래그해도 창이 움직이지 않음.
 - **Fix:** Tauri v2에서 `data-tauri-drag-region`은 내부적으로 `plugin:window|start_dragging`을 invoke하므로 `src-tauri/capabilities/default.json`에 `core:window:allow-start-dragging` 권한이 **반드시** 있어야 한다. 새 `core:window:allow-*` 권한을 추가/정리할 때 이 권한을 빠뜨리지 말 것 — 빠져도 콘솔에 에러가 안 뜨고 그냥 조용히 드래그만 안 먹는다.
-- **Issue:** 멀티뷰 극장모드(`MultiView.tsx`)에서 마우스를 상단에 올리면 헤더가 보이긴 하는데 버튼 클릭이 안 됨.
-- **Fix:** `.theater-hit-zone`(호버 감지용 투명 레이어, z-index:600)이 항상 같은 자리(top:0, height:52px)에 떠 있어서, `.multiview-header`의 z-index가 이보다 낮으면(과거 극장모드에서 550으로 낮춰져 있었음) 호버로 헤더가 보여도 클릭은 hit-zone이 가로챈다. 극장모드 헤더 z-index는 항상 hit-zone(600)보다 높게(현재 650) 유지할 것 — 이 둘의 z-index 관계를 건드리는 수정을 할 땐 반드시 같이 확인.
-- **Issue:** 멀티뷰에서 VM/RDP가 swallow된 상태로 상단에 마우스를 올려 호버 헤더(`.multiview-header`)를 내리면, 헤더 아래쪽 일부가 VM 화면에 가려져 겹쳐 보이고 그 부분 버튼이 안 눌림.
-- **Fix:** swallow된 Win32 자식 창은 WebView2 표면 **물리적으로 위**에 있어서 DOM `z-index`로는 절대 못 덮는다. HTML이 VM 위에 보이는 유일한 구간은 각 슬롯 상단 **36px `.slot-header-bar`**(Win32는 그 아래 `.slot-content-area`만 채움). 그래서 `.multiview-header` 높이를 **36px로 고정**(과거 52px라 아래 16px가 VM에 먹혔음)하고, 그 안의 `.control-group`(버튼 28px+패딩 2px=32px)도 36px 안에 들어오게 맞춤. 이 헤더 높이를 36px보다 키우거나 컨트롤을 키우면 바로 재발한다 — `App.css`의 `.multiview-header`/`.control-group` 주석을 지우지 말 것.
+- **Issue:** 멀티뷰에서 swallow된 VM 위에 헤더 UI를 띄우면 겹쳐 보이거나(헤더 중복) 아래쪽 버튼이 안 눌리는 현상 — 극장모드 호버 헤더(`.multiview-header`, `.theater-hit-zone`) 시절부터 반복 재발.
+- **Fix:** swallow된 Win32 자식 창은 WebView2 표면 **물리적으로 위**에 있어서 DOM `z-index`로는 절대 못 덮는다. HTML이 VM 위에 보이는 유일한 구간은 각 슬롯 상단 **36px `.slot-header-bar`**(Win32는 그 아래 `.slot-content-area`만 채움). 그래서 극장모드/호버 헤더는 아예 제거했고, 멀티뷰 컨트롤(슬롯 1~4 전환 + 전체화면)은 `MultiView.tsx`가 `headerControls` prop으로 `SwallowSlot`의 슬롯 헤더 바 **안에** 렌더한다. 슬롯 위에 떠 있는 두 번째 헤더/칩/오버레이를 다시 만들지 말 것 — 36px 밴드 밖은 VM에 먹히고, 밴드 안이면 슬롯 헤더와 중복된다. `.control-group`(버튼 28px+패딩 2px=32px)은 36px 안에 들어와야 한다 — `App.css`의 `.control-group`/`.slot-header-bar` 주석을 지우지 말 것.

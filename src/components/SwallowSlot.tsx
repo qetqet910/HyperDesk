@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Globe, Plus, X, RefreshCw, Terminal, AlertCircle, Maximize2, Minimize2, ZapOff, ChevronDown, Monitor } from "lucide-react";
+import { useState, useEffect, useRef, useCallback, ReactNode } from "react";
+import { Globe, Plus, X, RefreshCw, Terminal, AlertCircle, ZapOff, ChevronDown, Monitor } from "lucide-react";
 import { api } from "../lib/tauri-api";
 import { VmInfo, RemoteHost } from "../types";
 import { listen } from "@tauri-apps/api/event";
@@ -11,14 +11,16 @@ interface SwallowSlotProps {
   data: { vms: VmInfo[]; remoteHosts: RemoteHost[] };
   onAssign: (connectionId: string | null) => void;
   onError: (msg: string) => void;
-  isFocused?: boolean;
   isVisible: boolean;
   isOverlayActive: boolean;
   isSyncLocked?: boolean;
-  onToggleFocus: () => void;
+  /** MultiView's slot switcher/fullscreen controls, rendered inside the 36px
+      header bar. Keeping them here (not in a second floating header) is what
+      guarantees a single header over the VM — see .slot-header-bar in App.css. */
+  headerControls?: ReactNode;
 }
 
-export function SwallowSlot({ id, assignedId, data, onAssign, onError, isFocused, isVisible, isOverlayActive, isSyncLocked, onToggleFocus }: SwallowSlotProps) {
+export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls }: SwallowSlotProps) {
   // contentRef points to slot-content-area (below the fixed 36px header bar).
   // syncBounds and handleConnect both measure this div so the Win32 window
   // is positioned to fill exactly the content area, never under the header.
@@ -82,6 +84,17 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isFocused
       }
     });
 
+    // Horizon: the launcher/auth window is swallowed before the session window
+    // exists (up to ~20s of login). Flip to swallowed state now so the auth
+    // window follows slot resizes (the [isSwallowed] bounds effect does the
+    // initial sync); swallow-success later replaces it in place.
+    const unlistenProgress = listen<string>("swallow-progress", (event) => {
+      if (event.payload === id) {
+        setIsSwallowed(true);
+        setIsGlitched(false);
+      }
+    });
+
     const unlistenFailure = listen<string>("swallow-failure", (event) => {
       if (event.payload === id) {
         console.error(`[Slot ${id}] Swallow Failure received`);
@@ -93,6 +106,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isFocused
     return () => {
       unlistenClosed.then(f => f());
       unlistenSuccess.then(f => f());
+      unlistenProgress.then(f => f());
       unlistenFailure.then(f => f());
       // Hide native window when slot component unmounts (e.g. page change)
       // This prevents the window from floating over other pages.
@@ -391,31 +405,31 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isFocused
 
   return (
     <div
-      className={`swallow-slot ${isSwallowed ? "active" : ""} ${isGlitched ? "glitched" : ""} ${isFocused ? "focused" : ""} ${isActuallyHidden ? "slot-hidden" : ""}`}
+      className={`swallow-slot ${isSwallowed ? "active" : ""} ${isGlitched ? "glitched" : ""} ${isActuallyHidden ? "slot-hidden" : ""}`}
     >
       {/* Header bar: always rendered in flow (36px, flex row) so the Win32 window
-          starts below it. Buttons are always accessible regardless of Win32 z-order. */}
+          starts below it. Buttons are always accessible regardless of Win32 z-order.
+          This is the ONLY header over the slot — MultiView's controls render here
+          too (headerControls) instead of in a second bar. */}
       <div className={`slot-header-bar ${isSwallowed ? "slot-header-bar--active" : ""}`}>
         {isSwallowed ? (
-          <>
-            <button className="slot-change-btn" onClick={() => setShowSelector(true)} title="다른 연결로 변경">
-              <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
-              <ChevronDown size={11} />
-            </button>
-            <div className="slot-actions">
-              <button className="slot-action-btn" onClick={onToggleFocus} title={isFocused ? "축소" : "집중 모드"}>
-                {isFocused ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-              </button>
-              <button className="slot-action-btn close" onClick={handleDisconnect} title="세션 분리 (창은 유지됨)">
-                <X size={14} />
-              </button>
-            </div>
-          </>
+          <button className="slot-change-btn" onClick={() => setShowSelector(true)} title="다른 연결로 변경">
+            <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
+            <ChevronDown size={11} />
+          </button>
         ) : (
           <span className="slot-header-bar__label">
             {assignedId ? (selectedConnection?.name ?? assignedId) : "비어있음"}
           </span>
         )}
+        <div className="slot-header-right">
+          {headerControls}
+          {/* Always rendered (disabled when no session) so the header controls
+              never shift position when paging between swallowed/empty slots. */}
+          <button className="slot-action-btn close" onClick={handleDisconnect} disabled={!isSwallowed} title="세션 분리 (창은 유지됨)">
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Content area: Win32 window fills this region exactly.
@@ -510,14 +524,18 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isFocused
                     <Terminal size={14} /> {vm.name}
                   </div>
                 ))}
-                {/* Omnissa/Horizon swallow support is still incomplete (chrome
-                    detection unverified) — block grid assignment for this release
-                    rather than ship a half-working embed. Standalone connect from
-                    the Remote Assets page is unaffected (no swallow involved there). */}
+                {/* Omnissa/Horizon: grid embed DISABLED. The desktop window itself
+                    swallows fine (window chain login→desktop works), but its MKS
+                    display children stay pinned at absolute monitor coordinates
+                    (log: MKSEmbedded rect=(1920,0 1920x1080)) and never follow the
+                    reparented frame — the slot shows black. -desktopLayout
+                    windowLarge didn't change it; a real fix needs Horizon SDK-level
+                    embedding. Standalone connect from the Remote Assets page (no
+                    swallow) is unaffected. */}
                 {vdiHosts.map(host => (
-                  <div key={host.id} className="selector-item disabled" title="멀티뷰 그리드 지원 예정 (원격 자산 페이지에서 일반 연결은 가능)">
+                  <div key={host.id} className="selector-item disabled" title="멀티뷰 그리드 미지원 (원격 자산 페이지에서 일반 연결은 가능)">
                     <Monitor size={14} /> {host.name}
-                    <span className="selector-item-badge">지원 예정</span>
+                    <span className="selector-item-badge">미지원</span>
                   </div>
                 ))}
               </div>

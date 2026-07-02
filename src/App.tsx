@@ -38,7 +38,7 @@ import "./App.sidebar.css";
 
 const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
   dashboard: { title: "대시보드",     subtitle: "Virtualization Control Hub · Cool Blue" },
-  multiview: { title: "멀티 뷰",      subtitle: "SwallowGrid™ · 2×2 Live Remote Desktops" },
+  multiview: { title: "멀티 뷰",      subtitle: "SwallowGrid™ · Live Remote Desktops" },
   vms:       { title: "가상 머신",    subtitle: "Hyper-V Units · Gen 1 + Gen 2" },
   remote:    { title: "원격 자산",    subtitle: "RDP · Horizon · MST" },
   snapshots: { title: "스냅샷",       subtitle: "복원 지점 및 체크포인트 관리" },

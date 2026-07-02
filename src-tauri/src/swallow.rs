@@ -11,10 +11,27 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, IsWindow, HWND_TOP, GetWindowRect,
     SetForegroundWindow, BringWindowToTop, SetMenu,
 };
-use windows::Win32::Graphics::Gdi::{ScreenToClient, CreateRectRgn, SetWindowRgn};
+use windows::Win32::Graphics::Gdi::{ScreenToClient, CreateRectRgn, SetWindowRgn, HRGN};
 use windows::Win32::Foundation::{RECT, POINT};
 
 use tauri::{AppHandle, Emitter};
+
+// WIP dev-only file log (elevation detaches stderr from the console). Append to
+// %TEMP%\hyperdesk-swallow.log. Remove with all dlog! calls once swallow is stable.
+#[cfg(debug_assertions)]
+pub fn dlog(line: &str) {
+    use std::io::Write;
+    eprintln!("{}", line);
+    let path = std::env::temp_dir().join("hyperdesk-swallow.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+
+#[cfg(debug_assertions)]
+macro_rules! dlog {
+    ($($arg:tt)*) => { crate::swallow::dlog(&format!($($arg)*)) };
+}
 
 pub static SWALLOW_STATE: OnceLock<Arc<Mutex<HashMap<String, SwallowInfo>>>> = OnceLock::new();
 
@@ -61,7 +78,16 @@ pub struct SwallowInfo {
     /// via get_offset(class_name) only returns the HYPERV_OFFSET fallback constant,
     /// not the measured rect, so the ribbon mask would drift back to a wrong height
     /// (re-exposing the ribbon, or over-clipping the video) after the first resize.
+    /// The stabilization loop re-measures it (session-mode switch) and keeps it fresh.
     pub offset: i32,
+    /// Left inset of the content child inside the frame (vmconnect's WinForms
+    /// panel sits ~3px in from the frame edge — without compensating, the
+    /// rightmost few px of the VM surface are cropped by the slot).
+    pub offset_x: i32,
+    /// vmconnect's pid (Some for Hyper-V, None for RDP/Horizon). The connect-bar
+    /// (BBarWindowClass) is created lazily and can REappear on focus/unmaximize after
+    /// the 40s stabilization loop ends, so focus_window re-hides it using this pid.
+    pub vmconnect_pid: Option<u32>,
 }
 
 const DEFAULT_OFFSET: i32 = 0; // Styles successfully removed
@@ -214,12 +240,10 @@ fn find_vmconnect_bbar(pid: u32) -> Option<HWND> {
     param.found
 }
 
-fn hide_vmconnect_bbar(pid: u32) {
+pub fn hide_vmconnect_bbar(pid: u32) {
     if let Some(bar) = find_vmconnect_bbar(pid) {
         unsafe {
             if IsWindowVisible(bar).as_bool() {
-                #[cfg(debug_assertions)]
-                eprintln!("[swallow-tree] vmconnect BBar (connect bar) found visible, hiding");
                 let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(bar, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
             }
         }
@@ -296,7 +320,7 @@ extern "system" fn dump_tree_callback(hwnd: HWND, _lparam: LPARAM) -> BOOL {
         let class = String::from_utf16_lossy(&buf[..len as usize]);
         let mut r = RECT::default();
         let _ = GetWindowRect(hwnd, &mut r);
-        eprintln!(
+        dlog!(
             "[swallow-tree] hwnd={:?} class='{}' rect=({},{} {}x{}) visible={}",
             hwnd.0, class, r.left, r.top, r.right - r.left, r.bottom - r.top,
             IsWindowVisible(hwnd).as_bool()
@@ -307,7 +331,7 @@ extern "system" fn dump_tree_callback(hwnd: HWND, _lparam: LPARAM) -> BOOL {
 
 #[cfg(debug_assertions)]
 fn dump_window_tree(frame: HWND) {
-    eprintln!("[swallow-tree] ==== descendants of frame {:?} ====", frame.0);
+    dlog!("[swallow-tree] ==== descendants of frame {:?} ====", frame.0);
     unsafe {
         let _ = EnumChildWindows(frame, Some(dump_tree_callback), LPARAM(0));
     }
@@ -352,48 +376,109 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
     let app = app_handle.clone();
 
     std::thread::spawn(move || {
-        let mut launcher_h: Option<SendHWND> = None;
-        let mut session_h: Option<SendHWND> = None;
-        let total_attempts = 40; // 20 seconds to find the window (RDP/VDI baseline)
+        // Chain of windows already swallowed into this slot (login → picker →
+        // desktop). Never re-swallow one — that's what prevents oscillation.
+        let mut chain: Vec<isize> = Vec::new();
+        let mut current: Option<SendHWND> = None;
+        let mut session_found = false;
+        let mut is_horizon = false;
 
-        for _i in 0..total_attempts {
-            if let Some(h) = find_main_window(target_pid) {
-                let h_wrap = SendHWND(h);
-                let mut class_name_buf = [0u16; 256];
-                let class_len = unsafe { GetClassNameW(h, &mut class_name_buf) };
-                let class_str = String::from_utf16_lossy(&class_name_buf[..class_len as usize]);
+        let start = std::time::Instant::now();
+        // RDP/vmconnect windows appear fast — 20s is generous. Horizon shows a
+        // LOGIN window first and the desktop window only exists after the user
+        // finishes typing credentials/2FA, so once a Horizon launcher is seen
+        // the hunt is extended (the user is typing, not the machine working).
+        let mut deadline = start + std::time::Duration::from_secs(20);
+        #[cfg(debug_assertions)]
+        let mut last_dump = std::time::Instant::now() - std::time::Duration::from_secs(60);
 
-                // Detailed session detection
+        let read_class = |h: HWND| -> String {
+            let mut buf = [0u16; 256];
+            let len = unsafe { GetClassNameW(h, &mut buf) };
+            String::from_utf16_lossy(&buf[..len as usize])
+        };
+
+        while std::time::Instant::now() < deadline {
+            // Preferred: a window with a KNOWN session class (pid-scoped first,
+            // then the class-list fallback inside find_main_window).
+            let mut candidate: Option<HWND> = find_main_window(target_pid)
+                .filter(|h| !chain.contains(&(h.0 as isize)));
+
+            // After the first stage, only KNOWN session classes may come from the
+            // pid-scoped search — its "any visible window of the pid" fallback
+            // would otherwise hand us vmconnect's floating toolbar (BBar) or an
+            // IME window as a bogus next stage.
+            if let Some(h) = candidate {
+                if !chain.is_empty() {
+                    let c = read_class(h);
+                    let is_sess = c.contains("Blast") || c.contains("VMUI") ||
+                                  c.contains("TClient") || c.contains("TscShellContainerClass");
+                    if !is_sess { candidate = None; }
+                }
+            }
+
+            // Horizon: the next window in the chain is often a NEW top-level
+            // window (same WPF class family, sometimes even another process)
+            // that the pid-scoped search never sees. Hunt for it by heuristic.
+            if candidate.is_none() && is_horizon {
+                candidate = find_horizon_session_window(&chain);
+            }
+
+            if let Some(h) = candidate {
+                let class_str = read_class(h);
                 let is_session = class_str.contains("Blast") ||
                                class_str.contains("VMUI") ||
                                class_str.contains("TClient") ||
                                class_str.contains("TscShellContainerClass");
+                let lower = class_str.to_lowercase();
+                if lower.contains("horizon") || lower.contains("omnissa") || lower.contains("vmware") {
+                    if !is_horizon {
+                        is_horizon = true;
+                        deadline = start + std::time::Duration::from_secs(180);
+                    }
+                }
+
+                // Swallow this stage of the chain; hide the previous one if it
+                // is still alive (login window lingering behind the picker).
+                let h_wrap = SendHWND(h);
+                if let Some(prev) = current {
+                    if prev.0 .0 != h.0 {
+                        unsafe {
+                            let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(prev.0, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                        }
+                    }
+                }
+                chain.push(h.0 as isize);
+                current = Some(h_wrap);
+                let _ = perform_swallow(&s_id, h_wrap, actual_parent, app.clone(), bounds);
 
                 if is_session {
-                    session_h = Some(h_wrap);
+                    session_found = true;
                     break;
-                } else if launcher_h.is_none() {
-                    launcher_h = Some(h_wrap);
-                    let _ = perform_swallow(&s_id, h_wrap, actual_parent, app.clone(), bounds);
-                    // Launcher found, notify frontend but keep looking for session
-                    let _ = app.emit("swallow-progress", s_id.clone());
                 }
+                // Launcher/intermediate window swallowed — tell the frontend so
+                // it starts bounds-syncing, then keep hunting for the session.
+                let _ = app.emit("swallow-progress", s_id.clone());
             }
+
+            // Dev: while hunting a Horizon session, periodically dump every
+            // visible top-level window so a missed desktop-window class is
+            // identifiable from the log instead of guessed.
+            #[cfg(debug_assertions)]
+            if is_horizon && last_dump.elapsed().as_secs() >= 5 {
+                last_dump = std::time::Instant::now();
+                dump_all_visible_windows();
+            }
+
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
-        if let Some(s_h) = session_h {
-            let _ = perform_swallow(&s_id, s_h, actual_parent, app.clone(), bounds);
-            let _ = app.emit("swallow-success", s_id.clone());
-            if let Some(l_h) = launcher_h {
-                if l_h.0 .0 != s_h.0 .0 {
-                    unsafe {
-                        let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(l_h.0, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
-                    }
-                }
+        if current.is_some() {
+            #[cfg(debug_assertions)]
+            if !session_found {
+                dlog!("[swallow] deadline hit — keeping last chain window as the session");
             }
-        } else if let Some(l_h) = launcher_h {
-            let _ = perform_swallow(&s_id, l_h, actual_parent, app.clone(), bounds);
+            let _ = session_found; // silence unused warning in release
             let _ = app.emit("swallow-success", s_id.clone());
         } else {
             let _ = app.emit("swallow-failure", s_id.clone());
@@ -401,6 +486,75 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
     });
 
     Ok(())
+}
+
+/// Horizon window-chain heuristic: the biggest visible top-level window of the
+/// Horizon/Omnissa family that we have NOT already swallowed. Size floor keeps
+/// toasts/tooltips out; "biggest wins" makes login→picker→desktop converge on
+/// the desktop view. ponytail: class-substring heuristic — replace with the
+/// exact desktop class once a live log (dump_all_visible_windows) confirms it.
+fn find_horizon_session_window(exclude: &[isize]) -> Option<HWND> {
+    struct P<'a> {
+        exclude: &'a [isize],
+        best: Option<(HWND, i32)>,
+    }
+    extern "system" fn cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let p = unsafe { &mut *(lparam.0 as *mut P) };
+        if p.exclude.contains(&(hwnd.0 as isize)) { return BOOL::from(true); }
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() { return BOOL::from(true); }
+            let mut buf = [0u16; 256];
+            let len = GetClassNameW(hwnd, &mut buf);
+            if len <= 0 { return BOOL::from(true); }
+            let class = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
+            if !(class.contains("horizon") || class.contains("omnissa") ||
+                 class.contains("blast") || class.contains("vmui") || class.contains("vmware")) {
+                return BOOL::from(true);
+            }
+            let mut r = RECT::default();
+            if GetWindowRect(hwnd, &mut r).is_err() { return BOOL::from(true); }
+            let (w, h) = (r.right - r.left, r.bottom - r.top);
+            if w < 500 || h < 400 { return BOOL::from(true); }
+            let area = w * h;
+            if p.best.map(|(_, a)| area > a).unwrap_or(true) {
+                p.best = Some((hwnd, area));
+            }
+        }
+        BOOL::from(true)
+    }
+    let mut p = P { exclude, best: None };
+    unsafe {
+        let _ = EnumWindows(Some(cb), LPARAM(&mut p as *mut P as isize));
+    }
+    p.best.map(|(h, _)| h)
+}
+
+/// DEV-ONLY: dump every visible top-level window (class + rect + pid) with a
+/// non-trivial size. Used while hunting a Horizon session so an unmatched
+/// desktop-window class shows up in %TEMP%\hyperdesk-swallow.log.
+#[cfg(debug_assertions)]
+fn dump_all_visible_windows() {
+    dlog!("[horizon-scan] ==== visible top-level windows ====");
+    extern "system" fn cb(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() { return BOOL::from(true); }
+            let mut r = RECT::default();
+            if GetWindowRect(hwnd, &mut r).is_err() { return BOOL::from(true); }
+            let (w, h) = (r.right - r.left, r.bottom - r.top);
+            if w < 300 || h < 200 { return BOOL::from(true); }
+            let mut buf = [0u16; 256];
+            let len = GetClassNameW(hwnd, &mut buf);
+            let class = String::from_utf16_lossy(&buf[..len.max(0) as usize]);
+            let mut pid = 0u32;
+            let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            dlog!("[horizon-scan] hwnd={:?} pid={} class='{}' rect=({},{} {}x{})",
+                hwnd.0, pid, class, r.left, r.top, w, h);
+        }
+        BOOL::from(true)
+    }
+    unsafe {
+        let _ = EnumWindows(Some(cb), LPARAM(0));
+    }
 }
 
 fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, app_handle: AppHandle, bounds: SlotBounds) -> Result<(), String> {
@@ -418,7 +572,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     // Dev: dump the frame class + child tree of whatever we swallow.
     #[cfg(debug_assertions)]
     {
-        eprintln!("[swallow-tree] FRAME class='{}'", read_class(child_hwnd));
+        dlog!("[swallow-tree] FRAME class='{}'", read_class(child_hwnd));
         dump_window_tree(child_hwnd);
     }
 
@@ -432,17 +586,28 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     let class_str = String::from_utf16_lossy(&class_name_buf[..class_len as usize]);
     let mut offset = get_offset(&class_str);
 
-    // vmconnect: measure where the actual VM-video child sits inside the frame and
-    // mask exactly that much chrome off the top, instead of the fixed 30px guess
-    // (the real title+toolbar is taller, which is why the blue bar kept showing).
+    // vmconnect detection is by the VM-video CHILD, not the frame's class name.
+    // The frame is a generic WinForms window (class 'WindowsForms10.Window...'),
+    // so matching on "vmconnect" in the frame class missed every real session —
+    // the chrome mask and BBar hide never ran (blue connect-bar stayed visible).
+    // The unmistakable signal is the 'HwndWrapper[vmconnect.exe;...]' video child;
+    // its top is the exact chrome height to clip.
     let mut vmconnect_pid: Option<u32> = None;
-    if class_str.to_lowercase().contains("vmconnect") {
-        if let Some(vr) = find_vmconnect_video_rect(child_hwnd) {
-            if vr.top > 0 && vr.top < 200 {
-                offset = vr.top;
-                #[cfg(debug_assertions)]
-                eprintln!("[swallow-tree] vmconnect measured top chrome = {}px", offset);
-            }
+    let vmconnect_video = find_vmconnect_video_rect(child_hwnd);
+    #[cfg(debug_assertions)]
+    dlog!("[swallow-tree] DECISION frame_class='{}' vmconnect_video={:?} get_offset={}",
+        class_str, vmconnect_video.map(|r| r.top), offset);
+    let mut offset_x = 0;
+    if let Some(vr) = vmconnect_video {
+        if vr.top > 0 && vr.top < 200 {
+            offset = vr.top;
+            #[cfg(debug_assertions)]
+            eprintln!("[swallow-tree] vmconnect measured top chrome = {}px", offset);
+        }
+        // WinForms lays the video child a few px in from the frame's left edge;
+        // uncompensated, that many px of the VM's right side fall outside the slot.
+        if vr.left > 0 && vr.left <= 20 {
+            offset_x = vr.left;
         }
         let mut pid = 0u32;
         unsafe { let _ = GetWindowThreadProcessId(child_hwnd, Some(&mut pid)); }
@@ -490,7 +655,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
         // window menu — WS_CAPTION stripping does NOT remove it. SetMenu(None) does.
         // Combined with the caption strip and the HYPERV_OFFSET toolbar mask, this
         // leaves just the VM display in the slot.
-        if class_str.to_lowercase().contains("vmconnect") {
+        if vmconnect_pid.is_some() {
             let _ = SetMenu(child_hwnd, None);
         }
     }
@@ -522,19 +687,21 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
             is_visible: true,
             class_name: class_str.clone(),
             offset,
+            offset_x,
+            vmconnect_pid,
         });
 
         let _ = SetWindowPos(
             child_hwnd, HWND(std::ptr::null_mut()),
-            x - HORIZONTAL_BUFFER, y - offset, width + (HORIZONTAL_BUFFER * 2), height + offset,
+            x - HORIZONTAL_BUFFER - offset_x, y - offset, width + (HORIZONTAL_BUFFER * 2) + offset_x, height + offset,
             SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS
         );
 
-        // Clip the non-removable toolbar/ribbon (e.g. VMConnect 30px ribbon).
-        // The window is positioned at y-offset so rows 0..offset contain the ribbon.
-        // SetWindowRgn masks those rows out, making only the content visible.
-        if offset > 0 {
-            let rgn = CreateRectRgn(0, offset, width + (HORIZONTAL_BUFFER * 2), height + offset);
+        // Clip the non-removable chrome (e.g. VMConnect ribbon + left inset).
+        // The window is positioned at (x-offset_x, y-offset) so rows 0..offset and
+        // cols 0..offset_x contain chrome; the region masks them out.
+        if offset > 0 || offset_x > 0 {
+            let rgn = CreateRectRgn(offset_x, offset, offset_x + width + (HORIZONTAL_BUFFER * 2), offset + height);
             if !rgn.is_invalid() {
                 let _ = SetWindowRgn(child_hwnd, rgn, BOOL::from(true));
             }
@@ -546,7 +713,8 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     let s_id = slot_id.to_string();
     let target_style = style;
     let target_ex_style = ex_style;
-    let offset_cap = offset; // capture for stabilization loop
+    let mut offset_cap = offset; // capture for stabilization loop (re-measured for vmconnect)
+    let mut offset_x_cap = offset_x;
     let vmconnect_pid_cap = vmconnect_pid; // re-check the BBar each poll; it can reopen on focus/unmaximize
 
     std::thread::spawn(move || {
@@ -557,11 +725,27 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
         // backoff, swap for SetWinEventHook only if a real app still escapes.
         const FAST_MS: u64 = 100;
         const SLOW_MS: u64 = 1000;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
+        let start = std::time::Instant::now();
+        let deadline = start + std::time::Duration::from_secs(40);
         let mut interval_ms = FAST_MS;
+        // WIP: re-dump the tree once ~6s in, after a Basic→Enhanced session-mode
+        // switch would have replaced the child tree. Confirms whether the chrome we
+        // measured at swallow time still matches the settled session.
+        #[cfg(debug_assertions)]
+        let mut redumped = false;
 
         while std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(interval_ms));
+
+            #[cfg(debug_assertions)]
+            if !redumped && start.elapsed().as_secs() >= 6 {
+                redumped = true;
+                let h = HWND(h_child_raw as *mut _);
+                if unsafe { IsWindow(h).as_bool() } {
+                    dlog!("[swallow-tree] ==== SETTLED re-dump (6s) ====");
+                    dump_window_tree(h);
+                }
+            }
 
             let (target_rect, is_visible, is_active) = {
                 let state = lock_state();
@@ -600,6 +784,44 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                 let cur_parent = windows::Win32::UI::WindowsAndMessaging::GetParent(h_child).unwrap_or(HWND(std::ptr::null_mut()));
 
                 let mut needs_refresh = false;
+
+                // vmconnect: a Basic↔Enhanced session-mode switch REPLACES the child
+                // tree. Enhanced is an RDP tree (UIMainClass/...) with NO HwndWrapper
+                // video child, so the chrome measured at swallow time goes stale — the
+                // old mask then shifts the surface and leaves gaps at the slot edges.
+                // Re-measure BOTH axes every poll and reposition + re-clip on change.
+                // (Also self-corrects the Basic-mode measurement taken before
+                // SetMenu(None) shrank the chrome.)
+                if vmconnect_pid_cap.is_some() {
+                    let (mx, my) = match find_vmconnect_video_rect(h_child) {
+                        Some(vr) => (
+                            vr.left.clamp(0, 20),
+                            if vr.top > 0 && vr.top < 200 { vr.top } else { offset_cap },
+                        ),
+                        // Enhanced session: measure the RDP tree's content child
+                        // instead (it can still sit a few px inside the frame).
+                        None => match find_child_rect_by_class(h_child, "uimainclass") {
+                            Some(r) => (r.left.clamp(0, 20), r.top.clamp(0, 200)),
+                            None => (0, 0), // mid-switch transient — next poll corrects
+                        },
+                    };
+                    if mx != offset_x_cap || my != offset_cap {
+                        #[cfg(debug_assertions)]
+                        dlog!("[swallow] vmconnect chrome ({},{})px -> ({},{})px (session-mode switch)",
+                            offset_x_cap, offset_cap, mx, my);
+                        offset_x_cap = mx;
+                        offset_cap = my;
+                        {
+                            let mut st = lock_state();
+                            if let Some(i) = st.get_mut(&s_id) {
+                                i.offset = offset_cap;
+                                i.offset_x = offset_x_cap;
+                            }
+                        }
+                        needs_refresh = true;
+                    }
+                }
+
                 if cur_style != target_style {
                     let _ = SetWindowLongPtrW(h_child, GWL_STYLE, target_style);
                     needs_refresh = true;
@@ -617,15 +839,20 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                     let _ = SetWindowPos(
                         h_child,
                         HWND(std::ptr::null_mut()),
-                        target_rect.0 - HORIZONTAL_BUFFER, target_rect.1 - offset_cap, target_rect.2 + (HORIZONTAL_BUFFER * 2), target_rect.3 + offset_cap,
+                        target_rect.0 - HORIZONTAL_BUFFER - offset_x_cap, target_rect.1 - offset_cap,
+                        target_rect.2 + (HORIZONTAL_BUFFER * 2) + offset_x_cap, target_rect.3 + offset_cap,
                         SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE
                     );
-                    // Re-apply ribbon clip region in case the app reset it
-                    if offset_cap > 0 {
-                        let rgn = CreateRectRgn(0, offset_cap, target_rect.2 + (HORIZONTAL_BUFFER * 2), target_rect.3 + offset_cap);
+                    // Re-apply chrome clip region in case the app reset it — or REMOVE
+                    // it when the re-measured chrome dropped to 0 (Enhanced session).
+                    if offset_cap > 0 || offset_x_cap > 0 {
+                        let rgn = CreateRectRgn(offset_x_cap, offset_cap,
+                            offset_x_cap + target_rect.2 + (HORIZONTAL_BUFFER * 2), offset_cap + target_rect.3);
                         if !rgn.is_invalid() {
                             let _ = SetWindowRgn(h_child, rgn, BOOL::from(true));
                         }
+                    } else if vmconnect_pid_cap.is_some() {
+                        let _ = SetWindowRgn(h_child, HRGN::default(), BOOL::from(true));
                     }
                     interval_ms = FAST_MS; // app fought back — watch closely again
                 } else {
@@ -647,6 +874,9 @@ pub fn unswallow(slot_id: &str) -> Result<(), String> {
                 let _ = SetParent(child_hwnd, HWND(std::ptr::null_mut()));
                 let _ = SetWindowLongPtrW(child_hwnd, GWL_STYLE, info.original_style);
                 let _ = SetWindowLongPtrW(child_hwnd, GWL_EXSTYLE, info.original_ex_style);
+                // Drop any ribbon clip region — a detached vmconnect must not stay
+                // masked (it would show a window with its top rows invisible).
+                let _ = SetWindowRgn(child_hwnd, HRGN::default(), BOOL::from(true));
                 if info.original_parent != 0 {
                      let _ = SetParent(child_hwnd, HWND(info.original_parent as *mut _));
                 }
@@ -681,10 +911,15 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
         unsafe {
             if IsWindow(hwnd).as_bool() {
                 if visible {
-                    let offset = get_offset(&info.class_name);
+                    // The offsets resolved (and possibly re-measured) at swallow time —
+                    // NOT get_offset(class), which knows nothing about the measured
+                    // vmconnect chrome and would misplace the frame on re-show.
+                    let offset = info.offset;
+                    let offset_x = info.offset_x;
                     let _ = SetWindowPos(
                         hwnd, HWND(std::ptr::null_mut()),
-                        info.x - HORIZONTAL_BUFFER, info.y - offset, info.width + (HORIZONTAL_BUFFER * 2), info.height + offset,
+                        info.x - HORIZONTAL_BUFFER - offset_x, info.y - offset,
+                        info.width + (HORIZONTAL_BUFFER * 2) + offset_x, info.height + offset,
                         SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE
                     );
                 } else {
@@ -704,9 +939,9 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
     let mut state = lock_state();
     if let Some(info) = state.get_mut(slot_id) {
         // Delta filtering: Only update if there is at least >1px change to avoid jitter
-        if (info.x - x).abs() <= 1 && 
-           (info.y - y).abs() <= 1 && 
-           (info.width - width).abs() <= 1 && 
+        if (info.x - x).abs() <= 1 &&
+           (info.y - y).abs() <= 1 &&
+           (info.width - width).abs() <= 1 &&
            (info.height - height).abs() <= 1 {
             return;
         }
@@ -722,32 +957,33 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
                 let p_hwnd = HWND(info.parent_hwnd as *mut _);
                 
                 if IsWindow(hwnd).as_bool() {
+                    // Reuse the offsets resolved (and re-measured) at swallow time —
+                    // NOT get_offset(class_name), which knows nothing about the
+                    // per-window MEASURED chrome. Using the wrong one re-exposes the
+                    // ribbon (or over-clips) on the very first resize after swallow.
+                    let offset = info.offset;
+                    let offset_x = info.offset_x;
+                    let tx = x - HORIZONTAL_BUFFER - offset_x;
+                    let ty = y - offset;
+                    let tw = width + (HORIZONTAL_BUFFER * 2) + offset_x;
+                    let th = height + offset;
+
                     let mut rect = RECT::default();
                     if GetWindowRect(hwnd, &mut rect).is_ok() {
                         let mut pt_tl = POINT { x: rect.left, y: rect.top };
                         let _ = ScreenToClient(p_hwnd, &mut pt_tl);
-                        
-                        let current_x = pt_tl.x;
-                        let current_y = pt_tl.y;
-                        let current_w = rect.right - rect.left;
-                        let current_h = rect.bottom - rect.top;
 
-                        // Precise filtering: Only move if the difference is > 1.5px (effectively 2px)
-                        // This prevents internal rendering infinitesimal shifts from causing a loop.
-                        if (current_x - x).abs() <= 1 && 
-                           (current_y - y).abs() <= 1 && 
-                           (current_w - width).abs() <= 1 && 
-                           (current_h - height).abs() <= 1 {
+                        // Precise filtering against the OFFSET-ADJUSTED target: only move
+                        // on a real >1px change, so infinitesimal internal-render shifts
+                        // can't ring the sync loop.
+                        if (pt_tl.x - tx).abs() <= 1 &&
+                           (pt_tl.y - ty).abs() <= 1 &&
+                           ((rect.right - rect.left) - tw).abs() <= 1 &&
+                           ((rect.bottom - rect.top) - th).abs() <= 1 {
                             return;
                         }
                     }
 
-                    // Reuse the offset resolved at swallow time (info.offset), NOT
-                    // get_offset(class_name) — that only returns the generic HYPERV_OFFSET
-                    // fallback, not vmconnect's per-window MEASURED ribbon height. Using
-                    // the wrong one here re-exposes the ribbon (or over-clips the video)
-                    // on the very first resize after swallow.
-                    let offset = info.offset;
                     #[cfg(debug_assertions)]
                     eprintln!("[reposition] slot={} class='{}' -> {}x{} at ({},{})", slot_id, info.class_name, width, height, x, y);
                     // SYNCHRONOUS. The JS-side feedback loop is now cut by contain:strict
@@ -761,7 +997,7 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
                     let _ = SetWindowPos(
                         hwnd,
                         HWND_TOP,
-                        x - HORIZONTAL_BUFFER, y - offset, width + (HORIZONTAL_BUFFER * 2), height + offset,
+                        tx, ty, tw, th,
                         SWP_NOCOPYBITS | SWP_NOACTIVATE | SWP_NOOWNERZORDER
                     );
                 }
@@ -770,12 +1006,240 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
     }
 }
 
+// ─── Global keyboard hook: route Win-key / Alt+Tab into the focused VM ───────
+//
+// mstsc's own keyboardhook:i:1 forwarding half-works once the window is
+// reparented: its foreground check compares against ITS top-level window, but
+// after SetParent the foreground window is HyperDesk's — so mstsc forwards the
+// key to the remote yet never suppresses the LOCAL shell → Win key opened the
+// start menu on BOTH sides. This low-level hook closes that gap: while
+// HyperDesk is foreground AND keyboard focus lives inside a swallowed child,
+// Win/Alt+Tab events are eaten locally and posted straight to the focused
+// child window instead. Any other focus state passes through untouched.
+// (WH_KEYBOARD_LL is a message-based hook — this is NOT AttachThreadInput.)
+
+static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, GetMessageW, MSG, WH_KEYBOARD_LL};
+    let _ = APP_HANDLE.set(app);
+    MAIN_HWND.store(main_hwnd, std::sync::atomic::Ordering::Relaxed);
+    std::thread::spawn(|| unsafe {
+        // LL hooks need a message pump on the installing thread.
+        if SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0).is_err() {
+            return;
+        }
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+    });
+}
+
+// ─── Immersive mode: top-edge cursor watcher ─────────────────────────────────
+//
+// In immersive mode the header floats (position:absolute) UNDER the VM surface
+// so the VM owns 100% of the screen at native resolution. Mouse moves over the
+// VM go to the VM's process — the webview never sees them — so the top edge is
+// detected by an OS cursor poll. The reveal itself is a SetWindowRgn crop of
+// the VM's top band: the WebView header underneath shows through and receives
+// clicks, and the VM never moves or resizes (no scaling/relayout churn).
+// ponytail: 80ms polling; swap for a WH_MOUSE_LL hook only if it shows up in
+// profiles.
+
+static IMMERSIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Crop (shown) or restore (hidden) the top 36-CSS-px band of every visible
+/// swallowed window, composing with the window's own chrome mask.
+fn apply_reveal(shown: bool) {
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
+    let entries: Vec<(isize, isize, i32, i32, i32, i32)> = lock_state().values()
+        .filter(|i| i.is_visible)
+        .map(|i| (i.child_hwnd, i.parent_hwnd, i.offset_x, i.offset, i.width, i.height))
+        .collect();
+    for (raw, parent_raw, ox, oy, w, h) in entries {
+        let hwnd = HWND(raw as *mut _);
+        unsafe {
+            if !IsWindow(hwnd).as_bool() { continue; }
+            let band = if shown {
+                // 36 CSS px → physical px via the host window's DPI.
+                let dpi = GetDpiForWindow(HWND(parent_raw as *mut _));
+                (36 * dpi.max(96) as i32) / 96
+            } else {
+                0
+            };
+            if band == 0 && oy == 0 && ox == 0 {
+                let _ = SetWindowRgn(hwnd, HRGN::default(), BOOL::from(true));
+            } else {
+                let rgn = CreateRectRgn(ox, oy + band, ox + w + (HORIZONTAL_BUFFER * 2), oy + h);
+                if !rgn.is_invalid() {
+                    let _ = SetWindowRgn(hwnd, rgn, BOOL::from(true));
+                }
+            }
+        }
+    }
+}
+
+pub fn set_immersive(on: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    IMMERSIVE.store(on, std::sync::atomic::Ordering::Relaxed);
+    if !on {
+        apply_reveal(false); // never leave a crop behind when exiting immersive
+    }
+    static POLLER: OnceLock<()> = OnceLock::new();
+    POLLER.get_or_init(|| {
+        std::thread::spawn(|| {
+            let mut shown = false;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                if !IMMERSIVE.load(std::sync::atomic::Ordering::Relaxed) {
+                    if shown {
+                        shown = false;
+                        apply_reveal(false);
+                    }
+                    continue;
+                }
+                let mut p = POINT::default();
+                if unsafe { GetCursorPos(&mut p) }.is_err() { continue; }
+                // Reveal when the cursor hits the very top edge; keep it shown
+                // while the cursor stays in a generous band (64px covers the
+                // 36px header at up to ~175% DPI scaling).
+                let want = if shown { p.y <= 64 } else { p.y <= 2 };
+                if want != shown {
+                    shown = want;
+                    apply_reveal(shown);
+                }
+            }
+        });
+    });
+}
+
+/// Every distinct thread that owns a window in `frame`'s tree. mstsc keeps its
+/// input window on a different thread than the shell frame, so checking only
+/// the frame's thread misses the real focus holder.
+fn tree_thread_ids(frame: HWND) -> Vec<u32> {
+    struct P { tids: Vec<u32> }
+    extern "system" fn cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let p = unsafe { &mut *(lparam.0 as *mut P) };
+        let tid = unsafe { GetWindowThreadProcessId(hwnd, None) };
+        if tid != 0 && !p.tids.contains(&tid) { p.tids.push(tid); }
+        BOOL::from(true)
+    }
+    let mut p = P { tids: Vec::new() };
+    let ftid = unsafe { GetWindowThreadProcessId(frame, None) };
+    if ftid != 0 { p.tids.push(ftid); }
+    unsafe {
+        let _ = EnumChildWindows(frame, Some(cb), LPARAM(&mut p as *mut P as isize));
+    }
+    p.tids
+}
+
+/// The window that should receive VM-bound system keys: a focus window inside a
+/// visible swallowed child's tree — but only while HyperDesk itself is foreground.
+fn vm_key_target() -> Option<HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetGUIThreadInfo, GUITHREADINFO, IsChild};
+    let main = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
+    if main == 0 { return None; }
+    unsafe {
+        if GetForegroundWindow().0 as isize != main {
+            return None;
+        }
+        let children: Vec<isize> = lock_state().values()
+            .filter(|i| i.is_visible)
+            .map(|i| i.child_hwnd)
+            .collect();
+        for raw in children {
+            let child = HWND(raw as *mut _);
+            if !IsWindow(child).as_bool() { continue; }
+            for tid in tree_thread_ids(child) {
+                let mut gui = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+                if GetGUIThreadInfo(tid, &mut gui).is_err() || gui.hwndFocus.is_invalid() {
+                    continue;
+                }
+                // The focus must actually live inside THIS swallowed tree —
+                // GetGUIThreadInfo reports a thread's focus even when that
+                // thread isn't the active one, so an unguarded match could
+                // route keys to a stale window.
+                if gui.hwndFocus.0 == child.0 || IsChild(child, gui.hwndFocus).as_bool() {
+                    #[cfg(debug_assertions)]
+                    dlog!("[keyhook] target hwnd={:?} (tid {}) in child {:?}", gui.hwndFocus.0, tid, child.0);
+                    return Some(gui.hwndFocus);
+                }
+            }
+        }
+        #[cfg(debug_assertions)]
+        dlog!("[keyhook] foreground OK but no swallowed tree holds focus");
+    }
+    None
+}
+
+unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: windows::Win32::Foundation::WPARAM, lparam: LPARAM) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, PostMessageW, KBDLLHOOKSTRUCT, HC_ACTION,
+        LLKHF_INJECTED, LLKHF_UP, LLKHF_EXTENDED, LLKHF_ALTDOWN,
+        WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LWIN, VK_RWIN, VK_TAB};
+
+    if code == HC_ACTION as i32 {
+        let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+        let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
+        let alt_down = kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
+        let is_win = kb.vkCode == VK_LWIN.0 as u32 || kb.vkCode == VK_RWIN.0 as u32;
+        let is_alt_tab = kb.vkCode == VK_TAB.0 as u32 && alt_down;
+        // Alt+1..4 (slot switching) must keep working while a VM holds focus —
+        // with keyboardhook:i:1 the remote would otherwise swallow them.
+        let is_slot_key = alt_down && (0x31..=0x34).contains(&kb.vkCode);
+
+        if !injected && is_slot_key {
+            let up = kb.flags.0 & LLKHF_UP.0 != 0;
+            if vm_key_target().is_some() {
+                if !up {
+                    let idx = kb.vkCode - 0x31;
+                    // Off-thread: app.emit serializes into the webview; the hook
+                    // callback must return fast (system LL-hook timeout).
+                    std::thread::spawn(move || {
+                        if let Some(app) = APP_HANDLE.get() {
+                            let slot = format!("slot-{}", idx);
+                            let _ = app.emit("hotkey-focus", slot.clone());
+                            focus_window(&slot);
+                        }
+                    });
+                }
+                return LRESULT(1); // keep it away from both the remote and RegisterHotKey
+            }
+        }
+
+        if !injected && (is_win || is_alt_tab) {
+            if let Some(target) = vm_key_target() {
+                let up = kb.flags.0 & LLKHF_UP.0 != 0;
+                // Rebuild the WM_KEY* lparam: repeat=1, scancode, extended,
+                // and for keyup the previous-state + transition bits.
+                let mut l: isize = 1 | (((kb.scanCode & 0xFF) as isize) << 16);
+                if kb.flags.0 & LLKHF_EXTENDED.0 != 0 { l |= 1 << 24; }
+                if up { l |= (1 << 30) | (1 << 31); }
+                let msg = if is_alt_tab {
+                    l |= 1 << 29; // context bit: Alt is held
+                    if up { WM_SYSKEYUP } else { WM_SYSKEYDOWN }
+                } else if up { WM_KEYUP } else { WM_KEYDOWN };
+                let _ = PostMessageW(target, msg,
+                    windows::Win32::Foundation::WPARAM(kb.vkCode as usize), LPARAM(l));
+                return LRESULT(1); // eaten locally — host shell never reacts
+            }
+        }
+    }
+    CallNextHookEx(None, code, wparam, lparam)
+}
+
 /// Forward keyboard focus to a swallowed window by slot ID.
 /// Called from hotkey handlers and the focus_slot_window command.
 pub fn focus_window(slot_id: &str) {
-    let hwnd_raw = {
+    let (hwnd_raw, vmconnect_pid) = {
         let state = lock_state();
-        state.get(slot_id).map(|info| info.child_hwnd)
+        match state.get(slot_id) {
+            Some(info) => (Some(info.child_hwnd), info.vmconnect_pid),
+            None => (None, None),
+        }
     };
     if let Some(raw) = hwnd_raw {
         let hwnd = HWND(raw as *mut _);
@@ -784,6 +1248,11 @@ pub fn focus_window(slot_id: &str) {
                 let _ = SetForegroundWindow(hwnd);
                 let _ = BringWindowToTop(hwnd);
             }
+        }
+        // vmconnect re-creates its connect-bar on focus; the 40s stabilization loop
+        // that normally re-hides it has ended by now, so hide it here too.
+        if let Some(pid) = vmconnect_pid {
+            hide_vmconnect_bbar(pid);
         }
     }
 }
