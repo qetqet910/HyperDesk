@@ -46,6 +46,7 @@ export interface SystemStats {
   memory_used: number;
   uptime: string;
   disk_free: number;
+  disk_total: number;
   network_io: number;
   cpu_history: number[];
   mem_history: number[];

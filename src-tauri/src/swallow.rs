@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-use windows::Win32::Foundation::{HWND, LPARAM, BOOL};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM, BOOL};
 use windows::Win32::UI::WindowsAndMessaging::{
     SetParent, SetWindowLongPtrW, GetWindowLongPtrW, SetWindowPos, GetClassNameW,
     GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_THICKFRAME, WS_BORDER, WS_CHILD, WS_POPUP,
@@ -9,9 +9,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
     EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
     EnumChildWindows, IsWindow, HWND_TOP, GetWindowRect,
-    SetForegroundWindow, BringWindowToTop, SetMenu,
+    SetForegroundWindow, BringWindowToTop, SetMenu, PostMessageW, WM_CLOSE,
 };
-use windows::Win32::Graphics::Gdi::{ScreenToClient, CreateRectRgn, SetWindowRgn, HRGN};
+use windows::Win32::Graphics::Gdi::{ScreenToClient, ClientToScreen, CreateRectRgn, SetWindowRgn, HRGN};
 use windows::Win32::Foundation::{RECT, POINT};
 
 use tauri::{AppHandle, Emitter};
@@ -94,6 +94,55 @@ const DEFAULT_OFFSET: i32 = 0; // Styles successfully removed
 const HYPERV_OFFSET: i32 = 30;  // Hyper-V Ribbon
 const HORIZON_OFFSET: i32 = 0; // Horizon usually reacts well to style removal
 const HORIZONTAL_BUFFER: i32 = 0; // Remove buffer for 1:1 fit at 100% DPI
+
+/// Extra top rows (physical px) currently cropped away for the immersive
+/// header reveal — 0 when not immersive/not hovering the top edge. This is
+/// the SINGLE source of truth for that band: every SetWindowRgn call in this
+/// file (initial swallow, the vmconnect stabilization loop's re-measurement,
+/// and the immersive poller itself) goes through `apply_chrome_region` below,
+/// which always composes the window's own chrome crop (offset/offset_x) with
+/// this value. Without a single source, the vmconnect stabilization loop
+/// (which re-applies its OWN region on every re-measured tick, for up to 40s
+/// after swallow) would periodically stomp the reveal crop back to "hidden"
+/// — RDP never showed this bug because its offset is always 0 and nothing
+/// else touches its region after the initial swallow.
+static REVEAL_BAND: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Crops rows 0..offset and cols 0..offset_x (the window's own non-removable
+/// chrome, e.g. VMConnect's ribbon) PLUS the current immersive reveal band,
+/// or clears the region entirely when there is nothing to hide.
+fn apply_chrome_region(hwnd: HWND, offset_x: i32, offset: i32, width: i32, height: i32) {
+    let band = REVEAL_BAND.load(std::sync::atomic::Ordering::Relaxed);
+    let top = offset + band;
+    unsafe {
+        if top == 0 && offset_x == 0 {
+            let _ = SetWindowRgn(hwnd, HRGN::default(), BOOL::from(true));
+        } else {
+            let rgn = CreateRectRgn(offset_x, top, offset_x + width + (HORIZONTAL_BUFFER * 2), offset + height);
+            if !rgn.is_invalid() {
+                let _ = SetWindowRgn(hwnd, rgn, BOOL::from(true));
+            }
+        }
+    }
+}
+
+/// Window rect (x, y, w, h) that makes the swallowed content's video area exactly
+/// fill the slot. offset_x/offset are the LEFT/TOP chrome (frame non-client border
+/// + top ribbon). The frame's non-client border is symmetric, so the RIGHT and
+/// BOTTOM each need an extra `offset_x` (= the border thickness, which equals the
+/// left/top non-client inset since the ribbon has no left inset) — otherwise the
+/// client is that many px short of the slot and the window's white right/bottom
+/// border shows inside the region. The region (apply_chrome_region) stays slot-
+/// sized and clips any excess, so erring slightly large here is safe.
+/// For RDP/Horizon offset_x == offset == 0, so this is a no-op (slot rect).
+fn framed_rect(x: i32, y: i32, w: i32, h: i32, offset_x: i32, offset: i32) -> (i32, i32, i32, i32) {
+    (
+        x - HORIZONTAL_BUFFER - offset_x,
+        y - offset,
+        w + (HORIZONTAL_BUFFER * 2) + offset_x * 2,
+        h + offset + offset_x,
+    )
+}
 
 fn get_offset(class_name: &str) -> i32 {
     let lower_class = class_name.to_lowercase();
@@ -199,6 +248,26 @@ fn find_child_rect_by_class(frame: HWND, needle: &str) -> Option<RECT> {
 /// vmconnect's VM-video child is `HwndWrapper[vmconnect.exe;...]`.
 fn find_vmconnect_video_rect(frame: HWND) -> Option<RECT> {
     find_child_rect_by_class(frame, "hwndwrapper[vmconnect")
+}
+
+/// The frame's own NON-CLIENT border thickness (left, top) in physical px — the
+/// gap between its window rect and its client rect. WinForms re-adds a ~2-3px
+/// border even after WS_THICKFRAME is stripped; in an Enhanced-session vmconnect
+/// that border is the white edge around the VM (the content child fills the
+/// CLIENT area, so a child-relative inset measures 0 and misses it). Measured
+/// deterministically from the two rects, so it self-corrects across the
+/// Basic→Enhanced tree swap with no dependence on child-layout timing.
+fn frame_nc_border(hwnd: HWND) -> (i32, i32) {
+    unsafe {
+        let mut wr = RECT::default();
+        if GetWindowRect(hwnd, &mut wr).is_err() { return (0, 0); }
+        let mut origin = POINT { x: 0, y: 0 };
+        if ClientToScreen(hwnd, &mut origin).as_bool() {
+            ((origin.x - wr.left).clamp(0, 20), (origin.y - wr.top).clamp(0, 20))
+        } else {
+            (0, 0)
+        }
+    }
 }
 
 struct OwnedWindowParam<'a> {
@@ -691,22 +760,24 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
             vmconnect_pid,
         });
 
+        let (fx, fy, fw, fh) = framed_rect(x, y, width, height, offset_x, offset);
         let _ = SetWindowPos(
             child_hwnd, HWND(std::ptr::null_mut()),
-            x - HORIZONTAL_BUFFER - offset_x, y - offset, width + (HORIZONTAL_BUFFER * 2) + offset_x, height + offset,
+            fx, fy, fw, fh,
             SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS
         );
 
-        // Clip the non-removable chrome (e.g. VMConnect ribbon + left inset).
-        // The window is positioned at (x-offset_x, y-offset) so rows 0..offset and
-        // cols 0..offset_x contain chrome; the region masks them out.
-        if offset > 0 || offset_x > 0 {
-            let rgn = CreateRectRgn(offset_x, offset, offset_x + width + (HORIZONTAL_BUFFER * 2), offset + height);
-            if !rgn.is_invalid() {
-                let _ = SetWindowRgn(child_hwnd, rgn, BOOL::from(true));
-            }
-        }
+        // Clip the non-removable chrome (e.g. VMConnect ribbon + left inset),
+        // composed with any currently-active immersive reveal band.
+        apply_chrome_region(child_hwnd, offset_x, offset, width, height);
     }
+
+    // NOTE: NO WS_EX_LAYERED fade-in here. A layered child window kept mstsc from
+    // updating its own cursor/overlay (mouse stuck on the default arrow, input
+    // field I-beam never appeared, autocomplete popups didn't fire) — layered DWM
+    // composition doesn't play with the RDP surface's live cursor draw. The
+    // cosmetic ease-in isn't worth breaking VM input; if a fade is ever wanted it
+    // must not use WS_EX_LAYERED on the swallowed child.
 
     let h_child_raw = child_hwnd.0 as isize;
     let h_parent_raw = actual_parent.0 as isize;
@@ -793,22 +864,25 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                 // (Also self-corrects the Basic-mode measurement taken before
                 // SetMenu(None) shrank the chrome.)
                 if vmconnect_pid_cap.is_some() {
-                    let (mx, my) = match find_vmconnect_video_rect(h_child) {
+                    // Total chrome = frame's own non-client border (the white edge in
+                    // Enhanced session) PLUS any internal ribbon (Basic session's
+                    // HwndWrapper child sits inside the client area). The video-rect
+                    // helper reports the ribbon in CLIENT coords, so adding the border
+                    // converts to the window-relative offset the region/reposition use.
+                    let (nc_x, nc_y) = frame_nc_border(h_child);
+                    let (in_x, in_y) = match find_vmconnect_video_rect(h_child) {
                         Some(vr) => (
                             vr.left.clamp(0, 20),
-                            if vr.top > 0 && vr.top < 200 { vr.top } else { offset_cap },
+                            if vr.top > 0 && vr.top < 200 { vr.top } else { 0 },
                         ),
-                        // Enhanced session: measure the RDP tree's content child
-                        // instead (it can still sit a few px inside the frame).
-                        None => match find_child_rect_by_class(h_child, "uimainclass") {
-                            Some(r) => (r.left.clamp(0, 20), r.top.clamp(0, 200)),
-                            None => (0, 0), // mid-switch transient — next poll corrects
-                        },
+                        None => (0, 0), // Enhanced: content fills the client, no ribbon
                     };
+                    let mx = nc_x + in_x;
+                    let my = nc_y + in_y;
                     if mx != offset_x_cap || my != offset_cap {
                         #[cfg(debug_assertions)]
-                        dlog!("[swallow] vmconnect chrome ({},{})px -> ({},{})px (session-mode switch)",
-                            offset_x_cap, offset_cap, mx, my);
+                        dlog!("[swallow] vmconnect chrome ({},{})px -> ({},{})px [nc=({},{}) ribbon=({},{})]",
+                            offset_x_cap, offset_cap, mx, my, nc_x, nc_y, in_x, in_y);
                         offset_x_cap = mx;
                         offset_cap = my;
                         {
@@ -836,24 +910,17 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                 }
 
                 if needs_refresh {
+                    let (fx, fy, fw, fh) = framed_rect(target_rect.0, target_rect.1, target_rect.2, target_rect.3, offset_x_cap, offset_cap);
                     let _ = SetWindowPos(
                         h_child,
                         HWND(std::ptr::null_mut()),
-                        target_rect.0 - HORIZONTAL_BUFFER - offset_x_cap, target_rect.1 - offset_cap,
-                        target_rect.2 + (HORIZONTAL_BUFFER * 2) + offset_x_cap, target_rect.3 + offset_cap,
+                        fx, fy, fw, fh,
                         SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE
                     );
-                    // Re-apply chrome clip region in case the app reset it — or REMOVE
-                    // it when the re-measured chrome dropped to 0 (Enhanced session).
-                    if offset_cap > 0 || offset_x_cap > 0 {
-                        let rgn = CreateRectRgn(offset_x_cap, offset_cap,
-                            offset_x_cap + target_rect.2 + (HORIZONTAL_BUFFER * 2), offset_cap + target_rect.3);
-                        if !rgn.is_invalid() {
-                            let _ = SetWindowRgn(h_child, rgn, BOOL::from(true));
-                        }
-                    } else if vmconnect_pid_cap.is_some() {
-                        let _ = SetWindowRgn(h_child, HRGN::default(), BOOL::from(true));
-                    }
+                    // Re-apply chrome clip region in case the app reset it — composed
+                    // with any active immersive reveal band via apply_chrome_region,
+                    // so this can never stomp a reveal the top-edge poller just made.
+                    apply_chrome_region(h_child, offset_x_cap, offset_cap, target_rect.2, target_rect.3);
                     interval_ms = FAST_MS; // app fought back — watch closely again
                 } else {
                     interval_ms = (interval_ms * 2).min(SLOW_MS); // stable — ease off
@@ -865,6 +932,14 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     Ok(())
 }
 
+/// "Disconnect" a slot: end the session (RDP disconnect / VM console close),
+/// not just hide it elsewhere. mstsc/vmconnect handle WM_CLOSE themselves —
+/// for RDP that's a real disconnect, for a Hyper-V console it just closes the
+/// viewer (the VM itself is untouched, same as closing it from Hyper-V
+/// Manager). We first restore the window to a normal top-level frame (in case
+/// the app shows its own "really disconnect?" prompt and the user cancels —
+/// then it's left as an ordinary floating window instead of stuck invisible
+/// inside HyperDesk's webview container).
 pub fn unswallow(slot_id: &str) -> Result<(), String> {
     let mut state = lock_state();
     if let Some(info) = state.remove(slot_id) {
@@ -874,19 +949,13 @@ pub fn unswallow(slot_id: &str) -> Result<(), String> {
                 let _ = SetParent(child_hwnd, HWND(std::ptr::null_mut()));
                 let _ = SetWindowLongPtrW(child_hwnd, GWL_STYLE, info.original_style);
                 let _ = SetWindowLongPtrW(child_hwnd, GWL_EXSTYLE, info.original_ex_style);
-                // Drop any ribbon clip region — a detached vmconnect must not stay
-                // masked (it would show a window with its top rows invisible).
                 let _ = SetWindowRgn(child_hwnd, HRGN::default(), BOOL::from(true));
                 if info.original_parent != 0 {
                      let _ = SetParent(child_hwnd, HWND(info.original_parent as *mut _));
                 }
-                // Detached session window stays alive ("세션 분리 — 창은 유지됨") but must
-                // NOT slam down at 0,0 on top of HyperDesk. Apply the restored frame, give
-                // it a sane size, then minimize to the taskbar: reachable, never overlapping.
                 let _ = SetWindowPos(child_hwnd, HWND(std::ptr::null_mut()), 120, 120, 900, 650,
-                    SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER);
-                let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(
-                    child_hwnd, windows::Win32::UI::WindowsAndMessaging::SW_SHOWMINNOACTIVE);
+                    SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER);
+                let _ = PostMessageW(child_hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
             }
         }
     }
@@ -914,12 +983,10 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
                     // The offsets resolved (and possibly re-measured) at swallow time —
                     // NOT get_offset(class), which knows nothing about the measured
                     // vmconnect chrome and would misplace the frame on re-show.
-                    let offset = info.offset;
-                    let offset_x = info.offset_x;
+                    let (fx, fy, fw, fh) = framed_rect(info.x, info.y, info.width, info.height, info.offset_x, info.offset);
                     let _ = SetWindowPos(
                         hwnd, HWND(std::ptr::null_mut()),
-                        info.x - HORIZONTAL_BUFFER - offset_x, info.y - offset,
-                        info.width + (HORIZONTAL_BUFFER * 2) + offset_x, info.height + offset,
+                        fx, fy, fw, fh,
                         SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE
                     );
                 } else {
@@ -961,12 +1028,7 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
                     // NOT get_offset(class_name), which knows nothing about the
                     // per-window MEASURED chrome. Using the wrong one re-exposes the
                     // ribbon (or over-clips) on the very first resize after swallow.
-                    let offset = info.offset;
-                    let offset_x = info.offset_x;
-                    let tx = x - HORIZONTAL_BUFFER - offset_x;
-                    let ty = y - offset;
-                    let tw = width + (HORIZONTAL_BUFFER * 2) + offset_x;
-                    let th = height + offset;
+                    let (tx, ty, tw, th) = framed_rect(x, y, width, height, info.offset_x, info.offset);
 
                     let mut rect = RECT::default();
                     if GetWindowRect(hwnd, &mut rect).is_ok() {
@@ -1047,42 +1109,119 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
 // profiles.
 
 static IMMERSIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Poll-loop clock base + a "hold reveal until" deadline (ms since base). Set by
+/// flash_immersive_header so a slot switch pops the header for ~1s even with the
+/// cursor nowhere near the top edge.
+static POLL_CLOCK: OnceLock<std::time::Instant> = OnceLock::new();
+static HOLD_UNTIL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn poll_now_ms() -> u64 {
+    POLL_CLOCK.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+}
+
+/// The reveal band at full height (36 CSS px → physical px via the main window DPI).
+fn full_band() -> i32 {
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
+    let main = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
+    let dpi = if main != 0 { unsafe { GetDpiForWindow(HWND(main as *mut _)) } } else { 96 };
+    (36 * dpi.max(96) as i32) / 96
+}
+
+/// Set the reveal crop band to an exact physical-px height and re-clip every
+/// visible swallowed window. Driving the band directly (not just on/off) lets the
+/// hide path RAMP it down in step with the DOM header's slide-up, so the black
+/// header band shrinks together with the header instead of vanishing a frame late.
+fn set_reveal_band_px(band: i32) {
+    REVEAL_BAND.store(band, std::sync::atomic::Ordering::Relaxed);
+    let entries: Vec<(isize, i32, i32, i32, i32)> = lock_state().values()
+        .filter(|i| i.is_visible)
+        .map(|i| (i.child_hwnd, i.offset_x, i.offset, i.width, i.height))
+        .collect();
+    for (raw, ox, oy, w, h) in entries {
+        let hwnd = HWND(raw as *mut _);
+        if !unsafe { IsWindow(hwnd) }.as_bool() { continue; }
+        apply_chrome_region(hwnd, ox, oy, w, h);
+    }
+}
 
 /// Crop (shown) or restore (hidden) the top 36-CSS-px band of every visible
-/// swallowed window, composing with the window's own chrome mask.
+/// swallowed window, composing with each window's own chrome mask via the
+/// shared REVEAL_BAND (see its doc comment for why this must be shared).
 fn apply_reveal(shown: bool) {
-    use windows::Win32::UI::HiDpi::GetDpiForWindow;
-    let entries: Vec<(isize, isize, i32, i32, i32, i32)> = lock_state().values()
-        .filter(|i| i.is_visible)
-        .map(|i| (i.child_hwnd, i.parent_hwnd, i.offset_x, i.offset, i.width, i.height))
-        .collect();
-    for (raw, parent_raw, ox, oy, w, h) in entries {
-        let hwnd = HWND(raw as *mut _);
-        unsafe {
-            if !IsWindow(hwnd).as_bool() { continue; }
-            let band = if shown {
-                // 36 CSS px → physical px via the host window's DPI.
-                let dpi = GetDpiForWindow(HWND(parent_raw as *mut _));
-                (36 * dpi.max(96) as i32) / 96
-            } else {
-                0
-            };
-            if band == 0 && oy == 0 && ox == 0 {
-                let _ = SetWindowRgn(hwnd, HRGN::default(), BOOL::from(true));
-            } else {
-                let rgn = CreateRectRgn(ox, oy + band, ox + w + (HORIZONTAL_BUFFER * 2), oy + h);
-                if !rgn.is_invalid() {
-                    let _ = SetWindowRgn(hwnd, rgn, BOOL::from(true));
-                }
+    set_reveal_band_px(if shown { full_band() } else { 0 });
+}
+
+/// Force the immersive header to reveal for `ms`, then auto-hide — used on slot
+/// switch so the user sees which slot is now active (the header's 1~4 highlight)
+/// without having to hunt for the top edge.
+pub fn flash_immersive_header(ms: u64) {
+    if !IMMERSIVE.load(std::sync::atomic::Ordering::Relaxed) { return; }
+    HOLD_UNTIL_MS.store(poll_now_ms() + ms, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Notify the frontend of the reveal state so its (always-present, absolutely-
+/// positioned) header can slide in/out. Split from apply_reveal so the poller can
+/// order the emit vs. the native crop differently per direction — see set_immersive.
+fn emit_edge(shown: bool) {
+    if let Some(app) = APP_HANDLE.get() {
+        let _ = app.emit("immersive-edge", shown);
+    }
+}
+
+// ─── Borderless fullscreen (flash-free) ──────────────────────────────────────
+//
+// tao's set_fullscreen restores the window's saved styles on exit, which on
+// Windows momentarily re-adds the OS caption ("HyperDesk" title bar flash) even
+// though the window is decorations:false. We instead cover the monitor manually
+// with SetWindowPos: no style change at all, so no flash. A borderless window
+// that exactly covers the monitor rect while foregrounded also triggers the
+// shell's fullscreen detection, so the taskbar yields — same visual result as
+// real fullscreen, without the decoration churn.
+static FULLSCREEN_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SAVED_WINDOW_RECT: OnceLock<Mutex<Option<(i32, i32, i32, i32)>>> = OnceLock::new();
+
+pub fn set_borderless_fullscreen(main_hwnd: isize, on: bool) {
+    use windows::Win32::Graphics::Gdi::{MonitorFromWindow, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    if FULLSCREEN_ON.swap(on, std::sync::atomic::Ordering::Relaxed) == on {
+        return; // no state change
+    }
+    let hwnd = HWND(main_hwnd as *mut _);
+    let saved = SAVED_WINDOW_RECT.get_or_init(|| Mutex::new(None));
+    unsafe {
+        if !IsWindow(hwnd).as_bool() { return; }
+        if on {
+            let mut wr = RECT::default();
+            if GetWindowRect(hwnd, &mut wr).is_ok() {
+                *saved.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some((wr.left, wr.top, wr.right - wr.left, wr.bottom - wr.top));
+            }
+            let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            if GetMonitorInfoW(mon, &mut mi).as_bool() {
+                let r = mi.rcMonitor;
+                let _ = SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                    SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+            }
+        } else {
+            let restore = saved.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some((x, y, w, h)) = restore {
+                let _ = SetWindowPos(hwnd, HWND(std::ptr::null_mut()), x, y, w, h,
+                    SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER);
             }
         }
     }
+}
+
+pub fn toggle_borderless_fullscreen(main_hwnd: isize) {
+    let next = !FULLSCREEN_ON.load(std::sync::atomic::Ordering::Relaxed);
+    set_borderless_fullscreen(main_hwnd, next);
 }
 
 pub fn set_immersive(on: bool) {
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     IMMERSIVE.store(on, std::sync::atomic::Ordering::Relaxed);
     if !on {
+        emit_edge(false);
         apply_reveal(false); // never leave a crop behind when exiting immersive
     }
     static POLLER: OnceLock<()> = OnceLock::new();
@@ -1094,19 +1233,45 @@ pub fn set_immersive(on: bool) {
                 if !IMMERSIVE.load(std::sync::atomic::Ordering::Relaxed) {
                     if shown {
                         shown = false;
+                        emit_edge(false);
                         apply_reveal(false);
                     }
                     continue;
                 }
                 let mut p = POINT::default();
                 if unsafe { GetCursorPos(&mut p) }.is_err() { continue; }
-                // Reveal when the cursor hits the very top edge; keep it shown
-                // while the cursor stays in a generous band (64px covers the
-                // 36px header at up to ~175% DPI scaling).
-                let want = if shown { p.y <= 64 } else { p.y <= 2 };
+                // Reveal when the cursor hits the very top edge (kept shown within a
+                // generous 64px band), OR while a slot-switch flash hold is active.
+                let held = poll_now_ms() < HOLD_UNTIL_MS.load(std::sync::atomic::Ordering::Relaxed);
+                let want = held || if shown { p.y <= 64 } else { p.y <= 2 };
                 if want != shown {
                     shown = want;
-                    apply_reveal(shown);
+                    if want {
+                        // SHOW: open the crop first, then the DOM header slides down
+                        // into the now-visible band.
+                        apply_reveal(true);
+                        emit_edge(true);
+                    } else {
+                        // HIDE: the header lives UNDER the VM surface, so if we closed
+                        // the crop at once the VM would instantly cover the slide-up.
+                        // Slide the DOM header up FIRST, wait out the ~180ms CSS
+                        // transition, then close the crop with a SINGLE SetWindowRgn.
+                        // (A per-step band ramp re-clipped the fullscreen VM 7× and
+                        // made it stutter — one close keeps it smooth.)
+                        emit_edge(false);
+                        std::thread::sleep(std::time::Duration::from_millis(185));
+                        // Cursor returned to the top, or a flash hold armed → re-reveal.
+                        let mut np = POINT::default();
+                        let back = unsafe { GetCursorPos(&mut np) }.is_ok() && np.y <= 2;
+                        let held2 = poll_now_ms() < HOLD_UNTIL_MS.load(std::sync::atomic::Ordering::Relaxed);
+                        if back || held2 {
+                            shown = true;
+                            apply_reveal(true);
+                            emit_edge(true);
+                        } else {
+                            apply_reveal(false);
+                        }
+                    }
                 }
             }
         });

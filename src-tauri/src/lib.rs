@@ -9,7 +9,7 @@ use commands::{
     add_remote_host, remove_remote_host, update_remote_host,
     set_vm_memory, set_vm_processors, get_horizon_path, connect_horizon, check_host,
     set_window_visibility, is_window_valid, swallow_window,
-    unswallow_window, sync_slot_bounds, toggle_fullscreen, set_fullscreen, set_immersive, focus_slot_window,
+    unswallow_window, sync_slot_bounds, toggle_fullscreen, set_fullscreen, set_immersive, flash_immersive_header, quit_app, focus_slot_window,
     list_snapshots, create_snapshot, restore_snapshot, delete_snapshot,
     get_vm_memo, set_vm_memo, set_remote_host_memo,
     get_vm_tags, set_vm_tags, set_remote_host_tags,
@@ -133,9 +133,10 @@ pub fn run() {
             match event {
                 #[allow(unused_variables)]
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // Production: minimize-to-tray (keep running). Dev: actually exit,
-                    // otherwise every `tauri dev` restart leaves a zombie holding the
-                    // global Alt+1..4 hotkeys, so the next instance fails to register them.
+                    // Dev: actually exit immediately, otherwise every `tauri dev`
+                    // restart leaves a zombie holding the global Alt+1..4 hotkeys, so
+                    // the next instance fails to register them. No confirmation here —
+                    // it would have to be clicked through on every dev reload.
                     #[cfg(debug_assertions)]
                     {
                         // Unparent swallowed children before exit — exit(0) kills the
@@ -143,10 +144,13 @@ pub fn run() {
                         swallow::unswallow_all();
                         window.app_handle().exit(0);
                     }
+                    // Production: never close silently to tray. Prevent the close and
+                    // ask the frontend first (ConfirmModal) — the user picks tray vs.
+                    // cancel; "quit for real" is still reachable from the tray menu.
                     #[cfg(not(debug_assertions))]
                     {
-                        let _ = window.hide();
                         api.prevent_close();
+                        let _ = window.emit("close-requested", ());
                     }
                 }
                 // Shortcuts are registered once in setup() and stay registered for the
@@ -187,6 +191,8 @@ pub fn run() {
             toggle_fullscreen,
             set_fullscreen,
             set_immersive,
+            flash_immersive_header,
+            quit_app,
             focus_slot_window,
             list_snapshots,
             create_snapshot,

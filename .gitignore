@@ -68,3 +68,6 @@ devlog.txt
 # (TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in CI.
 src-tauri/*.key
 src-tauri/*.key.pub
+
+# Scratch drafts (GeekNews posts, notes) — not part of the app
+_workspace/

@@ -12,6 +12,7 @@ interface NewHost {
   is_detected: boolean;
   is_hidden: boolean;
   tags?: string[];
+  memo?: string;
 }
 
 interface AssetModalProps {
@@ -242,6 +243,25 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
             }}>
               <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)' }}>태그</label>
               <TagEditor tags={tags} onChange={setTags} />
+            </div>
+
+            {/* Memo */}
+            <div className="settings-card" style={{
+              background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '14px',
+              border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '10px'
+            }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)' }}>메모</label>
+              <textarea
+                placeholder="이 자산에 대한 메모 (접속 정보, 용도 등)"
+                value={hostData.memo ?? ""}
+                onChange={(e) => setHostData({ ...hostData, memo: e.target.value })}
+                rows={3}
+                style={{
+                  width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)',
+                  borderRadius: '10px', padding: '10px 12px', color: '#fff', fontSize: '13px',
+                  outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5
+                }}
+              />
             </div>
 
             {/* Actions */}

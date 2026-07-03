@@ -4,6 +4,8 @@ import {
   Globe, Cpu, Settings as LucideSettings,
   Server
 } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { api } from "./lib/tauri-api";
 import { useDashboard, useSystemStats, useHostActions } from "./hooks/useDashboard";
 import { parseError } from "./lib/error-utils";
 import { useSettings } from "./contexts/SettingsContext";
@@ -84,7 +86,26 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [errorModal, setErrorModal] = useState<{ title: string; body: string } | null>(null);
   const [showSearch, setShowSearch] = useState(false);
-  const isOverlayActive = !!(showAssetModal || confirmDelete || showVmSettings || errorModal || showSearch);
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+  const isOverlayActive = !!(showAssetModal || confirmDelete || showVmSettings || errorModal || showSearch || showQuitConfirm);
+
+  // Release builds: the window's own X button no longer silently minimizes to
+  // tray (see lib.rs CloseRequested — it prevent_close()s and emits this
+  // instead). Confirm→hide to tray; Cancel/✕ leaves the window exactly as it
+  // was, since the native close was already prevented.
+  useEffect(() => {
+    const unlisten = listen("close-requested", () => setShowQuitConfirm(true));
+    return () => { unlisten.then(f => f()); };
+  }, []);
+
+  const handleMinimizeToTray = async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().hide();
+    } catch (e) {
+      console.error("Failed to hide window", e);
+    }
+  };
 
   // ── Data ──
   const [logs, setLogs] = useState<{ id: string; msg: string; type: string; time: string }[]>([]);
@@ -218,6 +239,14 @@ export default function App() {
     try {
       if (editingHost) {
         await updateHost.mutateAsync({ id: editingHost.id, ...hostData });
+        // memo is stored via its own command (update_remote_host doesn't carry it);
+        // for a detected host, updateHost promotes it to a manual id, so re-read the
+        // saved id from the returned/refreshed list isn't available here — the memo
+        // is keyed on the id AssetModal already knows (manual hosts) or the detected
+        // id (promoted server-side to the same host, memo re-attaches on next merge).
+        if (hostData.memo !== undefined) {
+          await api.setRemoteHostMemo(editingHost.id, hostData.memo ?? "").catch(console.error);
+        }
         addToast(`${hostData.name} 자산 정보가 동기화되었습니다.`, "success");
       } else {
         await addHost.mutateAsync(hostData);
@@ -330,7 +359,8 @@ export default function App() {
             <div className="hub-stat-item">
               <span className="hub-stat-label">디스크 여유</span>
               <div className="hub-stat-track">
-                <div className="hub-stat-fill" style={{ width: "72%", background: "var(--accent-green)" }} />
+                {/* Fill shows the FREE fraction (matches the label + green color) */}
+                <div className="hub-stat-fill" style={{ width: `${statsData?.disk_total ? Math.round((statsData.disk_free / statsData.disk_total) * 100) : 0}%`, background: "var(--accent-green)" }} />
               </div>
               <span className="hub-stat-value" style={{ color: "var(--accent-green)" }}>
                 {(((statsData?.disk_free ?? data?.system_disk_free) ?? 0) / 1024).toFixed(0)} GB
@@ -604,6 +634,7 @@ export default function App() {
       {showAssetModal  && <AssetModal initialData={editingHost ?? undefined} isEditing={!!editingHost} isPending={addHost.isPending || updateHost.isPending} onClose={() => { setShowAssetModal(false); setEditingHost(null); }} onSubmit={handleAssetAction} />}
       {confirmDelete   && <ConfirmModal title="자산 영구 삭제" message="선택한 원격 자산을 영구적으로 삭제하시겠습니까?" confirmText="영구 삭제 수행" type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
       {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText="확인" onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}
+      {showQuitConfirm && <ConfirmModal title="HyperDesk 종료" message="백그라운드로 전환하면 실행 중인 세션이 유지되고 트레이에서 다시 열 수 있습니다. 완전 종료하면 모든 세션 연결이 정리됩니다." confirmText="백그라운드로 전환" cancelText="취소" extraText="완전 종료" onExtra={() => api.quitApp().catch(console.error)} onConfirm={handleMinimizeToTray} onClose={() => setShowQuitConfirm(false)} />}
     </div>
   );
 }

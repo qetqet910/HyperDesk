@@ -68,6 +68,7 @@ pub struct SystemStats {
     pub memory_used: u64,
     pub uptime: String,
     pub disk_free: u64,
+    pub disk_total: u64,
     pub network_io: f64,
     pub cpu_history: Vec<f64>,
     pub mem_history: Vec<f64>,
@@ -495,7 +496,7 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
     }
     tokio::time::sleep(Duration::from_millis(250)).await;
 
-    let (cpu, total_mem_kb, used_mem_kb, uptime_str, disk_free_mb, net_io_kb) = {
+    let (cpu, total_mem_kb, used_mem_kb, uptime_str, disk_free_mb, disk_total_mb, net_io_kb) = {
         let mut sys = lock_or_recover(sys());
         sys.refresh_cpu_usage(); // second sample — calculates actual delta
         sys.refresh_memory();
@@ -511,10 +512,13 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
         let uptime_str = format!("{}d {}h {}m", days, hours, minutes);
 
         let disks = Disks::new_with_refreshed_list();
-        let disk_free_mb = disks.iter()
+        // Prefer the C: system drive; fall back to the largest mounted disk so
+        // machines whose Windows lives on another letter still report something.
+        let sys_disk = disks.iter()
             .find(|d| d.mount_point().to_string_lossy().starts_with("C:"))
-            .map(|d| d.available_space() / 1024 / 1024)
-            .unwrap_or(0);
+            .or_else(|| disks.iter().max_by_key(|d| d.total_space()));
+        let disk_free_mb = sys_disk.map(|d| d.available_space() / 1024 / 1024).unwrap_or(0);
+        let disk_total_mb = sys_disk.map(|d| d.total_space() / 1024 / 1024).unwrap_or(0);
 
         let mut nets = lock_or_recover(networks());
         nets.refresh(true);
@@ -523,7 +527,7 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
             total_bytes_per_sec += network.received() + network.transmitted();
         }
 
-        (cpu, total_mem_kb, used_mem_kb, uptime_str, disk_free_mb, (total_bytes_per_sec as f64) / 1024.0)
+        (cpu, total_mem_kb, used_mem_kb, uptime_str, disk_free_mb, disk_total_mb, (total_bytes_per_sec as f64) / 1024.0)
     };
 
     let mem_percent = if total_mem_kb > 0 { (used_mem_kb as f64 / total_mem_kb as f64) * 100.0 } else { 0.0 };
@@ -544,6 +548,7 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
         memory_used: used_mem_kb,
         uptime: uptime_str,
         disk_free: disk_free_mb,
+        disk_total: disk_total_mb,
         network_io: net_io_kb,
         cpu_history,
         mem_history,
@@ -1082,10 +1087,13 @@ pub async fn swallow_window(
     crate::swallow::swallow(&slot_id, pid, parent_hwnd, window.app_handle().clone(), bounds)
 }
 
+/// Fullscreen via manual monitor-cover (swallow::*_borderless_fullscreen), NOT
+/// tao's set_fullscreen — the latter re-adds the OS caption for a frame on
+/// Windows (the "HyperDesk" title-bar flash) even though decorations are off.
 #[tauri::command]
 pub async fn toggle_fullscreen(window: tauri::Window) -> Result<(), String> {
-    let is_fullscreen = window.is_fullscreen().unwrap_or(false);
-    let _ = window.set_fullscreen(!is_fullscreen);
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    crate::swallow::toggle_borderless_fullscreen(hwnd);
     Ok(())
 }
 
@@ -1093,7 +1101,9 @@ pub async fn toggle_fullscreen(window: tauri::Window) -> Result<(), String> {
 /// can't desync from the window when F11 is also used).
 #[tauri::command]
 pub async fn set_fullscreen(window: tauri::Window, on: bool) -> Result<(), String> {
-    window.set_fullscreen(on).map_err(|e| e.to_string())
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    crate::swallow::set_borderless_fullscreen(hwnd, on);
+    Ok(())
 }
 
 /// Arms/disarms the immersive top-edge cursor watcher (emits "immersive-edge").
@@ -1101,6 +1111,23 @@ pub async fn set_fullscreen(window: tauri::Window, on: bool) -> Result<(), Strin
 pub async fn set_immersive(on: bool) -> Result<(), String> {
     crate::swallow::set_immersive(on);
     Ok(())
+}
+
+/// Briefly pop the immersive header (slot-switch hint) for `ms` milliseconds.
+#[tauri::command]
+pub async fn flash_immersive_header(ms: Option<u64>) -> Result<(), String> {
+    crate::swallow::flash_immersive_header(ms.unwrap_or(1000));
+    Ok(())
+}
+
+/// Fully quit the app (the window X only prevent_close()es → the frontend's
+/// close-requested modal calls this when the user picks "완전 종료"). Restores
+/// any swallowed children first so they aren't left reparented into a dying
+/// process.
+#[tauri::command]
+pub async fn quit_app(app: AppHandle) {
+    crate::swallow::unswallow_all();
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -1401,16 +1428,35 @@ mod tests {
     }
 
     #[test]
-    fn test_horizon_host_cleaning() {
-        let host1 = "https://horizon.vdi.com/";
-        let host2 = "horizon.vdi.com";
-        let host3 = "http://192.168.1.100/";
+    fn test_clean_host_url() {
+        // Exercises the REAL clean_host_url (not an inline copy), so a regression
+        // in the shipped function is actually caught.
+        assert_eq!(clean_host_url("https://horizon.vdi.com/"), "horizon.vdi.com");
+        assert_eq!(clean_host_url("horizon.vdi.com"), "horizon.vdi.com");
+        assert_eq!(clean_host_url("http://192.168.1.100/"), "192.168.1.100");
+        // Scheme stripped but an explicit port is preserved (health-check needs it).
+        assert_eq!(clean_host_url("https://vdi.example.com:8443/"), "vdi.example.com:8443");
+        // Multiple trailing slashes all trimmed; bare host untouched.
+        assert_eq!(clean_host_url("http://host.local///"), "host.local");
+        assert_eq!(clean_host_url("10.0.0.5"), "10.0.0.5");
+    }
 
-        let clean = |h: &str| h.replace("http://", "").replace("https://", "").trim_end_matches('/').to_string();
+    #[test]
+    fn test_ps_escape_multiple_quotes() {
+        // A VM name with several apostrophes must have EVERY one doubled — a
+        // single missed quote is a PowerShell injection hole (CLAUDE.md rule #1).
+        assert_eq!(ps_escape("a'b'c"), "a''b''c");
+        assert_eq!(ps_escape("'; Remove-Item C:\\ -Recurse '"), "''; Remove-Item C:\\ -Recurse ''");
+        assert_eq!(ps_escape(""), "");
+    }
 
-        assert_eq!(clean(host1), "horizon.vdi.com");
-        assert_eq!(clean(host2), "horizon.vdi.com");
-        assert_eq!(clean(host3), "192.168.1.100");
+    #[test]
+    fn test_rdp_sanitize_preserves_normal_chars() {
+        // Only control chars are stripped — spaces, dots, backslashes (domain\\user)
+        // and unicode must survive so legitimate hosts/usernames aren't corrupted.
+        assert_eq!(rdp_sanitize("CORP\\john.doe"), "CORP\\john.doe");
+        assert_eq!(rdp_sanitize("서버-01"), "서버-01");
+        assert_eq!(rdp_sanitize("a\u{0007}b"), "ab"); // bell char removed
     }
 
     // ── 체크포인트 JSON 파싱 ────────────────────────────────────────────

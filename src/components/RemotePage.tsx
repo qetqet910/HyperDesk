@@ -44,6 +44,7 @@ export function RemotePage({ remoteHosts, onConnect, onEdit, onDelete, onAdd }: 
                 <span className="mst-rack-hostname">{host.name}</span>
                 <span className={`mst-proto-tag ${proto}`}>{host.protocol}</span>
                 {host.is_detected && <span className="mst-proto-tag auto">AUTO</span>}
+                {host.memo && <span className="mst-rack-memo" title={host.memo}>✎ {host.memo}</span>}
               </div>
               <div className="mst-rack-addr">{host.host}</div>
               <div className="mst-rack-gauge">
@@ -62,12 +63,12 @@ export function RemotePage({ remoteHosts, onConnect, onEdit, onDelete, onAdd }: 
                 >
                   CONNECT →
                 </button>
-                {!host.is_detected && (
-                  <>
-                    <button className="mst-rack-icon-btn" title="편집" onClick={() => onEdit(host)}>✎</button>
-                    <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title="삭제" onClick={() => onDelete(host.id)}>✕</button>
-                  </>
-                )}
+                {/* Edit is allowed even for auto-detected hosts (rename / memo /
+                    tag); the backend promotes a detected id to a manual entry on
+                    save. Delete stays for all — detected hosts are hidden, not
+                    purged, so they don't zombie-regenerate from the registry. */}
+                <button className="mst-rack-icon-btn" title="편집" onClick={() => onEdit(host)}>✎</button>
+                <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? "숨기기" : "삭제"} onClick={() => onDelete(host.id)}>✕</button>
               </div>
             </div>
           );

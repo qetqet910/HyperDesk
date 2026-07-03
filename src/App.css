@@ -292,6 +292,73 @@
   padding: 18px 22px;
 }
 
+/* ─── Retro polish: the details that sell the Win9x look ─── */
+
+/* Pixel fonts should NOT be anti-aliased — smoothing blurs them into mush.
+   crispEdges everywhere makes the bitmap-ish fonts and 1px bevels read sharp. */
+[data-theme="retro"] {
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  text-rendering: optimizeSpeed;
+}
+
+/* Classic raised scrollbar — grey track, bevelled thumb, square buttons. */
+[data-theme="retro"] *::-webkit-scrollbar { width: 16px; height: 16px; }
+[data-theme="retro"] *::-webkit-scrollbar-track {
+  background: #dfdfdf;
+  box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #ffffff;
+}
+[data-theme="retro"] *::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border: 1px solid;
+  border-color: #ffffff #000000 #000000 #ffffff;
+  box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
+}
+[data-theme="retro"] *::-webkit-scrollbar-thumb:active {
+  border-color: #000000 #ffffff #ffffff #000000;
+}
+
+/* Text selection = the unmistakable navy highlight. */
+[data-theme="retro"] ::selection { background: #000080; color: #ffffff; }
+
+/* Active title-bar gradient (navy → azure), the single most recognizable Win9x
+   cue — applied to the topbar and each slot's header strip. */
+[data-theme="retro"] .hd-topbar,
+[data-theme="retro"] .slot-header-bar--active {
+  background: linear-gradient(90deg, #000080, #1084d0) !important;
+  border-bottom: 1px solid #000000 !important;
+}
+[data-theme="retro"] .hd-topbar__title,
+[data-theme="retro"] .slot-header-bar--active .slot-title {
+  color: #ffffff !important;
+  font-weight: 700;
+}
+
+/* Keyboard focus = dotted marquee outline, not a soft glow. */
+[data-theme="retro"] button:focus-visible,
+[data-theme="retro"] input:focus-visible,
+[data-theme="retro"] .selector-item:focus-visible {
+  outline: 1px dotted #000000;
+  outline-offset: -4px;
+}
+
+/* Primary action buttons get the bevel too (they were flat gradients before). */
+[data-theme="retro"] .confirm-btn,
+[data-theme="retro"] .cancel-btn,
+[data-theme="retro"] .extra-btn {
+  background: #c0c0c0 !important;
+  color: #000000 !important;
+  border: 2px solid !important;
+  border-color: #ffffff #000000 #000000 #ffffff !important;
+  box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080 !important;
+}
+[data-theme="retro"] .confirm-btn:active,
+[data-theme="retro"] .cancel-btn:active,
+[data-theme="retro"] .extra-btn:active {
+  border-color: #000000 #ffffff #ffffff #000000 !important;
+  box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #dfdfdf !important;
+}
+
 /* ─── Liquid Glass / Calm UI tokens (theme-independent) ─── */
 :root {
   --radius-glass: 18px;
@@ -1535,6 +1602,19 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   left: 0;
   right: 0;
   z-index: 10;
+  /* Parked just above the viewport; slides down into the cropped band when the
+     cursor hits the top edge (.edge-revealed, driven by the immersive-edge
+     event). The native crop is instant, so this 180ms slide is what the user
+     actually perceives as the header "coming down". */
+  transform: translateY(-100%);
+  opacity: 0;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease;
+  pointer-events: none;
+}
+.multiview-container.immersive.edge-revealed .slot-header-bar {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* NOTE: there is deliberately NO separate multiview header. A swallowed Win32

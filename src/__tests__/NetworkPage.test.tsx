@@ -77,7 +77,7 @@ describe("NetworkPage", () => {
     render(
       <NetworkPage
         vms={mockVms}
-        statsData={{ cpu: 10, memory_total: 1000, memory_used: 500, uptime: "1d", disk_free: 100, network_io: 2048, cpu_history: [], mem_history: [], net_history: [] }}
+        statsData={{ cpu: 10, memory_total: 1000, memory_used: 500, uptime: "1d", disk_free: 100, disk_total: 220, network_io: 2048, cpu_history: [], mem_history: [], net_history: [] }}
         netHistory={[]}
       />
     );

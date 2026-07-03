@@ -603,6 +603,16 @@ body::before {
   color: var(--text-main);
 }
 .mst-rack-row.dead .mst-rack-hostname { color: var(--text-muted); }
+/* Inline memo chip — truncates so a long note never breaks the row layout */
+.mst-rack-memo {
+  font-size: 10px;
+  color: var(--text-muted);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+}
 /* 주소 컬럼 */
 .mst-rack-addr {
   flex: 1; min-width: 0;

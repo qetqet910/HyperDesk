@@ -61,6 +61,10 @@ The core Win32 engine. Flow:
 
 **Immersive mode**: `set_immersive` arms a Rust cursor poller (`swallow::set_immersive`). In immersive the header floats `position:absolute` UNDER the VM surface so the VM keeps 100% of the screen at native resolution; top-edge hover makes the poller crop the VM's top 36-CSS-px band via `SetWindowRgn` (`apply_reveal`), letting the header show through and take clicks — the VM never moves or resizes on reveal (moving it caused visible up/down judder).
 
+**Chrome region is single-sourced (`apply_chrome_region` + `REVEAL_BAND`)**: every `SetWindowRgn` call in `swallow.rs` (initial swallow, the vmconnect stabilization loop's per-poll chrome re-measurement, and the immersive reveal poller) goes through one helper that composes the window's own chrome crop (`offset`/`offset_x`) with the current reveal band. Do NOT add a standalone `CreateRectRgn`/`SetWindowRgn` call anywhere else — vmconnect's stabilization loop re-applies its region on every re-measured tick for up to 40s after swallow, and a second uncoordinated writer WILL periodically stomp the reveal crop back to "hidden" (this is exactly why immersive reveal worked for RDP but not Hyper-V before the fix — RDP's offset is always 0 and nothing else ever touched its region after the initial swallow).
+
+**Disconnect (X / `unswallow_window`) actually ends the session**: `swallow::unswallow` restores the window to a normal top-level frame (in case the app shows its own "disconnect?" prompt and the user cancels — it lands as an ordinary floating window, not stuck invisible inside HyperDesk) and then posts `WM_CLOSE`. It does NOT leave the process running detached-and-minimized (that was the old behavior — deliberately removed since "detach" reads to a user as "still connected, window just hidden," which it wasn't).
+
 **Critical**: Does NOT use `AttachThreadInput` (deadlock risk — the LL keyboard hook above is message-based and fine). The Tauri main window requires admin privileges (declared in `hyperdesk.exe.manifest`) for `SetParent` to work across process boundaries.
 
 ### Dashboard & Host Data (`src-tauri/src/commands.rs`, `hosts.rs`)
@@ -149,8 +153,8 @@ The core Win32 engine. Flow:
 
 - **Issue:** VmConnect 창을 Swallow 할 때 위쪽에 30px 검은 여백이 생기는 현상.
 - **Fix:** `swallow.rs`에서 창 클래스명이 `TscShellContainerClass`인 경우, Y-offset을 -30으로 강제 보정하도록 하드코딩함. 이 로직을 지우지 말 것.
-- **Issue:** Hyper-V swallow 후 몇 초 뒤 VM 화면 하단에 여백이 남는 현상 (2026-07-02 로그로 확정).
-- **Fix:** vmconnect는 접속 후 Basic→Enhanced Session으로 **자식 트리를 통째로 교체**한다. Enhanced는 RDP 트리(`UIMainClass`/`OPWindowClass`)라 `HwndWrapper[vmconnect]` 비디오 자식이 없고 상단 크롬도 0인데, swallow 시점(Basic)에 측정한 51px 오프셋/클립이 그대로 남아 화면이 밀렸던 것. 안정화 루프가 매 폴마다 크롬을 재측정해 오프셋·리전을 갱신한다(`swallow.rs` "session-mode switch" 주석 블록) — 이 재측정을 지우면 재발한다.
+- **Issue:** Hyper-V swallow 후 몇 초 뒤 VM 화면 하단에 여백이 남거나(2026-07-02) VM 사방에 흰 테두리가 남는 현상(2026-07-03 로그로 확정).
+- **Fix:** vmconnect는 접속 후 Basic→Enhanced Session으로 **자식 트리를 통째로 교체**한다. Enhanced는 RDP 트리(`UIMainClass`/`OPWindowClass`)라 `HwndWrapper[vmconnect]` 비디오 자식이 없고 콘텐츠가 **클라이언트 영역을 꽉 채운다**. 그래서 흰 테두리의 정체는 자식 인셋이 아니라 **프레임 자체의 non-client 경계**(WinForms가 WS_THICKFRAME를 벗겨도 2~3px 테두리를 재부착 — 윈도우 rect vs 클라이언트 rect 차이)다. 안정화 루프가 매 폴마다 크롬을 재측정하는데, 총 오프셋 = `frame_nc_border()`(윈도우/클라이언트 rect 차이, 결정론적) + 내부 리본(Basic 세션의 `HwndWrapper` top, 클라이언트 좌표)로 합산한다. 자식 레이아웃 타이밍에 의존하던 옛 측정(`uimainclass` 위치)은 전환 순간 (0,0)에 갇혀 테두리를 못 잡았다 — `frame_nc_border` 기반 측정을 자식 위치 기반으로 되돌리지 말 것.
 - **Issue:** Omnissa/Horizon 그리드 임베드 — 창 체인(로그인→데스크톱, 180초 탐색)으로 데스크톱 창 자체는 잡히지만, 슬롯은 **검은 화면**이다 (2026-07-02 확정).
 - **Fix(결론): 그리드 임베드 비활성화.** 데스크톱 창의 MKS 표시 자식들(`MKSEmbedded`/`MKSScreenWindow` 등)은 모니터 **절대좌표에 고정**되어(로그: `rect=(1920,0 1920x1080)`) SetParent된 프레임을 전혀 따라오지 않는다. `-desktopLayout windowLarge`로 창 모드를 강제해도 동일. 다시 시도하려면 SetParent 방식이 아니라 Horizon Client SDK 수준의 임베드가 필요하다. 현재는 `SwallowSlot.tsx` 선택기에서 VDI 항목을 disabled("미지원") 처리했고, 원격 자산 페이지의 일반 연결(스왈로우 없음)은 정상. swallow 루프의 체인 추적/180초 연장/`[horizon-scan]` 덤프 코드는 재도전을 위해 남겨 둠.
 - **Issue:** React 상태 업데이트 시 창이 깜빡이는 현상.

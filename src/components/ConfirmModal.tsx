@@ -8,11 +8,14 @@ interface ConfirmModalProps {
   type?: "danger" | "warning" | "info";
   onConfirm: () => void;
   onClose: () => void;
+  /** Optional third button (e.g. "완전 종료") shown between cancel and confirm. */
+  extraText?: string;
+  onExtra?: () => void;
 }
 
-export function ConfirmModal({ 
-  title, message, confirmText = "확인", cancelText = "취소", 
-  type = "info", onConfirm, onClose 
+export function ConfirmModal({
+  title, message, confirmText = "확인", cancelText = "취소",
+  type = "info", onConfirm, onClose, extraText, onExtra
 }: ConfirmModalProps) {
   
   const getIcon = () => {
@@ -56,17 +59,30 @@ export function ConfirmModal({
         </div>
 
         <div className="modal-actions" style={{ padding: '20px 24px 24px', background: 'rgba(0,0,0,0.2)', display: 'flex', gap: '12px' }}>
-          <button 
-            className="cancel-btn" 
-            onClick={onClose} 
-            style={{ 
-              flex: 1, height: '44px', borderRadius: '10px', background: 'transparent', 
-              border: '1px solid var(--glass-border)', color: 'var(--text-secondary)', 
+          <button
+            className="cancel-btn"
+            onClick={onClose}
+            style={{
+              flex: 1, height: '44px', borderRadius: '10px', background: 'transparent',
+              border: '1px solid var(--glass-border)', color: 'var(--text-secondary)',
               fontWeight: 700, cursor: 'pointer', fontSize: '14px'
             }}
           >
             {cancelText}
           </button>
+          {extraText && onExtra && (
+            <button
+              className="extra-btn"
+              onClick={() => { onExtra(); onClose(); }}
+              style={{
+                flex: 1, height: '44px', borderRadius: '10px', background: 'transparent',
+                border: '1px solid var(--accent-red)', color: 'var(--accent-red)',
+                fontWeight: 700, cursor: 'pointer', fontSize: '14px'
+              }}
+            >
+              {extraText}
+            </button>
+          )}
           <button 
             className="confirm-btn" 
             onClick={() => { onConfirm(); onClose(); }}

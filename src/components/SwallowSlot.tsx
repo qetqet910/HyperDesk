@@ -426,7 +426,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
           {headerControls}
           {/* Always rendered (disabled when no session) so the header controls
               never shift position when paging between swallowed/empty slots. */}
-          <button className="slot-action-btn close" onClick={handleDisconnect} disabled={!isSwallowed} title="세션 분리 (창은 유지됨)">
+          <button className="slot-action-btn close" onClick={handleDisconnect} disabled={!isSwallowed} title="연결 해제">
             <X size={14} />
           </button>
         </div>
