@@ -1,11 +1,11 @@
-import { useSettings } from "../contexts/SettingsContext";
-import { SwallowSlot } from "./SwallowSlot";
-import { VmInfo, RemoteHost } from "../types";
+import { useSettings } from "@/contexts/SettingsContext";
+import { SwallowSlot } from "@/components/SwallowSlot";
+import { VmInfo, RemoteHost } from "@/types";
 import { Maximize, Expand, Shrink } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { api } from "../lib/tauri-api";
+import { api } from "@/lib/tauri-api";
 
 const SLOT_COUNT = 4;
 

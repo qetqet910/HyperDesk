@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { EventsPage } from "../components/EventsPage";
+import { EventsPage } from "@/components/EventsPage";
 
 const mockLogs = [
   { id: "1", msg: "[SYSTEM] Booting...", type: "info",    time: "12:00:00" },

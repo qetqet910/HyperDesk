@@ -433,7 +433,11 @@ async fn check_host_health(host: &str, protocol: &str) -> Option<u32> {
 
     let addr = format!("{}:{}", hostname, port);
     let start = std::time::Instant::now();
-    match timeout(Duration::from_millis(1500), TcpStream::connect(&addr)).await {
+    // Dashboard load blocks on this (join_all in get_dashboard), so the timeout is
+    // the worst-case stall from a single offline host. 800ms is still generous for
+    // any real TCP handshake (LAN/VPN hosts answer in <100ms) — this only trades
+    // off how long a genuinely offline host takes to be reported as such.
+    match timeout(Duration::from_millis(800), TcpStream::connect(&addr)).await {
         Ok(Ok(_)) => Some(start.elapsed().as_millis() as u32),
         _ => None,
     }
@@ -1010,6 +1014,24 @@ pub async fn set_remote_host_tags(app: AppHandle, id: String, tags: Vec<String>)
     if let Some(h) = hosts.iter_mut().find(|h| h.id == id) {
         h.tags = if tags.is_empty() { None } else { Some(tags) };
         save_hosts(&app, &hosts)
+    } else if id.starts_with("detected-") || id.starts_with("vdi-") {
+        let host_ip = id.replace("detected-", "").replace("vdi-", "");
+        let protocol = if id.starts_with("vdi-") { "HORIZON".to_string() } else { "RDP".to_string() };
+        hosts.push(crate::hosts::RemoteHost {
+            id,
+            name: host_ip.clone(),
+            host: host_ip,
+            username: None,
+            protocol,
+            is_detected: true,
+            status: None,
+            latency: None,
+            load: None,
+            is_hidden: false,
+            memo: None,
+            tags: if tags.is_empty() { None } else { Some(tags) },
+        });
+        save_hosts(&app, &hosts)
     } else {
         Err("호스트를 찾을 수 없습니다.".to_string())
     }
@@ -1020,6 +1042,26 @@ pub async fn set_remote_host_memo(app: AppHandle, id: String, memo: String) -> R
     let mut hosts = load_hosts(&app);
     if let Some(h) = hosts.iter_mut().find(|h| h.id == id) {
         h.memo = if memo.is_empty() { None } else { Some(memo) };
+        save_hosts(&app, &hosts)
+    } else if id.starts_with("detected-") || id.starts_with("vdi-") {
+        // Auto-detected hosts only exist in memory (built by get_dashboard);
+        // create a persistent entry so the memo is not lost.
+        let host_ip = id.replace("detected-", "").replace("vdi-", "");
+        let protocol = if id.starts_with("vdi-") { "HORIZON".to_string() } else { "RDP".to_string() };
+        hosts.push(crate::hosts::RemoteHost {
+            id,
+            name: host_ip.clone(),
+            host: host_ip,
+            username: None,
+            protocol,
+            is_detected: true,
+            status: None,
+            latency: None,
+            load: None,
+            is_hidden: false,
+            memo: if memo.is_empty() { None } else { Some(memo) },
+            tags: None,
+        });
         save_hosts(&app, &hosts)
     } else {
         Err("호스트를 찾을 수 없습니다.".to_string())
@@ -1087,23 +1129,66 @@ pub async fn swallow_window(
     crate::swallow::swallow(&slot_id, pid, parent_hwnd, window.app_handle().clone(), bounds)
 }
 
-/// Fullscreen via manual monitor-cover (swallow::*_borderless_fullscreen), NOT
-/// tao's set_fullscreen — the latter re-adds the OS caption for a frame on
-/// Windows (the "HyperDesk" title-bar flash) even though decorations are off.
+// ─── Borderless fullscreen (flash-free, layout-correct) ──────────────────────
+//
+// NOT tao's set_fullscreen — that re-adds the OS caption for a frame on Windows
+// (the "HyperDesk" title-bar flash) even though decorations are off. And NOT a
+// raw Win32 SetWindowPos either — bypassing tao meant the WebView child wasn't
+// always resized to the new bounds (the "규격이 안 맞음" mis-sized fullscreen,
+// especially entering from a restored window). set_position/set_size go through
+// tao, which resizes the WebView properly, without ever touching decorations.
+// A borderless window exactly covering the monitor also makes the taskbar yield.
+
+struct SavedWindowState {
+    pos: tauri::PhysicalPosition<i32>,
+    size: tauri::PhysicalSize<u32>,
+    maximized: bool,
+}
+/// Some(saved) == currently fullscreen (holds the state to restore on exit).
+static FS_SAVED: OnceLock<Mutex<Option<SavedWindowState>>> = OnceLock::new();
+
+fn fs_saved() -> &'static Mutex<Option<SavedWindowState>> {
+    FS_SAVED.get_or_init(|| Mutex::new(None))
+}
+
+fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
+    let mut saved = lock_or_recover(fs_saved());
+    if on {
+        if saved.is_some() { return Ok(()); } // already fullscreen
+        let maximized = window.is_maximized().unwrap_or(false);
+        if maximized {
+            // A maximized window ignores/mangles direct resizes — restore first.
+            let _ = window.unmaximize();
+        }
+        let pos = window.outer_position().map_err(|e| e.to_string())?;
+        let size = window.outer_size().map_err(|e| e.to_string())?;
+        let monitor = window.current_monitor().map_err(|e| e.to_string())?
+            .ok_or("no monitor")?;
+        *saved = Some(SavedWindowState { pos, size, maximized });
+        window.set_position(*monitor.position()).map_err(|e| e.to_string())?;
+        window.set_size(*monitor.size()).map_err(|e| e.to_string())?;
+    } else if let Some(s) = saved.take() {
+        if s.maximized {
+            let _ = window.maximize();
+        } else {
+            let _ = window.set_size(s.size);
+            let _ = window.set_position(s.pos);
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn toggle_fullscreen(window: tauri::Window) -> Result<(), String> {
-    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
-    crate::swallow::toggle_borderless_fullscreen(hwnd);
-    Ok(())
+    let on = lock_or_recover(fs_saved()).is_none();
+    apply_fullscreen(&window, on)
 }
 
 /// Deterministic fullscreen (immersive VM view needs set-not-toggle so its state
 /// can't desync from the window when F11 is also used).
 #[tauri::command]
 pub async fn set_fullscreen(window: tauri::Window, on: bool) -> Result<(), String> {
-    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
-    crate::swallow::set_borderless_fullscreen(hwnd, on);
-    Ok(())
+    apply_fullscreen(&window, on)
 }
 
 /// Arms/disarms the immersive top-edge cursor watcher (emits "immersive-edge").

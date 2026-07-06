@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { DashboardData, SystemStats, VmSnapshot, VmCheckpoint, VmSwitch, VmNetworkAdapter, HyperVEvent } from "../types";
+import { DashboardData, SystemStats, VmSnapshot, VmCheckpoint, VmSwitch, VmNetworkAdapter, HyperVEvent } from "@/types";
 
 // Helper to provide mock data in non-Tauri environments (like the browser subagent)
 const getMockDashboardData = (): DashboardData => ({

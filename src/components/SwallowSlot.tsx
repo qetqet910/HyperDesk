@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback, ReactNode } from "react";
 import { Globe, Plus, X, RefreshCw, Terminal, AlertCircle, ZapOff, ChevronDown, Monitor } from "lucide-react";
-import { api } from "../lib/tauri-api";
-import { VmInfo, RemoteHost } from "../types";
+import { api } from "@/lib/tauri-api";
+import { VmInfo, RemoteHost } from "@/types";
 import { listen } from "@tauri-apps/api/event";
-import { useSettings } from "../contexts/SettingsContext";
+import { useSettings } from "@/contexts/SettingsContext";
 
 interface SwallowSlotProps {
   id: string;

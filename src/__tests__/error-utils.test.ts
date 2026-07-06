@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseError } from "../lib/error-utils";
+import { parseError } from "@/lib/error-utils";
 
 describe("parseError", () => {
   // ── 기존 동작 (GREEN 유지 필수) ─────────────────────────────

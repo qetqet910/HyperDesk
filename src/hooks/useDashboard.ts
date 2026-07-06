@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/tauri-api";
-import { useSettings } from "../contexts/SettingsContext";
+import { api } from "@/lib/tauri-api";
+import { useSettings } from "@/contexts/SettingsContext";
 
 export function useDashboard() {
   const { settings } = useSettings();

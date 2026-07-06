@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { SnapshotsPage } from "../components/SnapshotsPage";
-import * as tauriApi from "../lib/tauri-api";
-import type { VmInfo, VmCheckpoint } from "../types";
+import { SnapshotsPage } from "@/components/SnapshotsPage";
+import * as tauriApi from "@/lib/tauri-api";
+import type { VmInfo, VmCheckpoint } from "@/types";
 
 const WAIT = { timeout: 3000 };
 

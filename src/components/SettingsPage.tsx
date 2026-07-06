@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { User, Bell, Sun, Moon, Monitor, Palette, Shield, RefreshCw, MonitorPlay, Keyboard, Database, FolderOpen, EyeOff, Trash2 } from "lucide-react";
-import { useSettings } from "../contexts/SettingsContext";
-import { applyTheme } from "../lib/theme";
-import { api } from "../lib/tauri-api";
-import type { ToastType } from "../hooks/useToast";
-import { ConfirmModal } from "./ConfirmModal";
+import { useSettings } from "@/contexts/SettingsContext";
+import { applyTheme } from "@/lib/theme";
+import { api } from "@/lib/tauri-api";
+import type { ToastType } from "@/hooks/useToast";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 type UpdateState = "idle" | "checking" | "upToDate" | "available" | "installing" | "error";
 

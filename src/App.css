@@ -359,6 +359,91 @@
   box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #dfdfdf !important;
 }
 
+/* ── Dashboard content on retro: dark-theme panels (rack rows, gauges, CONNECT
+   buttons, section labels, stats strips, modals) were untouched and floated as
+   dark neon islands on the teal canvas — restyle them as silver Win9x panels. */
+[data-theme="retro"] .mst-rack-row {
+  background: #c0c0c0 !important;
+  border: 2px solid !important;
+  border-color: #ffffff #000000 #000000 #ffffff !important;
+  box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080 !important;
+  --text-main: #000000;
+  --text-secondary: #1a1a1a;
+  --text-muted: #4a4a4a;
+  --accent-blue: #000080;
+  --accent-green: #008000;
+  --accent-red: #aa0000;
+  color: #000000;
+}
+[data-theme="retro"] .mst-rack-row.dead { background: #a8a8a8 !important; }
+[data-theme="retro"] .mst-rack-ear { background: #808080 !important; }
+[data-theme="retro"] .mst-rack-name,
+[data-theme="retro"] .mst-rack-addr { border-right-color: #808080 !important; background: none !important; }
+[data-theme="retro"] .mst-rack-hostname,
+[data-theme="retro"] .mst-rack-addr,
+[data-theme="retro"] .mst-rack-pct,
+[data-theme="retro"] .mst-rack-latency.online { color: #008000 !important; }
+[data-theme="retro"] .mst-proto-tag {
+  background: #ffffff !important;
+  color: #000080 !important;
+  border: 1px solid #808080 !important;
+}
+[data-theme="retro"] .mst-rack-track {
+  background: #ffffff !important;
+  border: 1px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+}
+[data-theme="retro"] .mst-rack-fill { background: #000080 !important; }
+[data-theme="retro"] .mst-rack-connect {
+  background: #c0c0c0 !important;
+  color: #000000 !important;
+  border: 2px solid !important;
+  border-color: #ffffff #000000 #000000 #ffffff !important;
+  box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080 !important;
+  text-shadow: none !important;
+}
+[data-theme="retro"] .mst-rack-connect:active {
+  border-color: #000000 #ffffff #ffffff #000000 !important;
+}
+[data-theme="retro"] .mst-rack-icon-btn {
+  background: #c0c0c0 !important;
+  color: #000000 !important;
+  border: 1px solid;
+  border-color: #ffffff #000000 #000000 #ffffff;
+}
+/* Section labels + stats strip: black ink on teal needs to become white/ink chips */
+[data-theme="retro"] .section-label h3,
+[data-theme="retro"] .section-label { color: #ffffff !important; }
+[data-theme="retro"] .section-line { background: rgba(255,255,255,0.4) !important; }
+[data-theme="retro"] .stats-bar {
+  background: #c0c0c0 !important;
+  border-bottom: 2px solid #808080 !important;
+  --text-main: #000000; --text-muted: #4a4a4a; --accent-green: #008000;
+  color: #000000;
+}
+/* Bento/hub internals: gauges + sparkline captions on silver */
+[data-theme="retro"] .hub-stat-track {
+  background: #ffffff !important;
+  border: 1px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+}
+[data-theme="retro"] .hub-stat-fill { background: #000080 !important; }
+/* Modals (memo/confirm/asset): silver window instead of glass */
+[data-theme="retro"] .modal-content {
+  background: #c0c0c0 !important;
+  border: 2px solid !important;
+  border-color: #ffffff #000000 #000000 #ffffff !important;
+  --text-main: #000000; --text-secondary: #1a1a1a; --text-muted: #4a4a4a;
+  color: #000000;
+}
+[data-theme="retro"] .modal-content h3 { color: #000000 !important; }
+[data-theme="retro"] .modal-content textarea,
+[data-theme="retro"] .modal-content input {
+  background: #ffffff !important;
+  color: #000000 !important;
+  border-color: #808080 #ffffff #ffffff #808080 !important;
+}
+
 /* ─── Liquid Glass / Calm UI tokens (theme-independent) ─── */
 :root {
   --radius-glass: 18px;
@@ -652,7 +737,8 @@
 .settings-group {
   display: flex;
   flex-direction: column;
-  padding: 22px 0;
+  padding: 11px 22px;
+  margin: 11px 0;
   border-bottom: 1px solid var(--border);
 }
 .settings-group:last-child { border-bottom: none; }
@@ -792,6 +878,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   gap: 16px; color: var(--text-secondary); z-index: 9999;
 }
 .loading-screen p { font-size: 14px; }
+.loading-lottie { width: 160px; height: 160px; }
 
 .error-screen {
   position: fixed; inset: 0;
@@ -1303,6 +1390,58 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   margin-top: 12px;
 }
 
+/* ─── Column toggle: sliding 2-way pill (list / 2-col grid) ───────────────── */
+.col-toggle {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.col-toggle__btn {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-toggle__btn.active { color: #fff; }
+.col-toggle__btn:hover:not(.active) { color: var(--text-main); }
+.col-toggle__thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 26px; height: 22px;
+  background: var(--accent-blue);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(91,130,190,0.32);
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.col-toggle__thumb--right { transform: translateX(28px); }
+
+[data-theme="retro"] .col-toggle {
+  background: #c0c0c0;
+  border: 1px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+}
+[data-theme="retro"] .col-toggle__thumb {
+  background: #000080;
+  border-radius: 0;
+  box-shadow: none;
+}
+[data-theme="retro"] .col-toggle__btn.active { color: #ffffff; }
+[data-theme="retro"] .col-toggle__btn:not(.active) { color: #000000; }
+
 .mst-line-item {
   display: grid;
   grid-template-columns: 0.8fr 2fr 3fr 1fr 2fr; /* Added status column */
@@ -1452,7 +1591,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   transition: border-color 0.15s;
 }
 .form-group input:focus { border-color: var(--accent-blue); }
-.modal-actions { display: flex; gap: 10px; margin-top: 22px; }
+.modal-actions { display: flex; gap: 10px; }
 .cancel-btn {
   flex: 1; height: 40px; border-radius: var(--radius-sm);
   background: transparent; border: 1px solid var(--border);

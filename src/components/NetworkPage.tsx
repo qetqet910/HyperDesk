@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { RefreshCw } from "lucide-react";
-import { api } from "../lib/tauri-api";
-import { VmInfo, VmSwitch, VmNetworkAdapter, SystemStats } from "../types";
-import { BentoCell } from "./BentoCell";
-import { Sparkline } from "./Sparkline";
+import { api } from "@/lib/tauri-api";
+import { VmInfo, VmSwitch, VmNetworkAdapter, SystemStats } from "@/types";
+import { BentoCell } from "@/components/BentoCell";
+import { Sparkline } from "@/components/Sparkline";
 
 interface NetworkPageProps {
   vms: VmInfo[];

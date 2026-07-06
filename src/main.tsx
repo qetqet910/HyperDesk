@@ -1,9 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import App from "./App";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { SettingsProvider } from "./contexts/SettingsContext";
+import App from "@/App";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { SettingsProvider } from "@/contexts/SettingsContext";
 import "./App.css";
 
 try {

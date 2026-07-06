@@ -1,7 +1,7 @@
 import { X, Globe, User, Terminal, Save, Check, Wifi, WifiOff, Loader, AlertCircle } from "lucide-react";
 import { useState, useRef } from "react";
-import { api } from "../lib/tauri-api";
-import { TagEditor } from "./TagEditor";
+import { api } from "@/lib/tauri-api";
+import { TagEditor } from "@/components/TagEditor";
 
 interface NewHost {
   id: string;
@@ -12,7 +12,6 @@ interface NewHost {
   is_detected: boolean;
   is_hidden: boolean;
   tags?: string[];
-  memo?: string;
 }
 
 interface AssetModalProps {
@@ -245,24 +244,8 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
               <TagEditor tags={tags} onChange={setTags} />
             </div>
 
-            {/* Memo */}
-            <div className="settings-card" style={{
-              background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '14px',
-              border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '10px'
-            }}>
-              <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)' }}>메모</label>
-              <textarea
-                placeholder="이 자산에 대한 메모 (접속 정보, 용도 등)"
-                value={hostData.memo ?? ""}
-                onChange={(e) => setHostData({ ...hostData, memo: e.target.value })}
-                rows={3}
-                style={{
-                  width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)',
-                  borderRadius: '10px', padding: '10px 12px', color: '#fff', fontSize: '13px',
-                  outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5
-                }}
-              />
-            </div>
+            {/* NOTE: memo lives in its own MemoModal (notepad-style, opened from
+                asset rows) — not buried here in the edit form. */}
 
             {/* Actions */}
             <div className="modal-actions" style={{ marginTop: '10px', display: 'flex', gap: '12px' }}>

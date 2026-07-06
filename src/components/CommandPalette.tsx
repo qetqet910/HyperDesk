@@ -5,8 +5,8 @@ import {
   Terminal, Play, Square, Pause, Save, Monitor,
   Plus, Settings, ChevronRight, AlertTriangle, Wifi, Pencil, Trash2, Sun,
 } from "lucide-react";
-import type { VmInfo, RemoteHost } from "../types";
-import type { Page } from "./Sidebar";
+import type { VmInfo, RemoteHost } from "@/types";
+import type { Page } from "@/components/Sidebar";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

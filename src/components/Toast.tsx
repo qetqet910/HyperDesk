@@ -1,4 +1,4 @@
-import { ToastMessage } from "../hooks/useToast";
+import { ToastMessage } from "@/hooks/useToast";
 import { AlertCircle, X } from "lucide-react";
 
 interface ToastProps {

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { api } from "../lib/tauri-api";
-import type { HyperVEvent } from "../types";
+import { api } from "@/lib/tauri-api";
+import type { HyperVEvent } from "@/types";
 
 interface EventsPageProps {
   logs: { id: string; msg: string; type: string; time: string }[];

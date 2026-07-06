@@ -1,8 +1,8 @@
 ﻿import { useState, useEffect, useCallback } from "react";
 import { Server, Plus, RotateCcw, Trash2, RefreshCw, Camera } from "lucide-react";
-import type { VmInfo, VmSnapshot } from "../types";
-import { api } from "../lib/tauri-api";
-import { ConfirmModal } from "./ConfirmModal";
+import type { VmInfo, VmSnapshot } from "@/types";
+import { api } from "@/lib/tauri-api";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 interface SnapshotsPageProps {
   vms: VmInfo[];

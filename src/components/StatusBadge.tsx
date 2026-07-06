@@ -1,4 +1,4 @@
-import type { VmInfo } from "../types";
+import type { VmInfo } from "@/types";
 
 interface StatusBadgeProps {
   state: VmInfo["state"];

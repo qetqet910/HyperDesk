@@ -2,9 +2,9 @@ import { useState } from "react";
 import {
   Monitor, RefreshCw, Trash2, Settings, Server, Cloud
 } from "lucide-react";
-import type { VmInfo, RemoteHost } from "../types";
-import { StatusBadge } from "./StatusBadge";
-import { useVmActions, useHostActions } from "../hooks/useDashboard";
+import type { VmInfo, RemoteHost } from "@/types";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useVmActions, useHostActions } from "@/hooks/useDashboard";
 
 interface CardWrapperProps {
   name: string;

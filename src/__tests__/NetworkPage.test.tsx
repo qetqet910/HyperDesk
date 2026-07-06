@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import { NetworkPage } from "../components/NetworkPage";
-import * as tauriApi from "../lib/tauri-api";
-import type { VmInfo, VmSwitch, VmNetworkAdapter } from "../types";
+import { NetworkPage } from "@/components/NetworkPage";
+import * as tauriApi from "@/lib/tauri-api";
+import type { VmInfo, VmSwitch, VmNetworkAdapter } from "@/types";
 
 const mockVms: VmInfo[] = [
   {

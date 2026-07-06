@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { X, Cpu, MemoryStick, AlertTriangle, Save, Square } from "lucide-react";
-import type { VmInfo } from "../types";
-import { useVmActions } from "../hooks/useDashboard";
-import { ConfirmModal } from "./ConfirmModal";
-import { TagEditor } from "./TagEditor";
-import { api } from "../lib/tauri-api";
+import type { VmInfo } from "@/types";
+import { useVmActions } from "@/hooks/useDashboard";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { TagEditor } from "@/components/TagEditor";
+import { api } from "@/lib/tauri-api";
 
 interface VmSettingsModalProps {
   vm: VmInfo;

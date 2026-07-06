@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Server } from "lucide-react";
-import { HyperVCard } from "./RackAsset";
-import type { VmInfo } from "../types";
+import { HyperVCard } from "@/components/RackAsset";
+import type { VmInfo } from "@/types";
 
 interface VmsPageProps {
   vms: VmInfo[];
@@ -54,7 +54,7 @@ export function VmsPage({ vms, onError, onSuccess, onSettings }: VmsPageProps) {
 
       <div className="section-label" style={{ gridColumn: "1 / -1" }}>
         <Server size={14} color="var(--accent-blue)" />
-        <h3>Hyper-V Virtual Machines</h3>
+        <h3>가상 머신 관리</h3>
         <div className="section-line" />
       </div>
 

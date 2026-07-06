@@ -108,19 +108,33 @@ const HORIZONTAL_BUFFER: i32 = 0; // Remove buffer for 1:1 fit at 100% DPI
 /// else touches its region after the initial swallow.
 static REVEAL_BAND: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
+/// Pure geometry for the chrome clip region: given the left/top chrome offsets,
+/// the current immersive reveal band, and the slot size, returns the visible
+/// rect (left, top, right, bottom) in the window's own coordinates — or None
+/// when there is nothing to clip (region should be cleared). Split out from the
+/// Win32 call so the geometry that caused the white-border bugs is unit-testable.
+fn chrome_region_rect(offset_x: i32, offset: i32, band: i32, width: i32, height: i32) -> Option<(i32, i32, i32, i32)> {
+    let top = offset + band;
+    if top == 0 && offset_x == 0 {
+        None
+    } else {
+        Some((offset_x, top, offset_x + width + (HORIZONTAL_BUFFER * 2), offset + height))
+    }
+}
+
 /// Crops rows 0..offset and cols 0..offset_x (the window's own non-removable
 /// chrome, e.g. VMConnect's ribbon) PLUS the current immersive reveal band,
 /// or clears the region entirely when there is nothing to hide.
 fn apply_chrome_region(hwnd: HWND, offset_x: i32, offset: i32, width: i32, height: i32) {
     let band = REVEAL_BAND.load(std::sync::atomic::Ordering::Relaxed);
-    let top = offset + band;
     unsafe {
-        if top == 0 && offset_x == 0 {
-            let _ = SetWindowRgn(hwnd, HRGN::default(), BOOL::from(true));
-        } else {
-            let rgn = CreateRectRgn(offset_x, top, offset_x + width + (HORIZONTAL_BUFFER * 2), offset + height);
-            if !rgn.is_invalid() {
-                let _ = SetWindowRgn(hwnd, rgn, BOOL::from(true));
+        match chrome_region_rect(offset_x, offset, band, width, height) {
+            None => { let _ = SetWindowRgn(hwnd, HRGN::default(), BOOL::from(true)); }
+            Some((l, t, r, b)) => {
+                let rgn = CreateRectRgn(l, t, r, b);
+                if !rgn.is_invalid() {
+                    let _ = SetWindowRgn(hwnd, rgn, BOOL::from(true));
+                }
             }
         }
     }
@@ -1168,55 +1182,6 @@ fn emit_edge(shown: bool) {
     }
 }
 
-// ─── Borderless fullscreen (flash-free) ──────────────────────────────────────
-//
-// tao's set_fullscreen restores the window's saved styles on exit, which on
-// Windows momentarily re-adds the OS caption ("HyperDesk" title bar flash) even
-// though the window is decorations:false. We instead cover the monitor manually
-// with SetWindowPos: no style change at all, so no flash. A borderless window
-// that exactly covers the monitor rect while foregrounded also triggers the
-// shell's fullscreen detection, so the taskbar yields — same visual result as
-// real fullscreen, without the decoration churn.
-static FULLSCREEN_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static SAVED_WINDOW_RECT: OnceLock<Mutex<Option<(i32, i32, i32, i32)>>> = OnceLock::new();
-
-pub fn set_borderless_fullscreen(main_hwnd: isize, on: bool) {
-    use windows::Win32::Graphics::Gdi::{MonitorFromWindow, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-    if FULLSCREEN_ON.swap(on, std::sync::atomic::Ordering::Relaxed) == on {
-        return; // no state change
-    }
-    let hwnd = HWND(main_hwnd as *mut _);
-    let saved = SAVED_WINDOW_RECT.get_or_init(|| Mutex::new(None));
-    unsafe {
-        if !IsWindow(hwnd).as_bool() { return; }
-        if on {
-            let mut wr = RECT::default();
-            if GetWindowRect(hwnd, &mut wr).is_ok() {
-                *saved.lock().unwrap_or_else(|e| e.into_inner()) =
-                    Some((wr.left, wr.top, wr.right - wr.left, wr.bottom - wr.top));
-            }
-            let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-            let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-            if GetMonitorInfoW(mon, &mut mi).as_bool() {
-                let r = mi.rcMonitor;
-                let _ = SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top,
-                    SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
-            }
-        } else {
-            let restore = saved.lock().unwrap_or_else(|e| e.into_inner()).take();
-            if let Some((x, y, w, h)) = restore {
-                let _ = SetWindowPos(hwnd, HWND(std::ptr::null_mut()), x, y, w, h,
-                    SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER);
-            }
-        }
-    }
-}
-
-pub fn toggle_borderless_fullscreen(main_hwnd: isize) {
-    let next = !FULLSCREEN_ON.load(std::sync::atomic::Ordering::Relaxed);
-    set_borderless_fullscreen(main_hwnd, next);
-}
-
 pub fn set_immersive(on: bool) {
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     IMMERSIVE.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -1419,5 +1384,89 @@ pub fn focus_window(slot_id: &str) {
         if let Some(pid) = vmconnect_pid {
             hide_vmconnect_bbar(pid);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{framed_rect, chrome_region_rect, HORIZONTAL_BUFFER};
+
+    // The invariant that fixes the white-border bug: the swallowed frame is
+    // positioned/sized so the CONTENT (client area, inset by the symmetric
+    // non-client border on every side) exactly fills the slot. With a border of
+    // `b` on all sides and a top ribbon `ribbon`, offset_x = b and offset =
+    // b + ribbon. Then: window origin = slot - (offset_x, offset), window size
+    // must cover slot + border on the far sides too.
+    #[test]
+    fn framed_rect_rdp_is_slot_identity() {
+        // RDP/Horizon: no chrome → frame == slot exactly (no white border work).
+        assert_eq!(framed_rect(100, 50, 1918, 1077, 0, 0), (100, 50, 1918, 1077));
+    }
+
+    #[test]
+    fn framed_rect_enhanced_session_covers_all_four_borders() {
+        // Enhanced vmconnect: symmetric 2px non-client border, no ribbon.
+        // offset_x = 2, offset = 2. Content must fill the whole slot.
+        let (x, y, w, h) = framed_rect(100, 50, 1918, 1077, 2, 2);
+        assert_eq!((x, y), (98, 48)); // shifted up-left by the border
+        // width/height grow by the border on BOTH sides (this is the exact fix
+        // for the right/bottom 2px white edge).
+        assert_eq!(w, 1918 + 4);
+        assert_eq!(h, 1077 + 4);
+        // Client area = window minus border on all sides == the slot.
+        let border = 2;
+        assert_eq!(w - 2 * border, 1918);
+        assert_eq!(h - 2 * border, 1077);
+        // And the client's top-left lands exactly on the slot origin.
+        assert_eq!(x + border, 100);
+        assert_eq!(y + border, 50);
+    }
+
+    #[test]
+    fn framed_rect_basic_session_ribbon_only_shifts_top() {
+        // Basic vmconnect: 2px border + 51px ribbon. offset_x=2, offset=53.
+        // Bottom border is just the 2px (offset_x), NOT offset — the ribbon is
+        // top-only. This is why height adds `offset + offset_x`, not `2*offset`.
+        let (x, y, w, h) = framed_rect(0, 0, 1000, 800, 2, 53);
+        assert_eq!(x, -2);
+        assert_eq!(y, -53);
+        assert_eq!(w, 1000 + 4);      // left+right border
+        assert_eq!(h, 800 + 53 + 2);  // top(border+ribbon) + bottom(border)
+    }
+
+    #[test]
+    fn chrome_region_none_when_nothing_to_clip() {
+        // RDP, no reveal: no offsets, no band → clear the region.
+        assert_eq!(chrome_region_rect(0, 0, 0, 1918, 1077), None);
+    }
+
+    #[test]
+    fn chrome_region_is_exactly_slot_sized() {
+        // Enhanced session (offset 2,2), no reveal band. The region must expose
+        // exactly the slot rect starting at the chrome offset — anything else
+        // re-exposes the border or crops the VM.
+        let r = chrome_region_rect(2, 2, 0, 1918, 1077).unwrap();
+        assert_eq!(r, (2, 2, 2 + 1918 + HORIZONTAL_BUFFER * 2, 2 + 1077));
+        assert_eq!(r.2 - r.0, 1918 + HORIZONTAL_BUFFER * 2);
+        assert_eq!(r.3 - r.1, 1077);
+    }
+
+    #[test]
+    fn chrome_region_reveal_band_pushes_top_down() {
+        // Immersive top-edge reveal: a band crops the VM's top so the header
+        // shows through. The visible top moves down by exactly the band.
+        assert_eq!(chrome_region_rect(0, 0, 0, 1000, 800), None); // no band, nothing to clip
+        let revealed = chrome_region_rect(0, 0, 48, 1000, 800).unwrap();
+        assert_eq!(revealed.1, 48);                     // top pushed down by the band
+        assert_eq!(revealed.3, 800);                    // bottom unchanged
+        assert_eq!(revealed.3 - revealed.1, 800 - 48);  // VM area shrinks by the band
+    }
+
+    #[test]
+    fn chrome_region_band_composes_with_chrome_offset() {
+        // Both a vmconnect chrome offset AND a reveal band: they add on top.
+        let r = chrome_region_rect(2, 53, 48, 1000, 800).unwrap();
+        assert_eq!(r.1, 53 + 48); // ribbon offset + reveal band
+        assert_eq!(r.0, 2);       // left chrome unchanged by the band
     }
 }

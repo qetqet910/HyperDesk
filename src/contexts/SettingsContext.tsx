@@ -9,6 +9,9 @@ export interface Settings {
   theme: "dark" | "light" | "retro";
   rdpColorDepth: 16 | 32;
   rdpQuality: "low" | "balanced" | "high";
+  /** Remote-asset list layout, shared by the Dashboard's remote-assets section
+      and the Remote Assets page (same list, same preference either place). */
+  remoteAssetColumns: 1 | 2;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -20,6 +23,7 @@ const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   rdpColorDepth: 32,
   rdpQuality: "balanced",
+  remoteAssetColumns: 1,
 };
 
 const STORAGE_KEY = "hyperdesk_settings";

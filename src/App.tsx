@@ -1,38 +1,53 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
-  Plus, RefreshCw,
+  Plus,
   Globe, Cpu, Settings as LucideSettings,
-  Server
+  Server,
+  Play
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { api } from "./lib/tauri-api";
-import { useDashboard, useSystemStats, useHostActions } from "./hooks/useDashboard";
-import { parseError } from "./lib/error-utils";
-import { useSettings } from "./contexts/SettingsContext";
-import { useToast } from "./hooks/useToast";
-import { applyTheme } from "./lib/theme";
-import { HyperVCard, HorizonCard } from "./components/RackAsset";
-import { Toast } from "./components/Toast";
-import { SettingsPage } from "./components/SettingsPage";
-import { VmSettingsModal } from "./components/VmSettingsModal";
-import { MultiView } from "./components/MultiView";
-import { SnapshotsPage } from "./components/SnapshotsPage";
-import { AssetModal } from "./components/AssetModal";
-import { ConfirmModal } from "./components/ConfirmModal";
-import { Sidebar, type Page } from "./components/Sidebar";
-import { Topbar } from "./components/Topbar";
-import { BentoCell } from "./components/BentoCell";
-import { Sparkline } from "./components/Sparkline";
-import { EventsPage } from "./components/EventsPage";
-import { VmsPage } from "./components/VmsPage";
-import { RemotePage } from "./components/RemotePage";
-import { CommandPalette } from "./components/CommandPalette";
-import { HeatmapView } from "./components/HeatmapView";
-import { useVmActions } from "./hooks/useDashboard";
-import type { VmInfo, RemoteHost } from "./types";
+import { api } from "@/lib/tauri-api";
+import { useDashboard, useSystemStats, useHostActions } from "@/hooks/useDashboard";
+import { parseError } from "@/lib/error-utils";
+import { useSettings } from "@/contexts/SettingsContext";
+import { useToast } from "@/hooks/useToast";
+import { applyTheme } from "@/lib/theme";
+import { HyperVCard, HorizonCard } from "@/components/RackAsset";
+import { Toast } from "@/components/Toast";
+import { SettingsPage } from "@/components/SettingsPage";
+import { VmSettingsModal } from "@/components/VmSettingsModal";
+import { MultiView } from "@/components/MultiView";
+import { SnapshotsPage } from "@/components/SnapshotsPage";
+import { AssetModal } from "@/components/AssetModal";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { MemoModal } from "@/components/MemoModal";
+import { ColumnToggle } from "@/components/ColumnToggle";
+import { Sidebar, type Page } from "@/components/Sidebar";
+import { Topbar } from "@/components/Topbar";
+import { BentoCell } from "@/components/BentoCell";
+import { Sparkline } from "@/components/Sparkline";
+import { EventsPage } from "@/components/EventsPage";
+import { VmsPage } from "@/components/VmsPage";
+import { RemotePage } from "@/components/RemotePage";
+import { CommandPalette } from "@/components/CommandPalette";
+import { useVmActions } from "@/hooks/useDashboard";
+import type { VmInfo, RemoteHost } from "@/types";
 import { Reorder } from 'framer-motion';
+import { DotLottieReact } from "@lottiefiles/dotlottie-react";
+import loadingAnimation from "@/assets/loading.lottie?url";
 import "./App.css";
 import "./App.sidebar.css";
+
+// ─── Loading screen copy — one is picked at random per app launch ────────────
+const LOADING_PHRASES = [
+  "시스템 부팅 중...",
+  "가상 자산을 스캔하는 중...",
+  "세션 텔레메트리 동기화 중...",
+  "네트워크 토폴로지 확인 중...",
+  "하이퍼데스크에 접속하는 중...",
+  "원격 자산 인벤토리 수집 중...",
+  "리소스 상태를 점검하는 중...",
+];
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -51,6 +66,10 @@ const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
+  // Picked once per launch (not per render) — the loading screen only shows
+  // during the initial fetch, so "매번 다르게" means "different each time you
+  // start the app", not re-rolling on every re-render.
+  const [loadingPhrase] = useState(() => LOADING_PHRASES[Math.floor(Math.random() * LOADING_PHRASES.length)]);
   const { settings, updateSettings } = useSettings();
   const { toasts, addToast, removeToast } = useToast();
   const { data, isLoading, refetch } = useDashboard();
@@ -87,7 +106,9 @@ export default function App() {
   const [errorModal, setErrorModal] = useState<{ title: string; body: string } | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
-  const isOverlayActive = !!(showAssetModal || confirmDelete || showVmSettings || errorModal || showSearch || showQuitConfirm);
+  // Notepad-style memo modal for a remote asset (opened from asset rows).
+  const [memoHost, setMemoHost] = useState<RemoteHost | null>(null);
+  const isOverlayActive = !!(showAssetModal || confirmDelete || showVmSettings || errorModal || showSearch || showQuitConfirm || memoHost);
 
   // Release builds: the window's own X button no longer silently minimizes to
   // tray (see lib.rs CloseRequested — it prevent_close()s and emits this
@@ -122,7 +143,6 @@ export default function App() {
   const [localRackAssets, setLocalRackAssets] = useState<AppRackAsset[]>([]);
   const [localMstHosts, setLocalMstHosts] = useState<RemoteHost[]>([]);
   const [localVms, setLocalVms] = useState<VmInfo[]>([]);
-  const [dashboardView, setDashboardView] = useState<"rack" | "heatmap">("rack");
 
   // ── Security + Global shortcuts ──
   useEffect(() => {
@@ -141,6 +161,7 @@ export default function App() {
         setShowVmSettings(null);
         setConfirmDelete(null);
         setErrorModal(null);
+        setMemoHost(null);
       }
     };
     window.addEventListener("contextmenu", onCtx);
@@ -239,14 +260,6 @@ export default function App() {
     try {
       if (editingHost) {
         await updateHost.mutateAsync({ id: editingHost.id, ...hostData });
-        // memo is stored via its own command (update_remote_host doesn't carry it);
-        // for a detected host, updateHost promotes it to a manual id, so re-read the
-        // saved id from the returned/refreshed list isn't available here — the memo
-        // is keyed on the id AssetModal already knows (manual hosts) or the detected
-        // id (promoted server-side to the same host, memo re-attaches on next merge).
-        if (hostData.memo !== undefined) {
-          await api.setRemoteHostMemo(editingHost.id, hostData.memo ?? "").catch(console.error);
-        }
         addToast(`${hostData.name} 자산 정보가 동기화되었습니다.`, "success");
       } else {
         await addHost.mutateAsync(hostData);
@@ -268,7 +281,10 @@ export default function App() {
 
   // ── Loading ──
   if (isLoading && !data) return (
-    <div className="loading-screen"><RefreshCw size={36} className="spinning" /><p>관제 시스템 부팅 중...</p></div>
+    <div className="loading-screen">
+      <DotLottieReact src={loadingAnimation} loop autoplay speed={1} className="loading-lottie" />
+      <p>{loadingPhrase}</p>
+    </div>
   );
 
   // ── Topbar actions per page ──
@@ -430,14 +446,6 @@ export default function App() {
       <div className="section-label">
         <h3>가상 머신 클러스터</h3>
         <div className="section-line" />
-        <div style={{ display: "flex", gap: "4px", background: "rgba(255,255,255,0.04)", padding: "2px", borderRadius: "7px", border: "1px solid var(--border)", flexShrink: 0 }}>
-          {(["rack", "heatmap"] as const).map(v => (
-            <button key={v} onClick={() => setDashboardView(v)}
-              style={{ height: "22px", padding: "0 10px", borderRadius: "5px", border: "none", fontSize: "10px", fontWeight: 600, cursor: "pointer", background: dashboardView === v ? "var(--accent-blue)" : "transparent", color: dashboardView === v ? "#fff" : "var(--text-muted)", transition: "all 0.15s" }}>
-              {v === "rack" ? "랙" : "히트맵"}
-            </button>
-          ))}
-        </div>
       </div>
       <BentoCell className="cell-4x2" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -446,44 +454,51 @@ export default function App() {
             {runningVms + horizonHosts.filter(h => h.status !== "Offline").length} / {vms.length + horizonHosts.length} 온라인
           </span>
         </div>
-        {dashboardView === "heatmap" ? (
-          <HeatmapView vms={vms} onVmClick={() => { setShowSearch(true); }} />
-        ) : (
-          <div className="rack-container no-scrollbar" style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "scroll", maxHeight: "480px" }}>
-            {localRackAssets.length > 0 ? (
-              <Reorder.Group axis="y" values={localRackAssets} onReorder={(o) => { setLocalRackAssets(o); localStorage.setItem("hyperdesk_rack_order", JSON.stringify(o.map(i => i.id))); }} style={{ display: "flex", flexDirection: "column", gap: "12px", listStyle: "none", padding: 0, margin: 0 }}>
-                {localRackAssets.map((asset, idx) => (
-                  <Reorder.Item key={asset.id} value={asset} style={{ listStyle: "none", margin: 0, padding: 0, width: "100%" }}>
-                    {asset.type === "HYPER_V"
-                      ? <HyperVCard vm={asset.data} animDelay={idx * 50} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={() => setShowVmSettings(asset.data as VmInfo)} />
-                      : <HorizonCard host={asset.data as RemoteHost} animDelay={idx * 50} onEdit={(h) => { setEditingHost(h); setShowAssetModal(true); }} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VDI] ${msg}`, "success"); }} />
-                    }
-                  </Reorder.Item>
-                ))}
-              </Reorder.Group>
-            ) : (
-              <div style={{ padding: "40px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
-                <Server size={24} style={{ marginBottom: "10px" }} />
-                <div style={{ fontSize: "12px", fontWeight: 500 }}>감지된 VM이 없습니다</div>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="rack-container no-scrollbar" style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "scroll", maxHeight: "480px" }}>
+          {localRackAssets.length > 0 ? (
+            <Reorder.Group axis="y" values={localRackAssets} onReorder={(o) => { setLocalRackAssets(o); localStorage.setItem("hyperdesk_rack_order", JSON.stringify(o.map(i => i.id))); }} style={{ display: "flex", flexDirection: "column", gap: "12px", listStyle: "none", padding: 0, margin: 0 }}>
+              {localRackAssets.map((asset, idx) => (
+                <Reorder.Item key={asset.id} value={asset} style={{ listStyle: "none", margin: 0, padding: 0, width: "100%" }}>
+                  {asset.type === "HYPER_V"
+                    ? <HyperVCard vm={asset.data} animDelay={idx * 50} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={() => setShowVmSettings(asset.data as VmInfo)} />
+                    : <HorizonCard host={asset.data as RemoteHost} animDelay={idx * 50} onEdit={(h) => { setEditingHost(h); setShowAssetModal(true); }} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VDI] ${msg}`, "success"); }} />
+                  }
+                </Reorder.Item>
+              ))}
+            </Reorder.Group>
+          ) : (
+            <div style={{ padding: "40px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
+              <Server size={24} style={{ marginBottom: "10px" }} />
+              <div style={{ fontSize: "12px", fontWeight: 500 }}>감지된 VM이 없습니다</div>
+            </div>
+          )}
+        </div>
       </BentoCell>
 
       {mstHostsList.length > 0 && <>
         <div className="section-label">
           <Globe size={14} color="var(--accent-blue)" /><h3>원격 자산</h3><div className="section-line" />
+          <ColumnToggle value={settings.remoteAssetColumns} onChange={(v) => updateSettings({ remoteAssetColumns: v })} />
           <button className="hd-segment-btn" onClick={() => { setEditingHost(null); setShowAssetModal(true); }} title="원격 자산 등록">
             <Plus size={13} />
           </button>
         </div>
         <div className="mst-line-container">
-          {/* MST rows — 새 랙 슬레드 스타일 */}
-          <Reorder.Group axis="y" values={localMstHosts} onReorder={(o) => { setLocalMstHosts(o); localStorage.setItem("hyperdesk_mst_order", JSON.stringify(o.map(i => i.id))); }} style={{ display: "flex", flexDirection: "column", gap: "6px", listStyle: "none", padding: 0, margin: 0 }}>
+          {/* MST rows — 새 랙 슬레드 스타일. 2열 모드는 grid로 전환, 각 아이템은 반폭. */}
+          <Reorder.Group
+            axis="y"
+            values={localMstHosts}
+            onReorder={(o) => { setLocalMstHosts(o); localStorage.setItem("hyperdesk_mst_order", JSON.stringify(o.map(i => i.id))); }}
+            style={settings.remoteAssetColumns === 2
+              // auto-fit + minmax: tries 2 columns, but each row needs ~600px of
+              // real estate (name 260px + status/ear/actions) before it clips the
+              // CONNECT button/icons off the edge — so it collapses to 1 column on
+              // its own once the container is too narrow, no JS/ResizeObserver needed.
+              ? { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(650px, 1fr))", gap: "6px", listStyle: "none", padding: 0, margin: 0 }
+              : { display: "flex", flexDirection: "column", gap: "6px", listStyle: "none", padding: 0, margin: 0 }}
+          >
             {localMstHosts.map((host) => {
               const isOffline = host.status === "TIMEOUT" || host.status === "Offline";
-              const load = host.load ?? 0;
               const proto = host.protocol === "HORIZON" ? "horizon" : "rdp";
               return (
                 <Reorder.Item key={host.id} value={host} style={{ listStyle: "none", margin: 0, padding: 0, width: "100%" }}>
@@ -507,15 +522,6 @@ export default function App() {
                     </div>
                     {/* 주소 */}
                     <div className="mst-rack-addr">{host.host}</div>
-                    {/* 부하 게이지 */}
-                    <div className="mst-rack-gauge">
-                      <div className="mst-rack-track">
-                        {!isOffline && load > 0 && <div className="mst-rack-fill" style={{ width: `${load}%` }} />}
-                      </div>
-                      <span className="mst-rack-pct" style={{ color: isOffline ? "var(--text-muted)" : "var(--text-main)" }}>
-                        {isOffline ? "--" : `${Math.round(load)}%`}
-                      </span>
-                    </div>
                     {/* 액션 */}
                     <div className="mst-rack-actions">
                       <button
@@ -523,8 +529,9 @@ export default function App() {
                         disabled={isOffline}
                         onClick={() => !isOffline && connectHost.mutateAsync({ host: host.host, protocol: host.protocol, username: host.username })}
                       >
-                        CONNECT ▸
+                        <Play/>
                       </button>
+                      <button className="mst-rack-icon-btn" title="메모장 (접속정보/메모)" onClick={() => setMemoHost(host)}>✎</button>
                     </div>
                   </div>
                 </Reorder.Item>
@@ -593,7 +600,7 @@ export default function App() {
             <div className="hd-page" key={page}>
               {page === "dashboard" && DashboardContent}
               {page === "vms" && <VmsPage vms={vms} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={setShowVmSettings} />}
-              {page === "remote" && <RemotePage remoteHosts={remoteHosts} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setShowAssetModal(true); }} />}
+              {page === "remote" && <RemotePage remoteHosts={remoteHosts} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onMemo={setMemoHost} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setShowAssetModal(true); }} />}
               {page === "snapshots" && <SnapshotsPage vms={vms} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[SNAP] ${msg}`, "success"); }} onError={(msg) => { addToast(msg, "error"); addLog(`[SNAP] ${msg}`, "error"); }} />}
               {page === "events"    && <EventsPage logs={logs} onClear={() => setLogs([])} />}
               {page === "settings"  && <SettingsPage addToast={addToast} />}
@@ -635,6 +642,7 @@ export default function App() {
       {confirmDelete   && <ConfirmModal title="자산 영구 삭제" message="선택한 원격 자산을 영구적으로 삭제하시겠습니까?" confirmText="영구 삭제 수행" type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
       {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText="확인" onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}
       {showQuitConfirm && <ConfirmModal title="HyperDesk 종료" message="백그라운드로 전환하면 실행 중인 세션이 유지되고 트레이에서 다시 열 수 있습니다. 완전 종료하면 모든 세션 연결이 정리됩니다." confirmText="백그라운드로 전환" cancelText="취소" extraText="완전 종료" onExtra={() => api.quitApp().catch(console.error)} onConfirm={handleMinimizeToTray} onClose={() => setShowQuitConfirm(false)} />}
+      {memoHost        && <MemoModal host={memoHost} onClose={() => setMemoHost(null)} onSaved={() => { refetch(); addToast("메모가 저장되었습니다.", "success"); }} />}
     </div>
   );
 }

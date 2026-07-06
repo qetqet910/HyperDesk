@@ -4,8 +4,8 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useSettings } from "../contexts/SettingsContext";
-import { applyTheme } from "../lib/theme";
+import { useSettings } from "@/contexts/SettingsContext";
+import { applyTheme } from "@/lib/theme";
 
 interface TopbarProps {
   title: string;

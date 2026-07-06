@@ -568,7 +568,7 @@ body::before {
 }
 /* 상태 컬럼 */
 .mst-rack-status {
-  width: 72px; flex-shrink: 0;
+  width: 60px; flex-shrink: 0;
   display: flex; align-items: center; gap: 8px;
   padding: 0 8px 0 10px;
   border-right: 1px solid rgba(0,0,0,0.5);
@@ -590,7 +590,8 @@ body::before {
 .mst-rack-latency.offline { color: var(--text-muted); }
 /* 네임플레이트 */
 .mst-rack-name {
-  flex: 0 0 auto; min-width: 200px;
+  position: relative;
+  flex: 0 0 auto; min-width: 260px;
   display: flex; align-items: center; gap: 8px;
   padding: 0 16px;
   border-right: 1px solid rgba(0,0,0,0.5);
@@ -604,15 +605,6 @@ body::before {
 }
 .mst-rack-row.dead .mst-rack-hostname { color: var(--text-muted); }
 /* Inline memo chip — truncates so a long note never breaks the row layout */
-.mst-rack-memo {
-  font-size: 10px;
-  color: var(--text-muted);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.75;
-}
 /* 주소 컬럼 */
 .mst-rack-addr {
   flex: 1; min-width: 0;
@@ -650,35 +642,47 @@ body::before {
 /* 연결 버튼 */
 .mst-rack-actions { display: flex; align-items: center; padding: 0 10px; }
 .mst-rack-connect {
-  height: 30px; padding: 0 14px;
-  border: none; border-radius: 3px;
-  background: linear-gradient(180deg, var(--accent-soft) 0%, var(--accent-blue) 50%, var(--accent-secondary) 100%);
-  color: #fff;
-  font-family: var(--font);
-  font-size: 10px; font-weight: 900; letter-spacing: 1px;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.20),
-    inset 0 -1px 0 rgba(0,0,0,0.4),
-    0 0 10px rgba(91,130,190,0.30);
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-.mst-rack-connect:hover { opacity: 0.9; }
-.mst-rack-connect.disabled {
-  background: #1C2433;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-muted);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
-  cursor: not-allowed;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: 4px;
+  flex-shrink: 0;
 }
+.mst-rack-connect svg{
+  transform: scale(.8);
+  color: var(--accent-blue)
+}
+.mst-rack-connect:hover {  
+  background: var(--accent-wash);
+  border-color: var(--accent-soft);
+  color: var(--text-main);
+}
+.mst-rack-connect.disabled {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
 /* 프로토콜 태그 */
 .mst-proto-tag {
+  position: absolute;
+  right: 10px;
   font-size: 8px; padding: 2px 5px;
   border-radius: 2px; font-weight: 900; letter-spacing: 0.5px;
   font-family: var(--font);
 }
 .mst-proto-tag.rdp     { background: rgba(143,171,212,0.12); color: var(--accent-soft);  border: 1px solid rgba(143,171,212,0.28); }
-.mst-proto-tag.horizon { background: rgba(143,171,212,0.08); color: var(--accent-faint); border: 1px solid rgba(143,171,212,0.20); }
-.mst-proto-tag.auto    { background: rgba(95,176,138,0.10);  color: var(--accent-green); border: 1px solid rgba(95,176,138,0.25); }
+.mst-proto-tag.horizon { background: rgba(143,171,212,0.08); color: var(--accent-faint); right: 78px!important; border: 1px solid rgba(143,171,212,0.20); }
+.mst-proto-tag.auto    { background: rgba(95,176,138,0.10);  color: var(--accent-green); right: 46px!important; border: 1px solid rgba(95,176,138,0.25); }
 
 /* ─── KPI 타일 ───────────────────────────────────────────────── */
 .hd-kpi-strip {
@@ -801,6 +805,9 @@ body::before {
   background: rgba(244, 63, 94, 0.12);
   border-color: var(--accent-red);
   color: var(--accent-red);
+}
+.mst-rack-icon-btn svg{
+  transform: scale(.76);
 }
 
 /* ─── Command Hub 하단 통계 바 ─────────────────────────────── */

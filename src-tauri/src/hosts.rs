@@ -50,6 +50,9 @@ pub fn save_hosts(app: &AppHandle, hosts: &[RemoteHost]) -> Result<(), String> {
         .filter(|h| {
             if h.is_hidden { return true; } // Always persist hidden state
             if !h.is_detected { return true; }
+            // Always persist hosts with user-entered memo or tags
+            if h.memo.is_some() { return true; }
+            if h.tags.as_ref().is_some_and(|t| !t.is_empty()) { return true; }
             match h.protocol.as_str() {
                 "HORIZON" => h.name != format!("VDI: {}", h.host),
                 _ => h.name != h.host, // RDP default name is just host address
