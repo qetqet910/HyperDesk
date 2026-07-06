@@ -88,6 +88,10 @@
   --sm-row-hover: rgba(143, 171, 212, 0.14);
   --sm-input-bg: rgba(0, 0, 0, 0.30);
   --sm-accent-bar: linear-gradient(90deg, transparent, #5B82BE, transparent);
+  /* Global custom scrollbar (webkit) — subtle, theme-tinted thumb on a
+     transparent track. Consumed by the *::-webkit-scrollbar rules below. */
+  --scrollbar-thumb: rgba(143, 171, 212, 0.22);
+  --scrollbar-thumb-hover: rgba(143, 171, 212, 0.40);
 }
 
 /* ─── Light mode — Royal Blue palette ─── */
@@ -128,6 +132,8 @@
   --sm-row-hover: rgba(58, 106, 170, 0.10);
   --sm-input-bg: rgba(244, 246, 250, 0.90);
   --sm-accent-bar: linear-gradient(90deg, transparent, #3A6AAA, transparent);
+  --scrollbar-thumb: rgba(58, 106, 170, 0.30);
+  --scrollbar-thumb-hover: rgba(58, 106, 170, 0.48);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -301,6 +307,26 @@
   -moz-osx-font-smoothing: unset;
   text-rendering: optimizeSpeed;
 }
+
+/* ─── Global custom scrollbar (dark/light) ───
+   Replaces the raw WebView2/Chromium default so any scrollable area that
+   isn't explicitly hidden gets a consistent thin, theme-tinted bar. Elements
+   that opt out (html/body, modals, .no-scrollbar, .hd-content…) keep their own
+   more-specific display:none rules. The retro theme's classic scrollbar below
+   is a more-specific selector, so it overrides this regardless of order. */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
 
 /* Classic raised scrollbar — grey track, bevelled thumb, square buttons. */
 [data-theme="retro"] *::-webkit-scrollbar { width: 16px; height: 16px; }
