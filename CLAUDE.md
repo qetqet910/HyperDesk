@@ -151,6 +151,8 @@ The core Win32 engine. Flow:
 
 ## Troubleshooting Memory (기억해야 할 에러들)
 
+- **Issue:** 로딩 화면 Lottie 애니메이션이 `npm run tauri dev`에선 보이는데 **프로덕션 빌드에선 텍스트만 뜨고 안 나옴**(2026-07-06 확정).
+- **Fix:** `@lottiefiles/dotlottie-web`은 WASM 바이너리를 기본적으로 `cdn.jsdelivr.net`에서 fetch하는데, 프로덕션 CSP(`connect-src 'self'`)가 외부 CDN을 막아 플레이어 초기화가 조용히 실패한다(dev는 Vite가 CSP 없이 서빙해서 통과). 두 가지를 함께 유지할 것: (1) `App.tsx`에서 `@lottiefiles/dotlottie-web/dotlottie-player.wasm?url`을 import해 dist에 번들하고 `setWasmUrl()`로 same-origin 경로를 지정(수동 `public/` 복사 금지 — 패키지 업데이트 시 버전 불일치로 조용히 깨진다). (2) `tauri.conf.json` CSP의 `script-src`에 **`'wasm-unsafe-eval'`**을 유지(WASM 컴파일에 필요). 보안 점검 때 이 토큰을 지우거나 `setWasmUrl` 호출을 빼면 로딩 애니메이션이 다시 사라진다. `'wasm-unsafe-eval'`은 `'unsafe-eval'`과 달리 임의 JS eval을 허용하지 않는 최소 완화라 규칙 #3에 위배되지 않는다.
 - **Issue:** VmConnect 창을 Swallow 할 때 위쪽에 30px 검은 여백이 생기는 현상.
 - **Fix:** `swallow.rs`에서 창 클래스명이 `TscShellContainerClass`인 경우, Y-offset을 -30으로 강제 보정하도록 하드코딩함. 이 로직을 지우지 말 것.
 - **Issue:** Hyper-V swallow 후 몇 초 뒤 VM 화면 하단에 여백이 남거나(2026-07-02) VM 사방에 흰 테두리가 남는 현상(2026-07-03 로그로 확정).

@@ -33,7 +33,15 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { useVmActions } from "@/hooks/useDashboard";
 import type { VmInfo, RemoteHost } from "@/types";
 import { Reorder, AnimatePresence, motion } from 'framer-motion';
-import { DotLottieReact } from "@lottiefiles/dotlottie-react";
+import { DotLottieReact, setWasmUrl } from "@lottiefiles/dotlottie-react";
+// dotlottie-web fetches its WASM from a CDN by default (cdn.jsdelivr.net), which
+// the production CSP (connect-src 'self') blocks → the loading animation silently
+// never renders (only the caption shows). Self-host it: this ?url import bundles
+// the exact WASM from the installed package into dist/ (always version-matched,
+// same-origin), and setWasmUrl points the player at it. Also requires
+// script-src 'wasm-unsafe-eval' in tauri.conf.json for WASM compilation.
+import dotlottieWasmUrl from "@lottiefiles/dotlottie-web/dotlottie-player.wasm?url";
+setWasmUrl(dotlottieWasmUrl);
 import "./App.css";
 import "./App.sidebar.css";
 
