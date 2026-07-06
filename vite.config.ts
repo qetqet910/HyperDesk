@@ -8,6 +8,9 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
+  // .lottie is a binary animation format (zip-based) — Vite doesn't recognise
+  // it by default, so ?url imports produce a broken path in production builds.
+  assetsInclude: ["**/*.lottie"],
   resolve: {
     // Mirrors tsconfig.json's "@/*" -> "./src/*" path so the alias resolves the
     // same way at typecheck time (tsc) and at bundle time (Vite/esbuild).

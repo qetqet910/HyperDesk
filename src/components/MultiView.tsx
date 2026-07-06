@@ -59,38 +59,26 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
     if (isImmersive) api.flashImmersiveHeader(1000).catch(console.error);
   }, [activeSlot]);
 
-  // Leaving the multiview (unmount) while immersive must restore the OS window —
-  // but only then; an F11 fullscreen the user chose themselves is left alone.
+  // Leaving the multiview (unmount) while immersive must restore the OS window.
   const immersiveRef = useRef(false);
-  // Tracks plain OS fullscreen (F11, not immersive) so ESC knows to exit it.
+  // Tracks plain OS fullscreen (F11) so ESC knows to exit it.
   const fullscreenRef = useRef(false);
   useEffect(() => { immersiveRef.current = isImmersive; }, [isImmersive]);
   useEffect(() => {
     return () => {
       if (immersiveRef.current) {
         api.setImmersive(false).catch(console.error);
-        api.setFullscreen(false).catch(console.error);
       }
     };
   }, []);
 
-  // Both handlers read immersiveRef.current (not the isImmersive closure) so the
-  // F11 keydown effect — registered once with [] deps — never acts on a stale
-  // value. Immersive and OS-fullscreen must stay in sync: immersive IS OS
-  // fullscreen (+ overlay + auto-hide header), so a second independent fullscreen
-  // toggle desyncs them and the fixed overlay is left floating over a non-
-  // fullscreen window (the "화면 고장" bug).
   const handleToggleImmersive = () => {
     const next = !immersiveRef.current;
     immersiveRef.current = next;
     setIsImmersive(next);
     api.setImmersive(next).catch(console.error);
-    api.setFullscreen(next).catch(console.error);
   };
 
-  // F11 toggles OS fullscreen — but while immersive, it exits immersive (which
-  // already owns the fullscreen state) instead of toggling OS fullscreen under it.
-  // ESC always exits fullscreen/immersive (both read the current state via refs).
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "F11") {
@@ -98,7 +86,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
         handleToggleOSFullscreen();
       } else if (e.key === "Escape") {
         if (immersiveRef.current) {
-          handleToggleImmersive(); // exits immersive + fullscreen
+          handleToggleImmersive(); // exits immersive
         } else if (fullscreenRef.current) {
           handleToggleOSFullscreen(); // plain OS fullscreen off
         }
@@ -123,13 +111,6 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   }, []);
 
   const handleToggleOSFullscreen = async () => {
-    // While immersive, the window is already fullscreen and the overlay owns the
-    // layout — a raw toggle_fullscreen here would flip the OS state out from under
-    // it and desync. So treat it as "exit immersive" instead.
-    if (immersiveRef.current) {
-      handleToggleImmersive();
-      return;
-    }
     try {
       await invoke("toggle_fullscreen");
       fullscreenRef.current = !fullscreenRef.current;
@@ -174,11 +155,6 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
         </button>
         {/* OS-fullscreen toggle is hidden while immersive — immersive already IS
             fullscreen, and a second toggle desyncs the two (Shrink exits). */}
-        {!isImmersive && (
-          <button onClick={handleToggleOSFullscreen} title="창 전체화면 전환 (F11)">
-            <Maximize size={14} />
-          </button>
-        )}
       </div>
     </>
   );

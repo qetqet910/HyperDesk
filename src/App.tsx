@@ -32,9 +32,8 @@ import { RemotePage } from "@/components/RemotePage";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useVmActions } from "@/hooks/useDashboard";
 import type { VmInfo, RemoteHost } from "@/types";
-import { Reorder } from 'framer-motion';
+import { Reorder, AnimatePresence, motion } from 'framer-motion';
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
-import loadingAnimation from "@/assets/loading.lottie?url";
 import "./App.css";
 import "./App.sidebar.css";
 
@@ -279,13 +278,7 @@ export default function App() {
     } catch (e) { handleError(String(e)); }
   };
 
-  // ── Loading ──
-  if (isLoading && !data) return (
-    <div className="loading-screen">
-      <DotLottieReact src={loadingAnimation} loop autoplay speed={1} className="loading-lottie" />
-      <p>{loadingPhrase}</p>
-    </div>
-  );
+  // ── Loading state logic is now handled in the main render block ──
 
   // ── Topbar actions per page ──
   const topbarActions = (
@@ -561,88 +554,109 @@ export default function App() {
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="app-layout">
-      {/* ── Left Sidebar ── */}
-      <Sidebar
-        current={page}
-        onNav={(p) => {
-          if (p === "events" || p === "dashboard" || p === "multiview" || p === "vms" || p === "remote" || p === "snapshots" || p === "settings") {
-            setPage(p);
-          }
-        }}
-        vmCount={vms.length}
-        remoteCount={remoteHosts.length}
-        runningCount={runningVms}
-      />
+    <AnimatePresence mode="wait">
+      {isLoading && !data ? (
+        <motion.div
+          key="loading"
+          initial={{ opacity: 1 }}
+          exit={{ opacity: 0, filter: "blur(10px)", scale: 1.05 }}
+          transition={{ duration: 0.4, ease: "easeInOut" }}
+          className="loading-screen"
+        >
+          <DotLottieReact src="/loading.lottie" loop autoplay speed={1} className="loading-lottie" />
+          <p>{loadingPhrase}</p>
+        </motion.div>
+      ) : (
+        <motion.div
+          key="app"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+          className="app-layout"
+        >
+          {/* ── Left Sidebar ── */}
+          <Sidebar
+            current={page}
+            onNav={(p) => {
+              if (p === "events" || p === "dashboard" || p === "multiview" || p === "vms" || p === "remote" || p === "snapshots" || p === "settings") {
+                setPage(p);
+              }
+            }}
+            vmCount={vms.length}
+            remoteCount={remoteHosts.length}
+            runningCount={runningVms}
+          />
 
-      {/* ── Main area ── */}
-      <div className="hd-main">
-        {/* Topbar */}
-        <Topbar
-          title={meta.title}
-          subtitle={meta.subtitle}
-          isRefreshing={isLoading}
-          onRefresh={() => refetch()}
-          actions={topbarActions}
-          onSearch={openSearch}
-        />
+          {/* ── Main area ── */}
+          <div className="hd-main">
+            {/* Topbar */}
+            <Topbar
+              title={meta.title}
+              subtitle={meta.subtitle}
+              isRefreshing={isLoading}
+              onRefresh={() => refetch()}
+              actions={topbarActions}
+              onSearch={openSearch}
+            />
 
-        {/* Stats strip (dashboard + vms only) */}
-        {(page === "dashboard" || page === "vms") && StatsBar}
+            {/* Stats strip (dashboard + vms only) */}
+            {(page === "dashboard" || page === "vms") && StatsBar}
 
-        {/* Content. MultiView renders bare (no .hd-page wrapper) — its swallowed
-            Win32 windows can't follow a CSS enter animation. Every other page is
-            wrapped in .hd-page keyed by `page` so the transition replays on nav. */}
-        <main className={`hd-content ${page === "multiview" ? "hd-content--multiview" : ""}`}>
-          {page === "multiview" ? (
-            <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} onError={(msg) => { addToast(msg, "error"); addLog(`[MULTIVIEW] ${msg}`, "error"); }} />
-          ) : (
-            <div className="hd-page" key={page}>
-              {page === "dashboard" && DashboardContent}
-              {page === "vms" && <VmsPage vms={vms} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={setShowVmSettings} />}
-              {page === "remote" && <RemotePage remoteHosts={remoteHosts} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onMemo={setMemoHost} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setShowAssetModal(true); }} />}
-              {page === "snapshots" && <SnapshotsPage vms={vms} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[SNAP] ${msg}`, "success"); }} onError={(msg) => { addToast(msg, "error"); addLog(`[SNAP] ${msg}`, "error"); }} />}
-              {page === "events"    && <EventsPage logs={logs} onClear={() => setLogs([])} />}
-              {page === "settings"  && <SettingsPage addToast={addToast} />}
-            </div>
-          )}
-        </main>
-      </div>
+            {/* Content. MultiView renders bare (no .hd-page wrapper) — its swallowed
+                Win32 windows can't follow a CSS enter animation. Every other page is
+                wrapped in .hd-page keyed by `page` so the transition replays on nav. */}
+            <main className={`hd-content ${page === "multiview" ? "hd-content--multiview" : ""}`}>
+              {page === "multiview" ? (
+                <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} onError={(msg) => { addToast(msg, "error"); addLog(`[MULTIVIEW] ${msg}`, "error"); }} />
+              ) : (
+                <div className="hd-page" key={page}>
+                  {page === "dashboard" && DashboardContent}
+                  {page === "vms" && <VmsPage vms={vms} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={setShowVmSettings} />}
+                  {page === "remote" && <RemotePage remoteHosts={remoteHosts} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onMemo={setMemoHost} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setShowAssetModal(true); }} />}
+                  {page === "snapshots" && <SnapshotsPage vms={vms} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[SNAP] ${msg}`, "success"); }} onError={(msg) => { addToast(msg, "error"); addLog(`[SNAP] ${msg}`, "error"); }} />}
+                  {page === "events"    && <EventsPage logs={logs} onClear={() => setLogs([])} />}
+                  {page === "settings"  && <SettingsPage addToast={addToast} />}
+                </div>
+              )}
+            </main>
+          </div>
 
-      {/* ── Global overlays ── */}
-      <Toast toasts={toasts} onClose={removeToast} />
+          {/* ── Global overlays ── */}
+          <Toast toasts={toasts} onClose={removeToast} />
 
-      {/* Command Palette */}
-      <CommandPalette
-        isOpen={showSearch}
-        onClose={closeSearch}
-        vms={vms}
-        remoteHosts={remoteHosts}
-        onNav={(p) => { setPage(p); closeSearch(); }}
-        onVmStart={(name) => { vmActions.start.mutate(name); addToast(`${name} 시작 중...`, "info"); }}
-        onVmStop={(name) => { vmActions.stop.mutate(name); addToast(`${name} 종료 중...`, "info"); }}
-        onVmSave={(name) => { vmActions.save.mutate(name); addToast(`${name} 상태 저장 중...`, "info"); }}
-        onVmPause={(name) => { vmActions.pause.mutate(name); addToast(`${name} 일시정지 중...`, "info"); }}
-        onVmResume={(name) => { vmActions.resume.mutate(name); addToast(`${name} 재개 중...`, "info"); }}
-        onVmConnect={(vm) => {
-          const ip = vm.ip_addresses?.[0];
-          if (ip) vmActions.connect.mutate({ host: ip, username: undefined });
-        }}
-        onVmConsole={(name) => vmActions.console.mutate(name)}
-        onVmSettings={(vm) => { setShowVmSettings(vm); closeSearch(); }}
-        onHostConnect={(host) => connectHost.mutate({ host: host.host, protocol: host.protocol, username: host.username })}
-        onHostEdit={(host) => { setEditingHost(host); setShowAssetModal(true); closeSearch(); }}
-        onHostDelete={(host) => { setConfirmDelete(host.id); closeSearch(); }}
-        onAddAsset={() => { setEditingHost(null); setShowAssetModal(true); closeSearch(); }}
-        onThemeToggle={() => { const next = settings.theme === "light" ? "dark" : "light"; applyTheme(next); updateSettings({ theme: next }); }}
-      />
+          {/* Command Palette */}
+          <CommandPalette
+            isOpen={showSearch}
+            onClose={closeSearch}
+            vms={vms}
+            remoteHosts={remoteHosts}
+            onNav={(p) => { setPage(p); closeSearch(); }}
+            onVmStart={(name) => { vmActions.start.mutate(name); addToast(`${name} 시작 중...`, "info"); }}
+            onVmStop={(name) => { vmActions.stop.mutate(name); addToast(`${name} 종료 중...`, "info"); }}
+            onVmSave={(name) => { vmActions.save.mutate(name); addToast(`${name} 상태 저장 중...`, "info"); }}
+            onVmPause={(name) => { vmActions.pause.mutate(name); addToast(`${name} 일시정지 중...`, "info"); }}
+            onVmResume={(name) => { vmActions.resume.mutate(name); addToast(`${name} 재개 중...`, "info"); }}
+            onVmConnect={(vm) => {
+              const ip = vm.ip_addresses?.[0];
+              if (ip) vmActions.connect.mutate({ host: ip, username: undefined });
+            }}
+            onVmConsole={(name) => vmActions.console.mutate(name)}
+            onVmSettings={(vm) => { setShowVmSettings(vm); closeSearch(); }}
+            onHostConnect={(host) => connectHost.mutate({ host: host.host, protocol: host.protocol, username: host.username })}
+            onHostEdit={(host) => { setEditingHost(host); setShowAssetModal(true); closeSearch(); }}
+            onHostDelete={(host) => { setConfirmDelete(host.id); closeSearch(); }}
+            onAddAsset={() => { setEditingHost(null); setShowAssetModal(true); closeSearch(); }}
+            onThemeToggle={() => { const next = settings.theme === "light" ? "dark" : "light"; applyTheme(next); updateSettings({ theme: next }); }}
+          />
 
-      {showVmSettings  && <VmSettingsModal vm={showVmSettings} onClose={() => setShowVmSettings(null)} onLog={addLog} />}
-      {showAssetModal  && <AssetModal initialData={editingHost ?? undefined} isEditing={!!editingHost} isPending={addHost.isPending || updateHost.isPending} onClose={() => { setShowAssetModal(false); setEditingHost(null); }} onSubmit={handleAssetAction} />}
-      {confirmDelete   && <ConfirmModal title="자산 영구 삭제" message="선택한 원격 자산을 영구적으로 삭제하시겠습니까?" confirmText="영구 삭제 수행" type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
-      {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText="확인" onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}
-      {showQuitConfirm && <ConfirmModal title="HyperDesk 종료" message="백그라운드로 전환하면 실행 중인 세션이 유지되고 트레이에서 다시 열 수 있습니다. 완전 종료하면 모든 세션 연결이 정리됩니다." confirmText="백그라운드로 전환" cancelText="취소" extraText="완전 종료" onExtra={() => api.quitApp().catch(console.error)} onConfirm={handleMinimizeToTray} onClose={() => setShowQuitConfirm(false)} />}
-      {memoHost        && <MemoModal host={memoHost} onClose={() => setMemoHost(null)} onSaved={() => { refetch(); addToast("메모가 저장되었습니다.", "success"); }} />}
-    </div>
+          {showVmSettings  && <VmSettingsModal vm={showVmSettings} onClose={() => setShowVmSettings(null)} onLog={addLog} />}
+          {showAssetModal  && <AssetModal initialData={editingHost ?? undefined} isEditing={!!editingHost} isPending={addHost.isPending || updateHost.isPending} onClose={() => { setShowAssetModal(false); setEditingHost(null); }} onSubmit={handleAssetAction} />}
+          {confirmDelete   && <ConfirmModal title="자산 영구 삭제" message="선택한 원격 자산을 영구적으로 삭제하시겠습니까?" confirmText="영구 삭제 수행" type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
+          {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText="확인" onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}
+          {showQuitConfirm && <ConfirmModal title="HyperDesk 종료" message="백그라운드로 전환하면 실행 중인 세션이 유지되고 트레이에서 다시 열 수 있습니다. 완전 종료하면 모든 세션 연결이 정리됩니다." confirmText="백그라운드로 전환" cancelText="취소" extraText="완전 종료" onExtra={() => api.quitApp().catch(console.error)} onConfirm={handleMinimizeToTray} onClose={() => setShowQuitConfirm(false)} />}
+          {memoHost        && <MemoModal host={memoHost} onClose={() => setMemoHost(null)} onSaved={() => { refetch(); addToast("메모가 저장되었습니다.", "success"); }} />}
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
