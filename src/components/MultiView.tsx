@@ -1,7 +1,7 @@
 import { useSettings } from "@/contexts/SettingsContext";
 import { SwallowSlot } from "@/components/SwallowSlot";
 import { VmInfo, RemoteHost } from "@/types";
-import { Maximize, Expand, Shrink } from "lucide-react";
+import { Expand, Shrink } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";

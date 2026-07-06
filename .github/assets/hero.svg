@@ -1,0 +1,174 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 440" width="1000" height="440" font-family="-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif">
+  <defs>
+    <style>
+      svg{
+        --win:#161b22; --winborder:#30363d; --bar:#0d1117; --side:#0d1117;
+        --screen:#1c2330; --wall:#11161f; --line:#39424f; --text:#c9d1d9; --subt:#7d8590; --hud:#0d1117; --tab:#8b949e;
+      }
+      @media (prefers-color-scheme: light){
+        svg{
+          --win:#ffffff; --winborder:#d0d7de; --bar:#f6f8fa; --side:#f6f8fa;
+          --screen:#eef1f5; --wall:#e3e8ef; --line:#c9d1da; --text:#1f2328; --subt:#656d76; --hud:#ffffff; --tab:#656d76;
+        }
+      }
+      .sv1,.sv2,.sv3,.sv4,.a1,.a2,.a3,.a4,.h1,.h2,.h3,.h4{animation-duration:8s;animation-iteration-count:infinite;animation-timing-function:ease-in-out}
+      .sv1{animation-name:sv1}.sv2{animation-name:sv2}.sv3{animation-name:sv3}.sv4{animation-name:sv4}
+      .a1{animation-name:a1}.a2{animation-name:a2}.a3{animation-name:a3}.a4{animation-name:a4}
+      .h1{animation-name:h1}.h2{animation-name:h2}.h3{animation-name:h3}.h4{animation-name:h4}
+      .live{animation:live 1.8s ease-in-out infinite}
+
+      @keyframes sv1{0%,22%{opacity:1}25%,96%{opacity:0}100%{opacity:1}}
+      @keyframes sv2{0%,23%{opacity:0}25%,47%{opacity:1}50%,100%{opacity:0}}
+      @keyframes sv3{0%,48%{opacity:0}50%,72%{opacity:1}75%,100%{opacity:0}}
+      @keyframes sv4{0%,73%{opacity:0}75%,96%{opacity:1}100%{opacity:0}}
+      @keyframes a1{0%,23%{opacity:1}25%,96%{opacity:0}100%{opacity:1}}
+      @keyframes a2{0%,24%{opacity:0}25%,48%{opacity:1}50%,100%{opacity:0}}
+      @keyframes a3{0%,49%{opacity:0}50%,73%{opacity:1}75%,100%{opacity:0}}
+      @keyframes a4{0%,74%{opacity:0}75%,97%{opacity:1}100%{opacity:0}}
+      @keyframes h1{0%{opacity:0}3%{opacity:1}12%{opacity:1}18%{opacity:0}100%{opacity:0}}
+      @keyframes h2{0%,25%{opacity:0}28%{opacity:1}37%{opacity:1}43%{opacity:0}100%{opacity:0}}
+      @keyframes h3{0%,50%{opacity:0}53%{opacity:1}62%{opacity:1}68%{opacity:0}100%{opacity:0}}
+      @keyframes h4{0%,75%{opacity:0}78%{opacity:1}87%{opacity:1}93%{opacity:0}100%{opacity:0}}
+      @keyframes live{0%,100%{opacity:1}50%{opacity:.35}}
+    </style>
+    <clipPath id="csess"><rect x="206" y="126" width="738" height="270" rx="0"/></clipPath>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- App window -->
+  <rect x="40" y="28" width="920" height="384" rx="16" fill="var(--win)" stroke="var(--winborder)" stroke-width="1.5" filter="url(#shadow)"/>
+  <rect x="40" y="28" width="920" height="44" rx="16" fill="var(--bar)"/>
+  <rect x="40" y="56" width="920" height="16" fill="var(--bar)"/>
+  <line x1="40" y1="72" x2="960" y2="72" stroke="var(--winborder)" stroke-width="1"/>
+  <rect x="56" y="42" width="16" height="16" rx="4" fill="#3b82f6"/>
+  <rect x="61" y="47" width="6" height="6" rx="1.5" fill="#ffffff" opacity="0.9"/>
+  <text x="82" y="56" font-size="15" font-weight="700" fill="var(--text)">HyperDesk</text>
+  <rect x="176" y="43" width="56" height="18" rx="9" fill="#3fb950" fill-opacity="0.15" stroke="#3fb950" stroke-opacity="0.45"/>
+  <circle class="live" cx="188" cy="52" r="3.2" fill="#3fb950"/>
+  <text x="198" y="56" font-size="10" font-weight="700" fill="#3fb950" letter-spacing="0.5">LIVE</text>
+  <circle cx="900" cy="50" r="4" fill="var(--subt)" opacity="0.5"/>
+  <circle cx="920" cy="50" r="4" fill="var(--subt)" opacity="0.5"/>
+  <circle cx="940" cy="50" r="4" fill="var(--subt)" opacity="0.5"/>
+
+  <!-- Sidebar -->
+  <rect x="40" y="72" width="150" height="340" fill="var(--side)"/>
+  <line x1="190" y1="72" x2="190" y2="412" stroke="var(--winborder)" stroke-width="1"/>
+  <rect x="58" y="100" width="16" height="16" rx="4" fill="#3b82f6"/>
+  <rect x="82" y="103" width="86" height="10" rx="3" fill="#3b82f6" opacity="0.55"/>
+  <rect x="58" y="132" width="16" height="16" rx="4" fill="var(--line)"/><rect x="82" y="135" width="78" height="10" rx="3" fill="var(--line)"/>
+  <rect x="58" y="164" width="16" height="16" rx="4" fill="var(--line)"/><rect x="82" y="167" width="70" height="10" rx="3" fill="var(--line)"/>
+  <rect x="58" y="196" width="16" height="16" rx="4" fill="var(--line)"/><rect x="82" y="199" width="82" height="10" rx="3" fill="var(--line)"/>
+  <rect x="58" y="228" width="16" height="16" rx="4" fill="var(--line)"/><rect x="82" y="231" width="60" height="10" rx="3" fill="var(--line)"/>
+  <rect x="58" y="380" width="16" height="16" rx="4" fill="var(--line)"/><rect x="82" y="383" width="66" height="10" rx="3" fill="var(--line)"/>
+
+  <!-- Session region background -->
+  <rect x="206" y="126" width="738" height="270" fill="var(--wall)"/>
+
+  <!-- Sessions (only the active one is visible; Alt+1~4 pages between them) -->
+  <g clip-path="url(#csess)">
+    <!-- Session 1 · VM-01 (blue) -->
+    <g class="sv1">
+      <rect x="206" y="126" width="738" height="270" fill="#3b82f6" opacity="0.10"/>
+      <rect x="222" y="138" width="214" height="22" rx="11" fill="#3b82f6" fill-opacity="0.16" stroke="#3b82f6" stroke-opacity="0.4"/>
+      <circle cx="235" cy="149" r="3" fill="#3b82f6"/>
+      <text x="246" y="153" font-size="11" font-weight="600" fill="var(--text)">VM-01 · 192.168.0.11 · RDP</text>
+      <rect x="360" y="178" width="430" height="150" rx="9" fill="var(--screen)" stroke="var(--winborder)"/>
+      <rect x="360" y="178" width="430" height="26" rx="9" fill="#3b82f6"/>
+      <rect x="360" y="192" width="430" height="12" fill="#3b82f6"/>
+      <circle cx="376" cy="191" r="3.5" fill="#fff" opacity="0.85"/><circle cx="390" cy="191" r="3.5" fill="#fff" opacity="0.5"/>
+      <rect x="380" y="224" width="390" height="9" rx="4" fill="var(--line)"/>
+      <rect x="380" y="244" width="300" height="9" rx="4" fill="var(--line)"/>
+      <rect x="380" y="264" width="350" height="9" rx="4" fill="var(--line)"/>
+      <rect x="380" y="284" width="220" height="9" rx="4" fill="var(--line)"/>
+    </g>
+    <!-- Session 2 · VM-02 (green) -->
+    <g class="sv2">
+      <rect x="206" y="126" width="738" height="270" fill="#22c55e" opacity="0.10"/>
+      <rect x="222" y="138" width="214" height="22" rx="11" fill="#22c55e" fill-opacity="0.16" stroke="#22c55e" stroke-opacity="0.4"/>
+      <circle cx="235" cy="149" r="3" fill="#22c55e"/>
+      <text x="246" y="153" font-size="11" font-weight="600" fill="var(--text)">VM-02 · 192.168.0.12 · RDP</text>
+      <rect x="320" y="172" width="360" height="160" rx="9" fill="var(--screen)" stroke="var(--winborder)"/>
+      <rect x="320" y="172" width="360" height="26" rx="9" fill="#22c55e"/>
+      <rect x="320" y="186" width="360" height="12" fill="#22c55e"/>
+      <circle cx="336" cy="185" r="3.5" fill="#fff" opacity="0.85"/><circle cx="350" cy="185" r="3.5" fill="#fff" opacity="0.5"/>
+      <rect x="340" y="218" width="320" height="9" rx="4" fill="var(--line)"/>
+      <rect x="340" y="238" width="240" height="9" rx="4" fill="var(--line)"/>
+      <rect x="340" y="258" width="290" height="9" rx="4" fill="var(--line)"/>
+      <rect x="700" y="200" width="180" height="120" rx="9" fill="var(--screen)" stroke="var(--winborder)"/>
+      <rect x="700" y="200" width="180" height="22" rx="9" fill="#22c55e" opacity="0.7"/>
+      <rect x="700" y="211" width="180" height="11" fill="#22c55e" opacity="0.7"/>
+      <rect x="716" y="238" width="148" height="8" rx="4" fill="var(--line)"/>
+      <rect x="716" y="256" width="110" height="8" rx="4" fill="var(--line)"/>
+    </g>
+    <!-- Session 3 · SRV-DC (violet, terminal) -->
+    <g class="sv3">
+      <rect x="206" y="126" width="738" height="270" fill="#8b5cf6" opacity="0.10"/>
+      <rect x="222" y="138" width="214" height="22" rx="11" fill="#8b5cf6" fill-opacity="0.16" stroke="#8b5cf6" stroke-opacity="0.4"/>
+      <circle cx="235" cy="149" r="3" fill="#8b5cf6"/>
+      <text x="246" y="153" font-size="11" font-weight="600" fill="var(--text)">SRV-DC · 192.168.0.10 · RDP</text>
+      <rect x="340" y="176" width="460" height="152" rx="9" fill="#0b1020" stroke="#8b5cf6" stroke-opacity="0.45"/>
+      <rect x="340" y="176" width="460" height="24" rx="9" fill="#8b5cf6"/>
+      <rect x="340" y="188" width="460" height="12" fill="#8b5cf6"/>
+      <text x="356" y="222" font-size="11" font-family="monospace" fill="#a78bfa">PS C:\&gt; Get-VM | ft Name,State</text>
+      <text x="356" y="242" font-size="11" font-family="monospace" fill="#7dd3fc">VM-01   Running</text>
+      <text x="356" y="260" font-size="11" font-family="monospace" fill="#7dd3fc">VM-02   Running</text>
+      <text x="356" y="278" font-size="11" font-family="monospace" fill="#86efac">SRV-DC  Running</text>
+      <rect x="356" y="292" width="8" height="13" fill="#a78bfa"/>
+    </g>
+    <!-- Session 4 · VM-04 (amber) -->
+    <g class="sv4">
+      <rect x="206" y="126" width="738" height="270" fill="#f59e0b" opacity="0.10"/>
+      <rect x="222" y="138" width="214" height="22" rx="11" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b" stroke-opacity="0.4"/>
+      <circle cx="235" cy="149" r="3" fill="#f59e0b"/>
+      <text x="246" y="153" font-size="11" font-weight="600" fill="var(--text)">VM-04 · 192.168.0.14 · RDP</text>
+      <rect x="400" y="180" width="420" height="146" rx="9" fill="var(--screen)" stroke="var(--winborder)"/>
+      <rect x="400" y="180" width="420" height="26" rx="9" fill="#f59e0b"/>
+      <rect x="400" y="194" width="420" height="12" fill="#f59e0b"/>
+      <circle cx="416" cy="193" r="3.5" fill="#fff" opacity="0.85"/><circle cx="430" cy="193" r="3.5" fill="#fff" opacity="0.5"/>
+      <rect x="420" y="226" width="380" height="9" rx="4" fill="var(--line)"/>
+      <rect x="420" y="246" width="260" height="9" rx="4" fill="var(--line)"/>
+      <rect x="420" y="266" width="330" height="9" rx="4" fill="var(--line)"/>
+      <rect x="420" y="286" width="200" height="9" rx="4" fill="var(--line)"/>
+    </g>
+  </g>
+
+  <!-- Taskbar (persistent OS chrome under the swapping sessions) -->
+  <rect x="206" y="374" width="738" height="22" fill="var(--bar)"/>
+  <line x1="206" y1="374" x2="944" y2="374" stroke="var(--winborder)" stroke-width="1"/>
+  <rect x="216" y="379" width="12" height="12" rx="3" fill="var(--subt)" opacity="0.55"/>
+  <rect x="234" y="379" width="12" height="12" rx="3" fill="var(--subt)" opacity="0.4"/>
+  <rect x="252" y="379" width="12" height="12" rx="3" fill="var(--subt)" opacity="0.4"/>
+  <text x="928" y="389" font-size="10" fill="var(--subt)" text-anchor="end">14:47</text>
+
+  <!-- Slot header bar (tab switcher = Alt+1~4) -->
+  <rect x="206" y="90" width="738" height="36" fill="var(--bar)"/>
+  <line x1="206" y1="126" x2="944" y2="126" stroke="var(--winborder)" stroke-width="1"/>
+  <text x="222" y="112" font-size="10.5" font-weight="600" fill="var(--subt)" opacity="0.9">세션</text>
+  <!-- base tab cells -->
+  <g>
+    <rect x="262" y="97" width="32" height="22" rx="6" fill="none" stroke="var(--winborder)"/><text x="278" y="112" font-size="12.5" font-weight="700" fill="var(--tab)" text-anchor="middle">1</text>
+    <rect x="302" y="97" width="32" height="22" rx="6" fill="none" stroke="var(--winborder)"/><text x="318" y="112" font-size="12.5" font-weight="700" fill="var(--tab)" text-anchor="middle">2</text>
+    <rect x="342" y="97" width="32" height="22" rx="6" fill="none" stroke="var(--winborder)"/><text x="358" y="112" font-size="12.5" font-weight="700" fill="var(--tab)" text-anchor="middle">3</text>
+    <rect x="382" y="97" width="32" height="22" rx="6" fill="none" stroke="var(--winborder)"/><text x="398" y="112" font-size="12.5" font-weight="700" fill="var(--tab)" text-anchor="middle">4</text>
+  </g>
+  <!-- active tab overlays -->
+  <g class="a1"><rect x="262" y="97" width="32" height="22" rx="6" fill="#3b82f6"/><text x="278" y="112" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle">1</text></g>
+  <g class="a2"><rect x="302" y="97" width="32" height="22" rx="6" fill="#3b82f6"/><text x="318" y="112" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle">2</text></g>
+  <g class="a3"><rect x="342" y="97" width="32" height="22" rx="6" fill="#3b82f6"/><text x="358" y="112" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle">3</text></g>
+  <g class="a4"><rect x="382" y="97" width="32" height="22" rx="6" fill="#3b82f6"/><text x="398" y="112" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle">4</text></g>
+  <!-- immersive/expand button (right) -->
+  <g stroke="var(--subt)" stroke-width="1.6" fill="none" stroke-linecap="round">
+    <path d="M916 100 h-8 v8"/><path d="M932 100 h8 v8"/><path d="M916 116 h-8 v-8"/><path d="M932 116 h8 v-8"/>
+  </g>
+
+  <!-- Alt+N switch cue (flashes at each switch) -->
+  <g class="h1"><rect x="490" y="228" width="170" height="52" rx="14" fill="var(--hud)" fill-opacity="0.94" stroke="#3b82f6" stroke-opacity="0.55"/><text x="516" y="261" font-size="16" font-weight="600" fill="var(--subt)">Alt +</text><text x="600" y="264" font-size="32" font-weight="800" fill="#3b82f6">1</text></g>
+  <g class="h2"><rect x="490" y="228" width="170" height="52" rx="14" fill="var(--hud)" fill-opacity="0.94" stroke="#3b82f6" stroke-opacity="0.55"/><text x="516" y="261" font-size="16" font-weight="600" fill="var(--subt)">Alt +</text><text x="600" y="264" font-size="32" font-weight="800" fill="#3b82f6">2</text></g>
+  <g class="h3"><rect x="490" y="228" width="170" height="52" rx="14" fill="var(--hud)" fill-opacity="0.94" stroke="#3b82f6" stroke-opacity="0.55"/><text x="516" y="261" font-size="16" font-weight="600" fill="var(--subt)">Alt +</text><text x="600" y="264" font-size="32" font-weight="800" fill="#3b82f6">3</text></g>
+  <g class="h4"><rect x="490" y="228" width="170" height="52" rx="14" fill="var(--hud)" fill-opacity="0.94" stroke="#3b82f6" stroke-opacity="0.55"/><text x="516" y="261" font-size="16" font-weight="600" fill="var(--subt)">Alt +</text><text x="600" y="264" font-size="32" font-weight="800" fill="#3b82f6">4</text></g>
+
+  <!-- Subtitle -->
+  <text x="500" y="432" font-size="13" font-weight="500" fill="var(--subt)" text-anchor="middle">SwallowGrid™  ·  Hyper-V + RDP  ·  여러 세션을 Alt+1~4로 즉시 전환</text>
+</svg>
