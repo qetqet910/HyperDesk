@@ -68,6 +68,11 @@ pub fn run() {
             }
         }).build())
         .setup(|app| {
+            // Warm the resident PowerShell worker (Hyper-V module + CIM session,
+            // ~1.1s) in parallel with WebView2/React boot, so the first dashboard
+            // fetch hits a warm worker (~30ms) instead of paying the cold cost.
+            commands::prewarm_ps_worker();
+
             // Register global hotkeys at startup (not just on focus)
             let shortcuts = app.global_shortcut();
             // Clear any stale registrations (e.g. a previous dev instance / zombie

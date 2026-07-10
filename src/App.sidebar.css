@@ -681,9 +681,9 @@ body::before {
 }
 
 .mst-rack-latency {
-  font-family: var(--font);
+  font-family: var(--font-num);
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.5px;
 }
 
@@ -874,9 +874,13 @@ body::before {
 }
 
 .hd-kpi-value {
-  font-size: 24px;
-  font-weight: 900;
-  letter-spacing: -0.5px;
+  /* Numeric display font (--font-num): Cascadia's max real weight is 700 —
+     900 forced synthetic bold and the negative tracking smashed digits
+     together, which is what read as "숫자가 이상함". */
+  font-family: var(--font-num);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.25px;
   line-height: 1;
 }
 
@@ -1039,8 +1043,8 @@ body::before {
 
 .hub-stat-value {
   font-size: 11px;
-  font-weight: 900;
-  font-family: var(--font);
+  font-weight: 700;
+  font-family: var(--font-num);
   white-space: nowrap;
   width: 56px;
   text-align: right;

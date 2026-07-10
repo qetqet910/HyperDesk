@@ -42,7 +42,7 @@ The core Win32 engine. Flow:
 1. Find the target process window by PID using `EnumWindows`
 2. Call `SetParent(hwnd, webview_container_hwnd)` to reparent the window into the WebView container (Chrome_WidgetWin)
 3. `SetWindowPos` to position/resize within the slot bounds
-4. A background stabilization thread runs 200 iterations × 200ms = 40s to enforce styles/position
+4. A background stabilization thread polls with adaptive backoff (100ms → 1s once stable, any correction resets to fast) for the **life of the swallow** to enforce styles/position — it doubles as the slot watchdog: its `IsWindow` check detects a crashed/closed child and emits `window-closed` (do not re-add a deadline; a child dying after it left the slot showing a corpse)
 
 **Z-order reality**: After `SetParent`, the swallowed Win32 window sits **above** the WebView2 renderer within Chrome_WidgetWin. This means HTML elements in slot areas are hidden behind the swallowed window. To keep controls accessible, the slot uses a **permanent 36px `slot-header-bar`** at the top — positioned above where the Win32 child starts — so header buttons are always reachable.
 
@@ -61,11 +61,11 @@ The core Win32 engine. Flow:
 
 **Immersive mode**: `set_immersive` arms a Rust cursor poller (`swallow::set_immersive`). In immersive the header floats `position:absolute` UNDER the VM surface so the VM keeps 100% of the screen at native resolution; top-edge hover makes the poller crop the VM's top 36-CSS-px band via `SetWindowRgn` (`apply_reveal`), letting the header show through and take clicks — the VM never moves or resizes on reveal (moving it caused visible up/down judder).
 
-**Chrome region is single-sourced (`apply_chrome_region` + `REVEAL_BAND`)**: every `SetWindowRgn` call in `swallow.rs` (initial swallow, the vmconnect stabilization loop's per-poll chrome re-measurement, and the immersive reveal poller) goes through one helper that composes the window's own chrome crop (`offset`/`offset_x`) with the current reveal band. Do NOT add a standalone `CreateRectRgn`/`SetWindowRgn` call anywhere else — vmconnect's stabilization loop re-applies its region on every re-measured tick for up to 40s after swallow, and a second uncoordinated writer WILL periodically stomp the reveal crop back to "hidden" (this is exactly why immersive reveal worked for RDP but not Hyper-V before the fix — RDP's offset is always 0 and nothing else ever touched its region after the initial swallow).
+**Chrome region is single-sourced (`apply_chrome_region` + `REVEAL_BAND`)**: every `SetWindowRgn` call in `swallow.rs` (initial swallow, the vmconnect stabilization loop's per-poll chrome re-measurement, and the immersive reveal poller) goes through one helper that composes the window's own chrome crop (`offset`/`offset_x`) with the current reveal band. Do NOT add a standalone `CreateRectRgn`/`SetWindowRgn` call anywhere else — vmconnect's stabilization loop re-applies its region on every re-measured tick for the life of the swallow, and a second uncoordinated writer WILL periodically stomp the reveal crop back to "hidden" (this is exactly why immersive reveal worked for RDP but not Hyper-V before the fix — RDP's offset is always 0 and nothing else ever touched its region after the initial swallow).
 
 **Disconnect (X / `unswallow_window`) actually ends the session**: `swallow::unswallow` restores the window to a normal top-level frame (in case the app shows its own "disconnect?" prompt and the user cancels — it lands as an ordinary floating window, not stuck invisible inside HyperDesk) and then posts `WM_CLOSE`. It does NOT leave the process running detached-and-minimized (that was the old behavior — deliberately removed since "detach" reads to a user as "still connected, window just hidden," which it wasn't).
 
-**Critical**: Does NOT use `AttachThreadInput` (deadlock risk — the LL keyboard hook above is message-based and fine). The Tauri main window requires admin privileges (declared in `hyperdesk.exe.manifest`) for `SetParent` to work across process boundaries.
+**Critical**: Does NOT use `AttachThreadInput` (deadlock risk — the LL keyboard hook above is message-based and fine). `hyperdesk.exe.manifest` requests `asInvoker`, not `requireAdministrator` (changed 2026-07 for MS Store: an MSIX/Desktop Bridge full-trust app that demands elevation crashes on launch — AppX activation can't show the normal UAC consent flow). `SetParent` across process boundaries does NOT need admin — verified directly (P/Invoke SetParent+WS_CHILD+SetWindowPos between two ordinary Medium-IL processes reparents and repositions correctly); UIPI only blocks a LOWER integrity level window messaging a HIGHER one, and both HyperDesk and mstsc/vmconnect run at the user's own IL. The Hyper-V PowerShell cmdlets (`Get-VM`/`Start-VM`/etc., see `run_powershell`) are the thing that actually needs elevated rights for a non-admin user — put the user in the local **Hyper-V Administrators** group instead of re-adding `requireAdministrator`.
 
 ### Dashboard & Host Data (`src-tauri/src/commands.rs`, `hosts.rs`)
 
@@ -77,6 +77,8 @@ The core Win32 engine. Flow:
 5. Filters hidden hosts
 
 **Smart persistence**: Auto-detected hosts (from registry) are NOT written to `hosts.json` unless the user modifies them (hide/rename). Only user overrides are persisted. This prevents stale data accumulation.
+
+**Warm PowerShell worker** (`run_powershell_warm` in `commands.rs`): a cold `powershell.exe` costs ~1.3s (spawn + Hyper-V module load + CIM session — measured 2026-07-09; the query itself is ~30ms warm), so the hot 5s polling paths (`get_vms`, RDP scan) go through one resident PowerShell process fed base64 scripts over stdin. **Only route read-only, fast scripts through it** — lifecycle commands (Start/Stop-VM, checkpoints) stay on cold `run_powershell` because Stop-VM can block 30s and would hold the worker mutex in front of dashboard polls. Any worker failure falls back to a cold spawn automatically.
 
 ### Frontend State
 
@@ -103,7 +105,7 @@ The core Win32 engine. Flow:
 ## Platform Constraints
 
 - **Windows only**: Uses Win32 APIs (`SetParent`, `EnumWindows`, `SetWindowPos`), PowerShell (`Get-VM`), and `winreg` for registry access. There is no cross-platform abstraction.
-- **Admin required**: The app requests elevation via `hyperdesk.exe.manifest` — window swallowing across process boundaries requires it.
+- **Not admin-elevated**: `hyperdesk.exe.manifest` requests `asInvoker` (MS Store MSIX requires this — `requireAdministrator` crashes on launch under AppX activation). Window swallowing does not need admin (see the swallow.rs note above). Users who aren't in the local Hyper-V Administrators group will still hit permission errors from the `Get-VM`/`Start-VM`/etc. PowerShell calls specifically — that's a separate requirement, not a manifest one.
 - **WebView2 runtime**: Must be installed on the target machine (bundled in the NSIS installer).
 - **DPI awareness**: Set at process level in `main.rs` via `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` before Tauri initializes.
 

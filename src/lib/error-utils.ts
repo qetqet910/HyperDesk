@@ -11,7 +11,7 @@ export function parseError(raw: string): ParsedError {
   if (raw.includes("Cannot find vm") || raw.includes("No virtual machine"))
     return { title: "가상 머신을 찾을 수 없습니다", body: "지정한 이름의 VM이 존재하지 않습니다." };
   if (raw.includes("Access is denied") || raw.includes("access denied"))
-    return { title: "권한이 없습니다", body: "관리자 권한이 필요합니다." };
+    return { title: "권한이 없습니다", body: "Hyper-V 관리 권한이 없습니다. 설정 > 계정 > 다른 사용자 에서 이 계정을 'Hyper-V Administrators' 그룹에 추가한 뒤 다시 로그인해주세요." };
   if (raw.includes("already running") || raw.includes("already started"))
     return { title: "이미 실행 중입니다", body: "VM이 이미 실행 중 상태입니다." };
   if (raw.includes("timed out") || raw.includes("Connection timed out"))

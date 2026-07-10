@@ -1,0 +1,22 @@
+{
+  "publisher": "CN=2B8E6FB2-76FA-4563-B612-D8CC9A2D8DF7",
+  "publisherDisplayName": "김현민",
+  "capabilities": {
+    "general": [
+      "internetClient"
+    ]
+  },
+  "extensions": {
+    "shareTarget": false,
+    "fileAssociations": [],
+    "protocolHandlers": []
+  },
+  "signing": {
+    "pfx": null,
+    "pfxPassword": null
+  },
+  "resourceIndex": {
+    "enabled": false,
+    "keepConfig": false
+  }
+}

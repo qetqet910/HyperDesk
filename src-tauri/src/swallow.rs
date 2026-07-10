@@ -85,8 +85,9 @@ pub struct SwallowInfo {
     /// rightmost few px of the VM surface are cropped by the slot).
     pub offset_x: i32,
     /// vmconnect's pid (Some for Hyper-V, None for RDP/Horizon). The connect-bar
-    /// (BBarWindowClass) is created lazily and can REappear on focus/unmaximize after
-    /// the 40s stabilization loop ends, so focus_window re-hides it using this pid.
+    /// (BBarWindowClass) is created lazily and can REappear on focus/unmaximize
+    /// between stabilization polls (1s when idle), so focus_window re-hides it
+    /// immediately using this pid instead of waiting for the next poll.
     pub vmconnect_pid: Option<u32>,
 }
 
@@ -102,8 +103,8 @@ const HORIZONTAL_BUFFER: i32 = 0; // Remove buffer for 1:1 fit at 100% DPI
 /// and the immersive poller itself) goes through `apply_chrome_region` below,
 /// which always composes the window's own chrome crop (offset/offset_x) with
 /// this value. Without a single source, the vmconnect stabilization loop
-/// (which re-applies its OWN region on every re-measured tick, for up to 40s
-/// after swallow) would periodically stomp the reveal crop back to "hidden"
+/// (which re-applies its OWN region on every re-measured tick, for the life
+/// of the swallow) would periodically stomp the reveal crop back to "hidden"
 /// — RDP never showed this bug because its offset is always 0 and nothing
 /// else touches its region after the initial swallow.
 static REVEAL_BAND: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
@@ -178,28 +179,46 @@ fn get_offset(class_name: &str) -> i32 {
 struct EnumParam {
     target_pid: u32,
     found_hwnd: HWND,
+    /// hwnds already owned by an existing swallow (any slot). Must be excluded
+    /// from both passes — see find_main_window for why.
+    excluded: Vec<isize>,
 }
 
 struct ChildParam { 
     found: HWND 
 }
 
+/// Finds the target process's main/session window. `pid` here is the PID
+/// Command::spawn returned, which for vmconnect.exe is NOT reliable — vmconnect
+/// is single-instance-per-VM and hands off to an already-running elevated
+/// instance, so the spawned PID can own no window at all. That's what the
+/// target_pid=0 fallback below exists for (search all windows by class instead
+/// of PID) — but with no PID filter, it will just as happily hand back a
+/// DIFFERENT slot's already-swallowed window if the class matches (e.g. a live
+/// TscShellContainerClass from an RDP slot), stealing it out from under that
+/// slot. `excluded` is every hwnd already tracked in SWALLOW_STATE (any slot)
+/// at call time — both passes skip them, so a fresh search can only ever
+/// re-find windows nobody has already claimed.
 pub fn find_main_window(pid: u32) -> Option<HWND> {
+    let excluded: Vec<isize> = lock_state().values().map(|i| i.child_hwnd).collect();
+
     let mut param = EnumParam {
         target_pid: pid,
         found_hwnd: HWND(std::ptr::null_mut()),
+        excluded: excluded.clone(),
     };
     unsafe {
         let _ = EnumWindows(Some(enum_windows_callback), LPARAM(&mut param as *mut EnumParam as isize));
     }
-    
+
     if !param.found_hwnd.is_invalid() {
         return Some(param.found_hwnd);
     }
 
     let mut fallback_param = EnumParam {
-        target_pid: 0, 
+        target_pid: 0,
         found_hwnd: HWND(std::ptr::null_mut()),
+        excluded,
     };
     unsafe {
         let _ = EnumWindows(Some(enum_windows_callback), LPARAM(&mut fallback_param as *mut EnumParam as isize));
@@ -359,11 +378,12 @@ extern "system" fn enum_video_rect_callback(hwnd: HWND, lparam: LPARAM) -> BOOL 
 
 extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let param = unsafe { &mut *(lparam.0 as *mut EnumParam) };
+    if param.excluded.contains(&(hwnd.0 as isize)) { return BOOL::from(true); }
     let mut pid = 0;
     unsafe {
         let thread_id = GetWindowThreadProcessId(hwnd, Some(&mut pid));
         if thread_id == 0 { return BOOL::from(true); }
-        
+
         if (param.target_pid == 0 || pid == param.target_pid) && IsWindowVisible(hwnd).as_bool() {
              let mut class_name = [0u16; 256];
              let len = GetClassNameW(hwnd, &mut class_name);
@@ -504,7 +524,12 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
             // window (same WPF class family, sometimes even another process)
             // that the pid-scoped search never sees. Hunt for it by heuristic.
             if candidate.is_none() && is_horizon {
-                candidate = find_horizon_session_window(&chain);
+                // Same exclusion as find_main_window: never hand back a window
+                // another slot already owns, not just ones this slot's own chain
+                // already tried.
+                let mut exclude = chain.clone();
+                exclude.extend(lock_state().values().map(|i| i.child_hwnd));
+                candidate = find_horizon_session_window(&exclude);
             }
 
             if let Some(h) = candidate {
@@ -805,13 +830,17 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     std::thread::spawn(move || {
         // Adaptive backoff: apps fight hardest right after swallow, so poll fast
         // (100ms) then ease off to 1s once the window stays put. Any correction
-        // resets to fast. Covers the same ~40s window as the old fixed 200×200ms
-        // loop with a fraction of the wakeups once stable. ponytail: heuristic
-        // backoff, swap for SetWinEventHook only if a real app still escapes.
+        // resets to fast. Runs for the LIFE of the swallow, not a fixed window —
+        // this loop doubles as the slot watchdog: the IsWindow check below is
+        // what detects a crashed/closed child and emits `window-closed`. The old
+        // 40s deadline meant a child dying at 41s left the slot showing a corpse
+        // until the user clicked it. At the 1s idle rate the cost is one cheap
+        // wakeup per second per slot. ponytail: heuristic backoff, swap for
+        // SetWinEventHook only if a real app still escapes.
         const FAST_MS: u64 = 100;
         const SLOW_MS: u64 = 1000;
+        #[cfg(debug_assertions)]
         let start = std::time::Instant::now();
-        let deadline = start + std::time::Duration::from_secs(40);
         let mut interval_ms = FAST_MS;
         // WIP: re-dump the tree once ~6s in, after a Basic→Enhanced session-mode
         // switch would have replaced the child tree. Confirms whether the chrome we
@@ -819,7 +848,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
         #[cfg(debug_assertions)]
         let mut redumped = false;
 
-        while std::time::Instant::now() < deadline {
+        loop {
             std::thread::sleep(std::time::Duration::from_millis(interval_ms));
 
             #[cfg(debug_assertions)]
@@ -1379,8 +1408,8 @@ pub fn focus_window(slot_id: &str) {
                 let _ = BringWindowToTop(hwnd);
             }
         }
-        // vmconnect re-creates its connect-bar on focus; the 40s stabilization loop
-        // that normally re-hides it has ended by now, so hide it here too.
+        // vmconnect re-creates its connect-bar on focus; the stabilization loop
+        // also re-hides it but only polls at 1s when idle — do it here immediately.
         if let Some(pid) = vmconnect_pid {
             hide_vmconnect_bbar(pid);
         }

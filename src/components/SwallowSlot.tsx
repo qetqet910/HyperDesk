@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, ReactNode } from "react";
-import { Globe, Plus, X, RefreshCw, Terminal, AlertCircle, ZapOff, ChevronDown, Monitor } from "lucide-react";
+import { Globe, Plus, X, RefreshCw, Terminal, AlertCircle, ZapOff, Monitor } from "lucide-react";
 import { api } from "@/lib/tauri-api";
 import { VmInfo, RemoteHost } from "@/types";
 import { listen } from "@tauri-apps/api/event";
@@ -18,9 +18,13 @@ interface SwallowSlotProps {
       header bar. Keeping them here (not in a second floating header) is what
       guarantees a single header over the VM — see .slot-header-bar in App.css. */
   headerControls?: ReactNode;
+  /** Reports connect-in-flight up to MultiView so it can lock slot switching —
+      swapping the visible slot mid-swallow breaks the embed (bounds sync runs
+      against a hidden slot while mstsc is still being captured). */
+  onConnectingChange?: (id: string, connecting: boolean) => void;
 }
 
-export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls }: SwallowSlotProps) {
+export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange }: SwallowSlotProps) {
   // contentRef points to slot-content-area (below the fixed 36px header bar).
   // syncBounds and handleConnect both measure this div so the Win32 window
   // is positioned to fill exactly the content area, never under the header.
@@ -32,6 +36,14 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
   // Keep refs in sync so the integrity-poll interval closure always reads current values.
   useEffect(() => { assignedIdRef.current = assignedId; }, [assignedId]);
   useEffect(() => { isConnectingRef.current = isConnecting; }, [isConnecting]);
+  useEffect(() => { onConnectingChange?.(id, isConnecting); }, [id, isConnecting, onConnectingChange]);
+  // A live session can't be "connecting". The swallow-success event clears
+  // isConnecting, but isSwallowed is ALSO set by the 5s heartbeat and the
+  // mount-time checkStatus (isWindowValid) — paths that never cleared it, so a
+  // missed event left isConnecting stuck true. Invisible before (the spinner
+  // is gated on isSwallowed), but it kept MultiView's connect-lock engaged
+  // forever after the connection was already up.
+  useEffect(() => { if (isSwallowed) setIsConnecting(false); }, [isSwallowed]);
   useEffect(() => { isSwallowedRef.current = isSwallowed; }, [isSwallowed]);
   const [showSelector, setShowSelector] = useState(false);
   const [isGlitched, setIsGlitched] = useState(false);
@@ -413,10 +425,11 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
           too (headerControls) instead of in a second bar. */}
       <div className={`slot-header-bar ${isSwallowed ? "slot-header-bar--active" : ""}`}>
         {isSwallowed ? (
-          <button className="slot-change-btn" onClick={() => setShowSelector(true)} title="다른 연결로 변경">
-            <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
-            <ChevronDown size={11} />
-          </button>
+          // Static label only. The old "다른 연결로 변경" dropdown hid the Win32
+          // child (selector-open → setWindowVisibility(false)) and left the slot
+          // black — connection switching is X-disconnect → pick again, which is
+          // the same number of clicks without the broken intermediate state.
+          <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
         ) : (
           <span className="slot-header-bar__label">
             {assignedId ? (selectedConnection?.name ?? assignedId) : "비어있음"}

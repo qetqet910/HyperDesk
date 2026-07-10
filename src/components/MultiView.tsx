@@ -2,7 +2,7 @@ import { useSettings } from "@/contexts/SettingsContext";
 import { SwallowSlot } from "@/components/SwallowSlot";
 import { VmInfo, RemoteHost } from "@/types";
 import { Expand, Shrink } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "@/lib/tauri-api";
@@ -34,6 +34,18 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   // swallowed window isn't moved against a half-reflowed container.
   const [isSwitching, setIsSwitching] = useState(false);
   const lockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Connect-lock: while any slot has a connect in flight, slot switching is
+  // frozen (Alt+1~4 + header buttons + immersive). Switching mid-swallow made
+  // the embed stutter or break — bounds sync ran against a hidden slot while
+  // mstsc/vmconnect was still being captured. The slot's own "연결 취소" button
+  // stays available as the escape hatch.
+  const [connectingSlots, setConnectingSlots] = useState<Record<string, boolean>>({});
+  const anyConnecting = Object.values(connectingSlots).some(Boolean);
+  const anyConnectingRef = useRef(false);
+  useEffect(() => { anyConnectingRef.current = anyConnecting; }, [anyConnecting]);
+  const handleConnectingChange = useCallback((slotId: string, connecting: boolean) => {
+    setConnectingSlots(prev => (prev[slotId] === connecting ? prev : { ...prev, [slotId]: connecting }));
+  }, []);
 
   useEffect(() => {
     const unlisten = listen<boolean>("immersive-edge", (e) => setEdgeRevealed(e.payload));
@@ -102,6 +114,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
       const m = /^slot-(\d+)$/.exec(event.payload);
       if (!m) return;
       const idx = Number(m[1]);
+      if (anyConnectingRef.current) return; // connect-lock: no switching mid-swallow
       if (idx >= 0 && idx < SLOT_COUNT) {
         setActiveSlot(idx);
         api.focusSlotWindow(event.payload).catch(console.error);
@@ -137,8 +150,9 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
           <button
             key={i}
             className={activeSlot === i ? "active" : ""}
+            disabled={anyConnecting && activeSlot !== i}
             onClick={() => setActiveSlot(i)}
-            title={`슬롯 ${i + 1} (Alt+${i + 1})`}
+            title={anyConnecting && activeSlot !== i ? "연결 중에는 슬롯을 전환할 수 없습니다" : `슬롯 ${i + 1} (Alt+${i + 1})`}
           >
             {i + 1}
           </button>
@@ -148,8 +162,9 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
       <div className="control-group">
         <button
           className={isImmersive ? "active" : ""}
+          disabled={anyConnecting}
           onClick={handleToggleImmersive}
-          title={isImmersive ? "VM 전체화면 해제" : "VM 전체화면 (앱 UI 숨김)"}
+          title={anyConnecting ? "연결 중에는 전환할 수 없습니다" : isImmersive ? "VM 전체화면 해제" : "VM 전체화면 (앱 UI 숨김)"}
         >
           {isImmersive ? <Shrink size={14} /> : <Expand size={14} />}
         </button>
@@ -176,6 +191,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
               isOverlayActive={isOverlayActive}
               isSyncLocked={isSwitching}
               headerControls={headerControls}
+              onConnectingChange={handleConnectingChange}
             />
           );
         })}

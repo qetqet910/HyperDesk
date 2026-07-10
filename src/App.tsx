@@ -3,7 +3,8 @@ import {
   Plus,
   Globe, Cpu, Settings as LucideSettings,
   Server,
-  Play
+  Play,
+  AlertTriangle
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "@/lib/tauri-api";
@@ -315,9 +316,24 @@ export default function App() {
   // ─── Dashboard content (extracted for clarity) ───────────────────────────
 
   const DashboardContent = (
-    <div className="dashboard-grid">
+    <motion.div 
+      className="dashboard-grid"
+      initial="hidden"
+      animate="visible"
+      variants={{
+        hidden: { opacity: 0 },
+        visible: { opacity: 1, transition: { staggerChildren: 0.08 } }
+      }}
+    >
       {/* KPI Strip */}
-      <div className="hd-kpi-strip" style={{ gridColumn: "1 / -1" }}>
+      <motion.div 
+        className="hd-kpi-strip" 
+        style={{ gridColumn: "1 / -1" }}
+        variants={{
+          hidden: { opacity: 0, y: 10 },
+          visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+        }}
+      >
         {(() => {
           const onlineRemote = remoteHosts.filter(h => h.status !== "TIMEOUT" && h.status !== "Offline").length;
           const latencyHosts = remoteHosts.filter(h => (h.latency ?? 0) > 0);
@@ -338,12 +354,26 @@ export default function App() {
             </div>
           ));
         })()}
-      </div>
+      </motion.div>
 
       {/* Section: System Command Hub */}
-      <div className="section-label"><h3>시스템 현황</h3><div className="section-line" /></div>
+      <motion.div 
+        className="section-label"
+        variants={{
+          hidden: { opacity: 0, x: -10 },
+          visible: { opacity: 1, x: 0, transition: { duration: 0.3 } }
+        }}
+      >
+        <h3>시스템 현황</h3><div className="section-line" />
+      </motion.div>
 
-      <div style={{ gridColumn: "1 / -1", display: "flex", gap: "16px" }}>
+      <motion.div 
+        style={{ gridColumn: "1 / -1", display: "flex", gap: "16px" }}
+        variants={{
+          hidden: { opacity: 0, y: 15 },
+          visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+        }}
+      >
         <BentoCell className="cell-master-hub" style={{ flex: 3, padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -441,14 +471,26 @@ export default function App() {
             )}
           </div>
         </BentoCell>
-      </div>
+      </motion.div>
 
       {/* Section: Virtualization Rack */}
-      <div className="section-label">
+      <motion.div 
+        className="section-label"
+        variants={{
+          hidden: { opacity: 0, x: -10 },
+          visible: { opacity: 1, x: 0, transition: { duration: 0.3 } }
+        }}
+      >
         <h3>가상 머신 클러스터</h3>
         <div className="section-line" />
-      </div>
-      <BentoCell className="cell-4x2" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
+      </motion.div>
+      <motion.div
+        variants={{
+          hidden: { opacity: 0, y: 15 },
+          visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+        }}
+      >
+        <BentoCell className="cell-4x2" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: "12px", fontWeight: 500, color: "var(--text-muted)" }}>{vms.length + horizonHosts.length}개 노드</span>
           <span style={{ fontSize: "11px", color: "var(--accent-green)", fontWeight: 600, background: "rgba(34,197,94,0.08)", padding: "2px 10px", borderRadius: "6px", border: "1px solid rgba(34,197,94,0.2)" }}>
@@ -456,6 +498,18 @@ export default function App() {
           </span>
         </div>
         <div className="rack-container no-scrollbar" style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "scroll", maxHeight: "480px" }}>
+          {data?.vm_error && (() => {
+            const err = parseError(data.vm_error);
+            return (
+              <div style={{ padding: "14px 16px", borderRadius: "10px", border: "1px solid rgba(244,63,94,0.3)", background: "rgba(244,63,94,0.08)", display: "flex", gap: "10px", alignItems: "flex-start" }}>
+                <AlertTriangle size={16} color="var(--accent-red)" style={{ flexShrink: 0, marginTop: "1px" }} />
+                <div>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--accent-red)" }}>{err.title}</div>
+                  <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>{err.body}</div>
+                </div>
+              </div>
+            );
+          })()}
           {localRackAssets.length > 0 ? (
             <Reorder.Group axis="y" values={localRackAssets} onReorder={(o) => { setLocalRackAssets(o); localStorage.setItem("hyperdesk_rack_order", JSON.stringify(o.map(i => i.id))); }} style={{ display: "flex", flexDirection: "column", gap: "12px", listStyle: "none", padding: 0, margin: 0 }}>
               {localRackAssets.map((asset, idx) => (
@@ -475,16 +529,28 @@ export default function App() {
           )}
         </div>
       </BentoCell>
-
+      </motion.div>
       {mstHostsList.length > 0 && <>
-        <div className="section-label">
+        <motion.div 
+          className="section-label"
+          variants={{
+            hidden: { opacity: 0, x: -10 },
+            visible: { opacity: 1, x: 0, transition: { duration: 0.3 } }
+          }}
+        >
           <Globe size={14} color="var(--accent-blue)" /><h3>원격 자산</h3><div className="section-line" />
           <ColumnToggle value={settings.remoteAssetColumns} onChange={(v) => updateSettings({ remoteAssetColumns: v })} />
           <button className="hd-segment-btn" onClick={() => { setEditingHost(null); setShowAssetModal(true); }} title="원격 자산 등록">
             <Plus size={13} />
           </button>
-        </div>
-        <div className="mst-line-container">
+        </motion.div>
+        <motion.div 
+          className="mst-line-container"
+          variants={{
+            hidden: { opacity: 0, y: 15 },
+            visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+          }}
+        >
           {/* MST rows — 새 랙 슬레드 스타일. 2열 모드는 grid로 전환, 각 아이템은 반폭. */}
           <Reorder.Group
             axis="y"
@@ -539,9 +605,9 @@ export default function App() {
               );
             })}
           </Reorder.Group>
-        </div>
+        </motion.div>
       </>}
-    </div>
+    </motion.div>
   );
 
   // ─── Stats bar (shown below topbar) ─────────────────────────────────────────

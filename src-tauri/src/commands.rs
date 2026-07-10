@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::os::windows::process::CommandExt;
 use crate::models::VmInfo;
 use crate::hosts::{RemoteHost, load_hosts, save_hosts};
@@ -128,6 +128,141 @@ fn run_powershell(script: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+// ---------- Persistent PowerShell worker (warm runspace) ----------
+//
+// A cold powershell.exe run costs ~1.3s here: ~150ms process spawn plus ~1.1s
+// Hyper-V module load + CIM session setup. The VM query itself is ~30ms once
+// those are warm (measured 2026-07-09). The dashboard pays that 1.3s twice
+// per 5s poll, so the hot read-only paths (get_vms, RDP registry scan) run
+// through ONE resident shell fed base64-encoded scripts over stdin.
+//
+// Lifecycle commands (Start/Stop-VM, checkpoints, ...) stay on cold
+// run_powershell on purpose: Stop-VM can block for 30s and must never hold
+// the worker mutex in front of a dashboard poll. Only route a script here if
+// it is read-only and fast.
+//
+// Protocol: one base64(UTF-8 script) line in -> output lines, then a
+// "##PS_DONE:<code>##" sentinel line out. `exit` inside a script would kill
+// the loop, but every script sent here runs under $ErrorActionPreference =
+// 'Stop' where Write-Error throws before any `exit 1` is reached (get_vms),
+// and the wrapper catch turns that into sentinel code 1 — verified by test.
+// ponytail: output containing a literal sentinel line would desync; VM/host
+// JSON can't produce one.
+const PS_WORKER_LOOP: &str = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; while ($true) { $l = [Console]::In.ReadLine(); if ($null -eq $l) { exit }; try { $ErrorActionPreference = 'Stop'; $s = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($l)); [Console]::Out.Write((& ([scriptblock]::Create($s)) | Out-String)); [Console]::Out.WriteLine(); [Console]::Out.WriteLine('##PS_DONE:0##') } catch { [Console]::Out.WriteLine($_.Exception.Message); [Console]::Out.WriteLine('##PS_DONE:1##') } }";
+
+struct PsWorker {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+}
+
+static PS_WORKER: OnceLock<Mutex<Option<PsWorker>>> = OnceLock::new();
+fn ps_worker_slot() -> &'static Mutex<Option<PsWorker>> {
+    PS_WORKER.get_or_init(|| Mutex::new(None))
+}
+
+/// Minimal base64 (RFC 4648) — only used to shuttle scripts to the worker.
+/// ponytail: hand-rolled to avoid a new dependency for 15 lines.
+fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
+        out.push(T[(n >> 18 & 63) as usize] as char);
+        out.push(T[(n >> 12 & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6 & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
+fn spawn_ps_worker() -> Option<PsWorker> {
+    let mut child = Command::new("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", PS_WORKER_LOOP])
+        .creation_flags(0x08000000)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        // Errors surface on stdout via the catch branch; an unread stderr pipe
+        // would deadlock the worker once full.
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let stdin = child.stdin.take()?;
+    let stdout = std::io::BufReader::new(child.stdout.take()?);
+    Some(PsWorker { child, stdin, stdout })
+}
+
+/// Sends one script to the worker; returns (output, success).
+fn ps_worker_exec(w: &mut PsWorker, script: &str) -> std::io::Result<(String, bool)> {
+    use std::io::{BufRead, Write};
+    writeln!(w.stdin, "{}", b64(script.as_bytes()))?;
+    w.stdin.flush()?;
+    let mut out = String::new();
+    loop {
+        let mut line = String::new();
+        if w.stdout.read_line(&mut line)? == 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "PS worker exited"));
+        }
+        if let Some(code) = line.trim().strip_prefix("##PS_DONE:") {
+            return Ok((out, code.starts_with('0')));
+        }
+        out.push_str(&line);
+    }
+}
+
+/// Warms the resident worker in the background at app startup so the module
+/// load + CIM session cost (~1.1s) overlaps with WebView2/React boot instead
+/// of stalling the first dashboard fetch (the loading screen's long pole).
+pub fn prewarm_ps_worker() {
+    std::thread::spawn(|| {
+        let _ = run_powershell_warm(
+            "if (Get-Command Get-VM -ErrorAction SilentlyContinue) { Get-VM | Out-Null }",
+        );
+    });
+}
+
+/// run_powershell via the resident worker; any worker failure falls back to a
+/// cold spawn, so behavior can never be worse than before the worker existed.
+fn run_powershell_warm(script: &str) -> Result<String, String> {
+    let full = format!("$ErrorActionPreference = 'Stop'; {}", script);
+    {
+        let mut guard = lock_or_recover(ps_worker_slot());
+        if guard.is_none() {
+            *guard = spawn_ps_worker();
+        }
+        if let Some(w) = guard.as_mut() {
+            // ponytail: coarse hang guard. A wedged worker would hold this mutex
+            // forever (a cold spawn recovers on the next poll); killing the
+            // process unblocks the reader below with EOF -> cold fallback.
+            let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let flag = done.clone();
+            let pid = w.child.id();
+            std::thread::spawn(move || {
+                for _ in 0..240 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    if flag.load(std::sync::atomic::Ordering::Relaxed) { return; }
+                }
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .creation_flags(0x08000000)
+                    .output();
+            });
+            let res = ps_worker_exec(w, &full);
+            done.store(true, std::sync::atomic::Ordering::Relaxed);
+            match res {
+                Ok((out, true)) => return Ok(out.trim().to_string()),
+                Ok((out, false)) => return Err(format!("PowerShell error: {}", out.trim())),
+                Err(_) => {
+                    let _ = w.child.kill();
+                    *guard = None; // respawned lazily on the next call
+                }
+            }
+        }
+    }
+    run_powershell(script)
+}
+
 #[tauri::command]
 pub async fn get_vms() -> Result<Vec<VmInfo>, String> {
     let vm_script = r#"
@@ -171,7 +306,7 @@ pub async fn get_vms() -> Result<Vec<VmInfo>, String> {
 
     // Run the blocking Get-VM off the async executor so get_dashboard can
     // overlap it with the registry scan (see tokio::join! there).
-    let vm_json = tokio::task::spawn_blocking(|| run_powershell(vm_script))
+    let vm_json = tokio::task::spawn_blocking(|| run_powershell_warm(vm_script))
         .await
         .map_err(|e| format!("VM query task failed: {}", e))??;
     if vm_json.is_empty() || vm_json == "null" {
@@ -251,7 +386,7 @@ pub async fn get_vm_ip(name: String) -> Result<String, String> {
         r#"(Get-VMNetworkAdapter -VMName '{}' | Where-Object {{ $_.IPAddresses.Count -gt 0 }} | Select-Object -ExpandProperty IPAddresses) -join ','"#,
         ps_escape(&name)
     );
-    let ip_str = run_powershell(&ip_script).unwrap_or_default();
+    let ip_str = run_powershell_warm(&ip_script).unwrap_or_default();
     Ok(ip_str)
 }
 
@@ -584,7 +719,7 @@ pub async fn get_dashboard(app: AppHandle) -> Result<DashboardData, String> {
     // independent, so run them concurrently on blocking threads instead of
     // letting the slow Get-VM gate the rest of the dashboard.
     let vms_fut = get_vms();
-    let rdp_fut = tokio::task::spawn_blocking(|| run_powershell(RDP_SCAN_SCRIPT));
+    let rdp_fut = tokio::task::spawn_blocking(|| run_powershell_warm(RDP_SCAN_SCRIPT));
     let (vms_res, rdp_res) = tokio::join!(vms_fut, rdp_fut);
 
     // 1. Hyper-V VMs
@@ -862,7 +997,7 @@ pub async fn list_snapshots(vm_name: String) -> Result<Vec<VmSnapshot>, String> 
         r#"Get-VMSnapshot -VMName '{}' -ErrorAction Stop | Select-Object Id,Name,VMName,@{{N='CreationTime';E={{$_.CreationTime.ToString('yyyy-MM-dd HH:mm')}}}},SnapshotType | ConvertTo-Json -Depth 2"#,
         safe_vm
     );
-    let out = run_powershell(&script)?;
+    let out = run_powershell_warm(&script)?;
     if out.is_empty() || out == "null" {
         return Ok(vec![]);
     }
@@ -1262,7 +1397,7 @@ pub async fn get_hyper_v_events(max_events: Option<u32>) -> Result<Vec<crate::mo
             else {{ $_ | ConvertTo-Json -Depth 2 }}
     "#, count, count);
 
-    let json = run_powershell(&script).unwrap_or_else(|_| "[]".to_string());
+    let json = run_powershell_warm(&script).unwrap_or_else(|_| "[]".to_string());
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(vec![]);
     }
@@ -1312,7 +1447,7 @@ pub async fn get_vm_checkpoints(name: String) -> Result<Vec<crate::models::VmChe
         else {{ $result | ConvertTo-Json -Depth 3 }}
     "#, safe);
 
-    let json = run_powershell(&script).unwrap_or_else(|_| "[]".to_string());
+    let json = run_powershell_warm(&script).unwrap_or_else(|_| "[]".to_string());
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(vec![]);
     }
@@ -1401,7 +1536,7 @@ pub async fn get_vm_switches() -> Result<Vec<crate::models::VmSwitch>, String> {
         else { $result | ConvertTo-Json -Depth 2 }
     "#;
 
-    let json = run_powershell(script).unwrap_or_else(|_| "[]".to_string());
+    let json = run_powershell_warm(script).unwrap_or_else(|_| "[]".to_string());
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(vec![]);
     }
@@ -1441,7 +1576,7 @@ pub async fn get_vm_network_adapters() -> Result<Vec<crate::models::VmNetworkAda
         else { $result | ConvertTo-Json -Depth 2 }
     "#;
 
-    let json = run_powershell(script).unwrap_or_else(|_| "[]".to_string());
+    let json = run_powershell_warm(script).unwrap_or_else(|_| "[]".to_string());
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(vec![]);
     }
@@ -1680,5 +1815,32 @@ mod tests {
         let json = r#"[{"VMName":"SRV-01","SwitchName":""}]"#;
         let result = parse_adapters(json);
         assert_eq!(result[0].switch_name, "");
+    }
+
+    #[test]
+    fn test_b64_rfc4648_vectors() {
+        assert_eq!(b64(b""), "");
+        assert_eq!(b64(b"f"), "Zg==");
+        assert_eq!(b64(b"fo"), "Zm8=");
+        assert_eq!(b64(b"foo"), "Zm9v");
+        assert_eq!(b64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(b64("한글".as_bytes()), "7ZWc6riA");
+    }
+
+    #[test]
+    fn test_ps_worker_roundtrip() {
+        // Success, error (Write-Error under EAP=Stop must NOT kill the loop),
+        // then success again through the same worker — the persistence claim.
+        let mut w = spawn_ps_worker().expect("spawn worker");
+        let (out, ok) = ps_worker_exec(&mut w, "Write-Output '한글OK'").unwrap();
+        assert!(ok, "first exec failed: {}", out);
+        assert_eq!(out.trim(), "한글OK");
+        let (out, ok) = ps_worker_exec(&mut w, "$ErrorActionPreference='Stop'; Write-Error 'boom'; exit 1").unwrap();
+        assert!(!ok);
+        assert!(out.contains("boom"));
+        let (out, ok) = ps_worker_exec(&mut w, "1 + 1").unwrap();
+        assert!(ok, "worker died after error case");
+        assert_eq!(out.trim(), "2");
+        let _ = w.child.kill();
     }
 }
