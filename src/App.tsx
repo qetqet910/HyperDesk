@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
 import {
   Plus,
   Globe, Cpu, Settings as LucideSettings,
@@ -15,10 +15,14 @@ import { useToast } from "@/hooks/useToast";
 import { applyTheme } from "@/lib/theme";
 import { HyperVCard, HorizonCard } from "@/components/RackAsset";
 import { Toast } from "@/components/Toast";
-import { SettingsPage } from "@/components/SettingsPage";
 import { VmSettingsModal } from "@/components/VmSettingsModal";
-import { MultiView } from "@/components/MultiView";
-import { SnapshotsPage } from "@/components/SnapshotsPage";
+import { CreateVmModal } from "@/components/CreateVmModal";
+// Non-dashboard routes are code-split: the dashboard is the initial view, so
+// these only load their chunk when the user first navigates to them, shrinking
+// the initial app chunk (and its parse cost at startup).
+const SettingsPage = lazy(() => import("@/components/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const MultiView = lazy(() => import("@/components/MultiView").then(m => ({ default: m.MultiView })));
+const SnapshotsPage = lazy(() => import("@/components/SnapshotsPage").then(m => ({ default: m.SnapshotsPage })));
 import { AssetModal } from "@/components/AssetModal";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { MemoModal } from "@/components/MemoModal";
@@ -27,9 +31,9 @@ import { Sidebar, type Page } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { BentoCell } from "@/components/BentoCell";
 import { Sparkline } from "@/components/Sparkline";
-import { EventsPage } from "@/components/EventsPage";
-import { VmsPage } from "@/components/VmsPage";
-import { RemotePage } from "@/components/RemotePage";
+const EventsPage = lazy(() => import("@/components/EventsPage").then(m => ({ default: m.EventsPage })));
+const VmsPage = lazy(() => import("@/components/VmsPage").then(m => ({ default: m.VmsPage })));
+const RemotePage = lazy(() => import("@/components/RemotePage").then(m => ({ default: m.RemotePage })));
 import { CommandPalette } from "@/components/CommandPalette";
 import { useVmActions } from "@/hooks/useDashboard";
 import type { VmInfo, RemoteHost } from "@/types";
@@ -110,6 +114,7 @@ export default function App() {
   const [showAssetModal, setShowAssetModal] = useState(false);
   const [editingHost, setEditingHost] = useState<RemoteHost | null>(null);
   const [showVmSettings, setShowVmSettings] = useState<VmInfo | null>(null);
+  const [showCreateVm, setShowCreateVm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [errorModal, setErrorModal] = useState<{ title: string; body: string } | null>(null);
   const [showSearch, setShowSearch] = useState(false);
@@ -367,14 +372,17 @@ export default function App() {
         <h3>시스템 현황</h3><div className="section-line" />
       </motion.div>
 
-      <motion.div 
-        style={{ gridColumn: "1 / -1", display: "flex", gap: "16px" }}
+      <motion.div
+        // flexWrap + per-child minWidth: the monitor (flex 3) and snapshot index
+        // (flex 2) sit side-by-side when wide and stack once the row can't give
+        // each its ~320px min, instead of squeezing the sparklines to nothing.
+        style={{ gridColumn: "1 / -1", display: "flex", flexWrap: "wrap", gap: "16px" }}
         variants={{
           hidden: { opacity: 0, y: 15 },
           visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
         }}
       >
-        <BentoCell className="cell-master-hub" style={{ flex: 3, padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+        <BentoCell className="cell-master-hub" style={{ flex: "3 1 340px", padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <Cpu size={14} color="var(--accent-blue)" />
@@ -397,7 +405,7 @@ export default function App() {
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "10px", color: "var(--text-muted)" }}>
                 <span>메모리</span><span>{(((statsData?.memory_used ?? data?.system_memory_used) ?? 0) / 1024 / 1024).toFixed(1)} GB</span>
               </div>
-              <Sparkline data={memHistory} color="var(--accent-blue)" height={70} />
+              <Sparkline data={memHistory} color="var(--accent-green)" height={70} />
             </div>
           </div>
 
@@ -437,7 +445,7 @@ export default function App() {
         </BentoCell>
 
         {/* Snapshot Index */}
-        <BentoCell style={{ flex: 2, padding: "20px", display: "flex", flexDirection: "column", gap: "12px" }}>
+        <BentoCell style={{ flex: "2 1 300px", padding: "20px", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span style={{ fontSize: "13px", opacity: 0.5 }}>◇</span>
@@ -485,6 +493,12 @@ export default function App() {
         <div className="section-line" />
       </motion.div>
       <motion.div
+        // Span the full dashboard-grid width. `.cell-4x2`'s own `grid-column:
+        // 1/-1` sits on the inner BentoCell, but the grid CHILD is THIS
+        // motion.div — so the rule never applied and the card rendered at half
+        // width (1 of 2 columns), clipping the VM rows' controls. Mirrors how
+        // `.mst-line-container` (remote assets) puts the span on the grid child.
+        style={{ gridColumn: "1 / -1" }}
         variants={{
           hidden: { opacity: 0, y: 15 },
           visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
@@ -680,18 +694,23 @@ export default function App() {
                 Win32 windows can't follow a CSS enter animation. Every other page is
                 wrapped in .hd-page keyed by `page` so the transition replays on nav. */}
             <main className={`hd-content ${page === "multiview" ? "hd-content--multiview" : ""}`}>
-              {page === "multiview" ? (
-                <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} onError={(msg) => { addToast(msg, "error"); addLog(`[MULTIVIEW] ${msg}`, "error"); }} />
-              ) : (
-                <div className="hd-page" key={page}>
-                  {page === "dashboard" && DashboardContent}
-                  {page === "vms" && <VmsPage vms={vms} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={setShowVmSettings} />}
-                  {page === "remote" && <RemotePage remoteHosts={remoteHosts} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onMemo={setMemoHost} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setShowAssetModal(true); }} />}
-                  {page === "snapshots" && <SnapshotsPage vms={vms} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[SNAP] ${msg}`, "success"); }} onError={(msg) => { addToast(msg, "error"); addLog(`[SNAP] ${msg}`, "error"); }} />}
-                  {page === "events"    && <EventsPage logs={logs} onClear={() => setLogs([])} />}
-                  {page === "settings"  && <SettingsPage addToast={addToast} />}
-                </div>
-              )}
+              {/* Suspense fallback covers the brief chunk-load of a lazily-imported
+                  route (near-instant off local disk); the dashboard is eager so it
+                  never shows the fallback on first paint. */}
+              <Suspense fallback={<div className="hd-page" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "12px" }}>로딩 중…</div>}>
+                {page === "multiview" ? (
+                  <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} onError={(msg) => { addToast(msg, "error"); addLog(`[MULTIVIEW] ${msg}`, "error"); }} />
+                ) : (
+                  <div className="hd-page" key={page}>
+                    {page === "dashboard" && DashboardContent}
+                    {page === "vms" && <VmsPage vms={vms} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={setShowVmSettings} onCreate={() => setShowCreateVm(true)} />}
+                    {page === "remote" && <RemotePage remoteHosts={remoteHosts} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onMemo={setMemoHost} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setShowAssetModal(true); }} />}
+                    {page === "snapshots" && <SnapshotsPage vms={vms} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[SNAP] ${msg}`, "success"); }} onError={(msg) => { addToast(msg, "error"); addLog(`[SNAP] ${msg}`, "error"); }} />}
+                    {page === "events"    && <EventsPage logs={logs} onClear={() => setLogs([])} />}
+                    {page === "settings"  && <SettingsPage addToast={addToast} />}
+                  </div>
+                )}
+              </Suspense>
             </main>
           </div>
 
@@ -724,6 +743,11 @@ export default function App() {
           />
 
           {showVmSettings  && <VmSettingsModal vm={showVmSettings} onClose={() => setShowVmSettings(null)} onLog={addLog} />}
+          {showCreateVm    && <CreateVmModal
+            onClose={() => setShowCreateVm(false)}
+            onCreated={(name) => { setShowCreateVm(false); addToast(`${name} 가상 머신이 생성되었습니다.`, "success"); addLog(`[VM] 새 VM 생성: ${name}`, "success"); refetch(); }}
+            onError={(msg) => { handleError(msg); }}
+          />}
           {showAssetModal  && <AssetModal initialData={editingHost ?? undefined} isEditing={!!editingHost} isPending={addHost.isPending || updateHost.isPending} onClose={() => { setShowAssetModal(false); setEditingHost(null); }} onSubmit={handleAssetAction} />}
           {confirmDelete   && <ConfirmModal title="자산 영구 삭제" message="선택한 원격 자산을 영구적으로 삭제하시겠습니까?" confirmText="영구 삭제 수행" type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
           {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText="확인" onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}

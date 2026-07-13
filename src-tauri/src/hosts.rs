@@ -23,6 +23,42 @@ pub struct RemoteHost {
     pub tags: Option<Vec<String>>,
 }
 
+/// One-time migration for the 2026-07 MS Store identifier change
+/// (`com.hyperdesk.app` -> `FAAFE2B2.HyperDesk`, see CLAUDE.md). Tauri derives
+/// `app_data_dir()` straight from `identifier`, so every existing install's
+/// hosts.json/vm-tags.json/vm-memos.json would otherwise silently vanish the
+/// moment a user updates — same folder name, new parent, no error. Must run
+/// before anything else reads/writes the new directory (called first thing in
+/// lib.rs setup()). No-op if the new dir already has data (already migrated,
+/// or a genuinely fresh install with nothing to bring over).
+pub fn migrate_legacy_app_data(app: &AppHandle) {
+    let Ok(new_dir) = app.path().app_data_dir() else { return };
+    let Some(roaming_root) = new_dir.parent().map(|p| p.to_path_buf()) else { return };
+    migrate_legacy_app_data_at(&roaming_root, &new_dir);
+}
+
+/// Path-only core of the migration, split out from `migrate_legacy_app_data` so
+/// it's testable without a live `AppHandle` (Tauri's isn't constructible in a
+/// plain unit test). `roaming_root` is the shared parent both identifiers'
+/// folders live under (`%APPDATA%` on Windows); `new_dir` is this build's
+/// `app_data_dir()`.
+fn migrate_legacy_app_data_at(roaming_root: &std::path::Path, new_dir: &std::path::Path) {
+    if new_dir.join("hosts.json").exists() {
+        return; // already migrated, or fresh install that collided — leave it alone
+    }
+    let old_dir = roaming_root.join("com.hyperdesk.app");
+    if !old_dir.exists() {
+        return; // fresh install, never had the old identifier
+    }
+    let _ = fs::create_dir_all(new_dir);
+    for name in ["hosts.json", "vm-tags.json", "vm-memos.json"] {
+        let old_file = old_dir.join(name);
+        if old_file.exists() {
+            let _ = fs::copy(&old_file, new_dir.join(name));
+        }
+    }
+}
+
 pub fn get_hosts_file_path(app: &AppHandle) -> PathBuf {
     let mut path = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
     if !path.exists() {
@@ -149,5 +185,74 @@ mod tests {
         assert_eq!(filtered.len(), 2, "Should only persist manual hosts and hidden detected hosts");
         assert!(filtered.iter().any(|h| h.id == "manual-1"));
         assert!(filtered.iter().any(|h| h.id == "detected-hidden"));
+    }
+
+    // 3. 2026-07 identifier 변경 마이그레이션 검증 (실제 임시 디렉터리 사용)
+    fn temp_scratch_dir(tag: &str) -> PathBuf {
+        // Instant/SystemTime's Debug output includes ':' on some platforms,
+        // which Windows rejects in a path — a plain nanos-since-epoch integer
+        // is portable and still unique enough to avoid cross-test collisions.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "hyperdesk-migrate-test-{}-{}-{}",
+            tag, std::process::id(), nanos
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn migration_copies_legacy_files_into_new_dir() {
+        let root = temp_scratch_dir("copy");
+        let old_dir = root.join("com.hyperdesk.app");
+        let new_dir = root.join("FAAFE2B2.HyperDesk");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::write(old_dir.join("hosts.json"), r#"[{"id":"x"}]"#).unwrap();
+        fs::write(old_dir.join("vm-tags.json"), r#"{"vm1":["prod"]}"#).unwrap();
+        // vm-memos.json deliberately absent — migration must not choke on a
+        // partially-populated old install.
+
+        migrate_legacy_app_data_at(&root, &new_dir);
+
+        assert_eq!(fs::read_to_string(new_dir.join("hosts.json")).unwrap(), r#"[{"id":"x"}]"#);
+        assert_eq!(fs::read_to_string(new_dir.join("vm-tags.json")).unwrap(), r#"{"vm1":["prod"]}"#);
+        assert!(!new_dir.join("vm-memos.json").exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn migration_is_noop_when_new_dir_already_has_data() {
+        let root = temp_scratch_dir("noop-existing");
+        let old_dir = root.join("com.hyperdesk.app");
+        let new_dir = root.join("FAAFE2B2.HyperDesk");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::write(old_dir.join("hosts.json"), r#"[{"id":"old"}]"#).unwrap();
+        fs::write(new_dir.join("hosts.json"), r#"[{"id":"already-here"}]"#).unwrap();
+
+        migrate_legacy_app_data_at(&root, &new_dir);
+
+        // Must never clobber data that's already in the new location.
+        assert_eq!(fs::read_to_string(new_dir.join("hosts.json")).unwrap(), r#"[{"id":"already-here"}]"#);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn migration_is_noop_on_fresh_install() {
+        let root = temp_scratch_dir("noop-fresh");
+        let new_dir = root.join("FAAFE2B2.HyperDesk");
+        // No old_dir at all — a genuinely fresh install.
+
+        migrate_legacy_app_data_at(&root, &new_dir);
+
+        assert!(!new_dir.join("hosts.json").exists());
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

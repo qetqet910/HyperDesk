@@ -1,40 +1,23 @@
-/* ─── Pretendard ───
-   WebView2 (Chromium-based) always supports woff2 — no legacy .woff fallback needed. */
-
+/* ─── 펴진고딕 (Pyeojin Gothic) — primary UI font ───
+   서지환(엔파피), SIL OFL 1.1 — 글꼴 단독 판매 외 상업적 사용·수정·재배포·임베딩
+   모두 허용. noonnu의 jsDelivr 배포본(woff2)을 self-host (CSP font-src 'self'라
+   런타임 CDN 불가). 3종만 존재(Light 300 / Regular 400 / Bold 700); UI의 500~900
+   선언은 Bold 페이스의 `700 900` 범위로 매핑해 흐릿한 synthetic-bold를 피한다.
+   WebView2(Chromium)는 woff2를 항상 지원하므로 legacy .woff 폴백 불필요. */
 @font-face {
-  font-family: 'Pretendard';
-  src: url('./fonts/Pretendard-Light.woff2') format('woff2');
+  font-family: 'Pyeojin Gothic';
+  src: url('./fonts/PyeojinGothic-Light.woff2') format('woff2');
   font-weight: 300; font-display: swap;
 }
 @font-face {
-  font-family: 'Pretendard';
-  src: url('./fonts/Pretendard-Regular.woff2') format('woff2');
-  font-weight: 400; font-display: swap;
+  font-family: 'Pyeojin Gothic';
+  src: url('./fonts/PyeojinGothic-Regular.woff2') format('woff2');
+  font-weight: 400 600; font-display: swap;
 }
 @font-face {
-  font-family: 'Pretendard';
-  src: url('./fonts/Pretendard-Medium.woff2') format('woff2');
-  font-weight: 500; font-display: swap;
-}
-@font-face {
-  font-family: 'Pretendard';
-  src: url('./fonts/Pretendard-SemiBold.woff2') format('woff2');
-  font-weight: 600; font-display: swap;
-}
-@font-face {
-  font-family: 'Pretendard';
-  src: url('./fonts/Pretendard-Bold.woff2') format('woff2');
-  font-weight: 700; font-display: swap;
-}
-@font-face {
-  font-family: 'Pretendard';
-  src: url('./fonts/Pretendard-ExtraBold.woff2') format('woff2');
-  font-weight: 800; font-display: swap;
-}
-@font-face {
-  font-family: 'Pretendard';
-  src: url('./fonts/Pretendard-Black.woff2') format('woff2');
-  font-weight: 900; font-display: swap;
+  font-family: 'Pyeojin Gothic';
+  src: url('./fonts/PyeojinGothic-Bold.woff2') format('woff2');
+  font-weight: 700 900; font-display: swap;
 }
 
 /* ─── MaruMinya — Korean pixel/bitmap font for the RETRO theme ───
@@ -71,13 +54,12 @@
   --text-secondary: #AEB7C7;
   --border: rgba(143, 171, 212, 0.12);
   --border-focus: #8FABD4;
-  --font: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font: 'Pyeojin Gothic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
-  /* Numeric display font for stats/KPIs/latency: fixed-width digits that don't
-     jitter as telemetry updates. Cascadia Mono ships with Windows 11 (this app
-     is Windows-only); Consolas is the guaranteed Win10 fallback — zero bundled
-     bytes. Korean text stays on Pretendard. */
-  --font-num: 'Cascadia Mono', ui-monospace, Consolas, monospace;
+  /* Numbers share the primary Pyeojin Gothic face so telemetry/KPI figures match
+     the rest of the UI. body sets font-variant-numeric: tabular-nums globally,
+     so digits still hold a consistent width where the face supports it. */
+  --font-num: 'Pyeojin Gothic', ui-monospace, Consolas, monospace;
   --radius: 12px;
   --radius-sm: 8px;
   --shadow: 0 4px 20px rgba(6, 9, 14, 0.55);
@@ -122,7 +104,7 @@
   --text-secondary: #475569;
   --border: rgba(58, 106, 170, 0.15);
   --border-focus: #3A6AAA;
-  --font: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font: 'Pyeojin Gothic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
   --shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
   --shadow-lg: 0 10px 40px rgba(15, 23, 42, 0.14);
@@ -176,8 +158,8 @@
   --border: #808080;
   --border-focus: #000080;
   /* Pixel-first stack: bundled MaruMinya → installed KR pixel fonts →
-     Pretendard fallback so text stays legible even with no pixel font present. */
-  --font: 'MaruMinya', 'DungGeunMo', 'Neodgm', 'NeoDunggeunmo', 'Pretendard', 'Malgun Gothic', monospace;
+     Pyeojin Gothic fallback so text stays legible even with no pixel font present. */
+  --font: 'MaruMinya', 'DungGeunMo', 'Neodgm', 'NeoDunggeunmo', 'Pyeojin Gothic', 'Malgun Gothic', monospace;
   --font-mono: 'MaruMinya', 'Consolas', 'Courier New', monospace;
   /* Numbers keep the pixel font in retro — Cascadia would break the Win9x look. */
   --font-num: 'MaruMinya', 'Consolas', 'Courier New', monospace;
@@ -892,7 +874,7 @@ html, body {
   background: var(--bg-main);
   color: var(--text-main);
   font-family: var(--font);
-  /* Fixed-width digits everywhere (Pretendard ships the 'tnum' feature):
+  /* Fixed-width digits everywhere (tabular-nums where the face supports it):
      telemetry values re-render every 2s, and proportional digits made every
      stat/latency/uptime readout wobble in width on each tick. */
   font-variant-numeric: tabular-nums;
@@ -1055,6 +1037,33 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   .dashboard-grid {
     grid-template-columns: repeat(3, minmax(400px, 1fr));
   }
+}
+
+/* ─── VM / Horizon rack card — responsive column grid ───
+   The card was a fixed 5-column grid (50px 220px 140px 1fr 220px); when the
+   card got narrow the 1fr memory column collapsed to 0 and the fixed columns
+   overflowed, clipping the controls under overflow:hidden. Now the columns are
+   minmax(0,…) so they shrink gracefully (name/values ellipsis), and a CONTAINER
+   query — keyed on the card's own width, correct whether the sidebar is open or
+   collapsed, unlike a viewport media query — folds the two metric columns away
+   below 760px, leaving icon · identity · controls so the buttons never clip. */
+.rack-container,
+.vm-card-list { container-type: inline-size; }
+
+.vm-card-grid {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1.6fr) minmax(0, 0.9fr) minmax(0, 0.9fr) auto;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0 20px;
+  gap: 0;
+}
+
+@container (max-width: 760px) {
+  .vm-card-grid { grid-template-columns: 50px minmax(0, 1fr) auto; column-gap: 14px; }
+  .vm-card-grid > *:nth-child(3),
+  .vm-card-grid > *:nth-child(4) { display: none; }
 }
 
 /* ─── Bento Cell Base ─── */
@@ -1885,6 +1894,24 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .slot-empty span { font-size: 13px; font-weight: 500; }
 
 .slot-title { font-size: 11px; font-weight: 600; color: #fff; }
+
+/* Clickable title area — disconnects then opens the selector in one click. */
+.slot-change-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: rgba(255,255,255,0.85);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.slot-change-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
 
 .slot-close {
   background: none; border: none; color: #fff; cursor: pointer;

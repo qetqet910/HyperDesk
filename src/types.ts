@@ -67,6 +67,14 @@ export interface VmSwitch {
   net_adapter_name: string;
 }
 
+export interface VmDiskEntry {
+  path: string;
+  disk_type: string;      // "Dynamic" | "Fixed" | "Differencing"
+  file_size: number;      // actual bytes on disk now
+  max_size: number;       // virtual max size
+  is_checkpoint: boolean; // a checkpoint's differencing (.avhdx) layer
+}
+
 export interface VmNetworkAdapter {
   vm_name: string;
   switch_name: string;

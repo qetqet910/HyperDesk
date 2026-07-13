@@ -5,15 +5,17 @@ pub mod swallow;
 
 use commands::{
     get_vms, get_vm_ip, start_vm, stop_vm, save_vm, resume_vm,
-    pause_vm, connect_vm, connect_console, get_dashboard, get_system_stats,
+    pause_vm, connect_vm, connect_console, get_dashboard, get_system_stats, create_vm,
     add_remote_host, remove_remote_host, update_remote_host,
     set_vm_memory, set_vm_processors, get_horizon_path, connect_horizon, check_host,
     set_window_visibility, is_window_valid, swallow_window,
     unswallow_window, sync_slot_bounds, toggle_fullscreen, set_fullscreen, set_immersive, flash_immersive_header, quit_app, focus_slot_window,
+    set_connect_lock,
     list_snapshots, create_snapshot, restore_snapshot, delete_snapshot,
     get_vm_memo, set_vm_memo, set_remote_host_memo,
     get_vm_tags, set_vm_tags, set_remote_host_tags,
     get_vm_checkpoints, checkpoint_vm, restore_vm_checkpoint, delete_vm_checkpoint,
+    get_vm_disk_info, compact_vm_disk, convert_vm_disk_to_dynamic,
     get_vm_switches, get_vm_network_adapters,
     get_hyper_v_events,
     get_data_dir_path, reset_hidden_hosts, clear_app_data,
@@ -45,7 +47,12 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &tauri::AppHandle, shortcut: &Shortcut, _event| {
-            if shortcut.mods.contains(Modifiers::ALT) {
+            // MultiView.tsx mirrors its `anyConnecting` lock into this flag via
+            // set_connect_lock — switching slots mid-swallow breaks the embed, and
+            // this handler runs natively with no visibility into React state, so
+            // it must consult the flag itself rather than trust the frontend to
+            // ignore the emitted event.
+            if shortcut.mods.contains(Modifiers::ALT) && !crate::swallow::is_connect_locked() {
                 match shortcut.key {
                     Code::Digit1 => {
                         let _ = app.emit("hotkey-focus", "slot-0");
@@ -68,6 +75,11 @@ pub fn run() {
             }
         }).build())
         .setup(|app| {
+            // Must run before anything touches hosts.json/vm-tags.json/vm-memos.json —
+            // see hosts.rs for why (2026-07 identifier change would otherwise silently
+            // drop every existing user's data on update).
+            hosts::migrate_legacy_app_data(app.handle());
+
             // Warm the resident PowerShell worker (Hyper-V module + CIM session,
             // ~1.1s) in parallel with WebView2/React boot, so the first dashboard
             // fetch hits a warm worker (~30ms) instead of paying the cold cost.
@@ -171,6 +183,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_dashboard,
             get_system_stats,
+            create_vm,
             add_remote_host,
             remove_remote_host,
             update_remote_host,
@@ -199,6 +212,7 @@ pub fn run() {
             flash_immersive_header,
             quit_app,
             focus_slot_window,
+            set_connect_lock,
             list_snapshots,
             create_snapshot,
             restore_snapshot,
@@ -213,6 +227,9 @@ pub fn run() {
             checkpoint_vm,
             restore_vm_checkpoint,
             delete_vm_checkpoint,
+            get_vm_disk_info,
+            compact_vm_disk,
+            convert_vm_disk_to_dynamic,
             get_vm_switches,
             get_vm_network_adapters,
             get_hyper_v_events,

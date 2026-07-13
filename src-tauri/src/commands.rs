@@ -386,8 +386,89 @@ pub async fn get_vm_ip(name: String) -> Result<String, String> {
         r#"(Get-VMNetworkAdapter -VMName '{}' | Where-Object {{ $_.IPAddresses.Count -gt 0 }} | Select-Object -ExpandProperty IPAddresses) -join ','"#,
         ps_escape(&name)
     );
-    let ip_str = run_powershell_warm(&ip_script).unwrap_or_default();
+    // spawn_blocking so this blocking mutex+I/O call never runs directly on a
+    // Tokio async worker thread (that pool is small and fixed-size; parking it
+    // on blocking work risks starving unrelated async tasks).
+    let ip_str = tokio::task::spawn_blocking(move || run_powershell_warm(&ip_script))
+        .await
+        .map(|r| r.unwrap_or_default())
+        .unwrap_or_default();
     Ok(ip_str)
+}
+
+/// Creates a new Hyper-V VM with a fresh dynamic VHD, and optionally attaches a
+/// switch + boot ISO. Lifecycle op → COLD run_powershell. The VHD lands in the
+/// host's default virtual-disk folder as `<name>.vhdx`. All string params go
+/// through ps_escape (CLAUDE.md rule #1); numeric params are type-safe.
+/// `iso_path` is validated to exist before it's attached so a typo'd path fails
+/// loudly instead of creating a VM that silently can't boot.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn create_vm(
+    name: String,
+    generation: u32,
+    memory_gb: u32,
+    cpu_count: u32,
+    disk_gb: u32,
+    switch_name: Option<String>,
+    iso_path: Option<String>,
+) -> Result<(), String> {
+    let gen = if generation == 2 { 2 } else { 1 };
+    let safe_name = ps_escape(&name);
+    // Build the optional clauses with escaped values (empty = omitted).
+    let switch_clause = match switch_name.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(s) => format!("$params.SwitchName = '{}'", ps_escape(s)),
+        None => String::new(),
+    };
+    let iso = iso_path.unwrap_or_default();
+    let iso_clause = if iso.trim().is_empty() {
+        String::new()
+    } else {
+        let safe_iso = ps_escape(&iso);
+        format!(
+            r#"
+        $iso = '{}'
+        if (-not (Test-Path -LiteralPath $iso)) {{ Write-Error "ISO 파일을 찾을 수 없습니다: $iso"; exit 1 }}
+        Set-VMDvdDrive -VMName '{}' -Path $iso -ErrorAction Stop
+        if ({} -eq 2) {{
+            $dvd = Get-VMDvdDrive -VMName '{}'
+            Set-VMFirmware -VMName '{}' -FirstBootDevice $dvd -ErrorAction SilentlyContinue
+        }}"#,
+            safe_iso, safe_name, gen, safe_name, safe_name
+        )
+    };
+
+    let script = format!(
+        r#"
+        if (Get-VM -Name '{name}' -ErrorAction SilentlyContinue) {{ Write-Error '같은 이름의 VM이 이미 존재합니다.'; exit 1 }}
+        $vmHost = Get-VMHost
+        $vhdDir = $vmHost.VirtualHardDiskPath
+        if (-not (Test-Path -LiteralPath $vhdDir)) {{ New-Item -ItemType Directory -Path $vhdDir -Force | Out-Null }}
+        $vhdPath = Join-Path $vhdDir '{name}.vhdx'
+        if (Test-Path -LiteralPath $vhdPath) {{ Write-Error "같은 이름의 디스크가 이미 존재합니다: $vhdPath"; exit 1 }}
+        $params = @{{
+            Name = '{name}'
+            MemoryStartupBytes = {mem}GB
+            Generation = {gen}
+            NewVHDPath = $vhdPath
+            NewVHDSizeBytes = {disk}GB
+        }}
+        {switch_clause}
+        New-VM @params -ErrorAction Stop | Out-Null
+        Set-VMProcessor -VMName '{name}' -Count {cpu} -ErrorAction Stop
+        {iso_clause}
+    "#,
+        name = safe_name,
+        mem = memory_gb.max(1),
+        gen = gen,
+        disk = disk_gb.max(1),
+        cpu = cpu_count.max(1),
+        switch_clause = switch_clause,
+        iso_clause = iso_clause,
+    );
+
+    run_powershell(&script)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -717,9 +798,15 @@ const RDP_SCAN_SCRIPT: &str = r#"
 pub async fn get_dashboard(app: AppHandle) -> Result<DashboardData, String> {
     // VM query (blocking Get-VM) and RDP registry scan (blocking) are
     // independent, so run them concurrently on blocking threads instead of
-    // letting the slow Get-VM gate the rest of the dashboard.
+    // letting the slow Get-VM gate the rest of the dashboard. The RDP scan
+    // deliberately stays on a COLD run_powershell, not the warm worker: it never
+    // touches Hyper-V/CIM (just two registry reads), so it gets none of the
+    // warm path's benefit but would fully share its mutex — routing it through
+    // run_powershell_warm serialized this "concurrent" pair behind one lock,
+    // silently defeating the comment above (worst case, a wedged Get-VM could
+    // stall the RDP scan for the warm worker's full 120s hang-guard window).
     let vms_fut = get_vms();
-    let rdp_fut = tokio::task::spawn_blocking(|| run_powershell_warm(RDP_SCAN_SCRIPT));
+    let rdp_fut = tokio::task::spawn_blocking(|| run_powershell(RDP_SCAN_SCRIPT));
     let (vms_res, rdp_res) = tokio::join!(vms_fut, rdp_fut);
 
     // 1. Hyper-V VMs
@@ -997,7 +1084,9 @@ pub async fn list_snapshots(vm_name: String) -> Result<Vec<VmSnapshot>, String> 
         r#"Get-VMSnapshot -VMName '{}' -ErrorAction Stop | Select-Object Id,Name,VMName,@{{N='CreationTime';E={{$_.CreationTime.ToString('yyyy-MM-dd HH:mm')}}}},SnapshotType | ConvertTo-Json -Depth 2"#,
         safe_vm
     );
-    let out = run_powershell_warm(&script)?;
+    let out = tokio::task::spawn_blocking(move || run_powershell_warm(&script))
+        .await
+        .map_err(|e| format!("snapshot query task failed: {}", e))??;
     if out.is_empty() || out == "null" {
         return Ok(vec![]);
     }
@@ -1367,6 +1456,15 @@ pub async fn focus_slot_window(slot_id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Mirrors MultiView.tsx's `anyConnecting` into Rust so the Alt+1~4 global
+/// hotkey handler (which runs with no visibility into React state) can skip
+/// its native focus_window call while a connect is in flight.
+#[tauri::command]
+pub async fn set_connect_lock(locked: bool) -> Result<(), String> {
+    crate::swallow::set_connect_lock(locked);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_hyper_v_events(max_events: Option<u32>) -> Result<Vec<crate::models::HyperVEvent>, String> {
     let count = max_events.unwrap_or(50).min(200);
@@ -1397,7 +1495,10 @@ pub async fn get_hyper_v_events(max_events: Option<u32>) -> Result<Vec<crate::mo
             else {{ $_ | ConvertTo-Json -Depth 2 }}
     "#, count, count);
 
-    let json = run_powershell_warm(&script).unwrap_or_else(|_| "[]".to_string());
+    let json = tokio::task::spawn_blocking(move || run_powershell_warm(&script))
+        .await
+        .map(|r| r.unwrap_or_else(|_| "[]".to_string()))
+        .unwrap_or_else(|_| "[]".to_string());
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(vec![]);
     }
@@ -1447,7 +1548,10 @@ pub async fn get_vm_checkpoints(name: String) -> Result<Vec<crate::models::VmChe
         else {{ $result | ConvertTo-Json -Depth 3 }}
     "#, safe);
 
-    let json = run_powershell_warm(&script).unwrap_or_else(|_| "[]".to_string());
+    let json = tokio::task::spawn_blocking(move || run_powershell_warm(&script))
+        .await
+        .map(|r| r.unwrap_or_else(|_| "[]".to_string()))
+        .unwrap_or_else(|_| "[]".to_string());
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(vec![]);
     }
@@ -1520,6 +1624,168 @@ pub async fn delete_vm_checkpoint(vm_name: String, checkpoint_name: String) -> R
     Ok(())
 }
 
+// ─── Disk usage & compaction ─────────────────────────────────────────────────
+
+/// Read-only: walk the VM's virtual-disk chain (base .vhdx + every checkpoint
+/// .avhdx layer) and report actual-vs-max sizes, so the user can see what's
+/// eating host disk. Warm worker — it's a fast, UI-triggered read.
+#[tauri::command]
+pub async fn get_vm_disk_info(name: String) -> Result<Vec<crate::models::VmDiskEntry>, String> {
+    let safe = ps_escape(&name);
+    let script = format!(r#"
+        $disks = Get-VMHardDiskDrive -VMName '{}' -ErrorAction Stop
+        $chain = @()
+        foreach ($d in $disks) {{
+            $p = $d.Path
+            while ($p) {{
+                $vhd = Get-VHD -Path $p -ErrorAction SilentlyContinue
+                if (-not $vhd) {{ break }}
+                $chain += [PSCustomObject]@{{
+                    Path = $vhd.Path
+                    DiskType = $vhd.VhdType.ToString()
+                    FileSize = [long]$vhd.FileSize
+                    MaxSize = [long]$vhd.Size
+                    IsCheckpoint = ($vhd.VhdType.ToString() -eq 'Differencing')
+                }}
+                $p = $vhd.ParentPath
+            }}
+        }}
+        if (@($chain).Count -eq 1) {{ $chain | ConvertTo-Json -Depth 2 -AsArray }}
+        else {{ $chain | ConvertTo-Json -Depth 2 }}
+    "#, safe);
+
+    let json = tokio::task::spawn_blocking(move || run_powershell_warm(&script))
+        .await
+        .map(|r| r.unwrap_or_else(|_| "[]".to_string()))
+        .unwrap_or_else(|_| "[]".to_string());
+    if json.is_empty() || json == "null" || json == "[]" {
+        return Ok(vec![]);
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Raw {
+        path: String,
+        disk_type: String,
+        file_size: u64,
+        max_size: u64,
+        is_checkpoint: bool,
+    }
+    let raw: Vec<Raw> = if json.trim_start().starts_with('[') {
+        serde_json::from_str(&json).unwrap_or_default()
+    } else {
+        match serde_json::from_str::<Raw>(&json) { Ok(s) => vec![s], Err(_) => return Ok(vec![]) }
+    };
+    Ok(raw.into_iter().map(|r| crate::models::VmDiskEntry {
+        path: r.path,
+        disk_type: r.disk_type,
+        file_size: r.file_size,
+        max_size: r.max_size,
+        is_checkpoint: r.is_checkpoint,
+    }).collect())
+}
+
+/// Compacts every dynamic disk in the VM's chain (Optimize-VHD, Full mode),
+/// reclaiming blocks the guest freed. Lifecycle op → COLD run_powershell (can
+/// take minutes) and refuses to run unless the VM is Off — Optimize-VHD needs
+/// the disk mounted read-only, impossible while a running VM holds it. Returns
+/// the number of bytes reclaimed so the UI can show a concrete result.
+/// Fixed disks are skipped (can't be compacted).
+#[tauri::command]
+pub async fn compact_vm_disk(name: String) -> Result<u64, String> {
+    let safe = ps_escape(&name);
+    let script = format!(r#"
+        $vm = Get-VM -Name '{}' -ErrorAction Stop
+        if ($vm.State -ne 'Off') {{
+            Write-Error 'VM이 실행 중입니다. 디스크를 압축하려면 먼저 VM을 종료하세요.'
+            exit 1
+        }}
+        $disks = Get-VMHardDiskDrive -VMName '{}' -ErrorAction Stop
+        $freed = [long]0
+        foreach ($d in $disks) {{
+            $p = $d.Path
+            while ($p) {{
+                $vhd = Get-VHD -Path $p -ErrorAction SilentlyContinue
+                if (-not $vhd) {{ break }}
+                $parent = $vhd.ParentPath
+                # Fixed disks have nothing to reclaim; skip.
+                if ($vhd.VhdType.ToString() -ne 'Fixed') {{
+                    $before = [long]$vhd.FileSize
+                    $mounted = $false
+                    try {{
+                        Mount-VHD -Path $p -ReadOnly -ErrorAction Stop
+                        $mounted = $true
+                        Optimize-VHD -Path $p -Mode Full -ErrorAction Stop
+                    }} catch {{
+                        # Leave a partial failure non-fatal for the rest of the chain,
+                        # but surface it if NOTHING could be optimized.
+                    }} finally {{
+                        if ($mounted) {{ Dismount-VHD -Path $p -ErrorAction SilentlyContinue }}
+                    }}
+                    $after = [long](Get-VHD -Path $p).FileSize
+                    if ($before -gt $after) {{ $freed += ($before - $after) }}
+                }}
+                $p = $parent
+            }}
+        }}
+        $freed
+    "#, safe, safe);
+
+    let out = run_powershell(&script)?;
+    out.trim().parse::<u64>().map_err(|_| format!("압축 결과를 해석하지 못했습니다: {}", out))
+}
+
+/// Converts a VM's Fixed base disk(s) to Dynamic — reclaiming the gap between the
+/// virtual max size and what the guest actually uses (a fixed disk always occupies
+/// its full max on the host). Lifecycle op → COLD run_powershell (Convert-VHD
+/// copies the whole disk, minutes). Heavily guarded: VM must be Off, and there must
+/// be NO checkpoints (a differencing chain can't have its base swapped safely).
+/// Failure modes are safe — the VM is only re-pointed at the new disk AFTER a
+/// successful conversion, so a mid-way failure never leaves it diskless.
+/// Returns bytes reclaimed.
+#[tauri::command]
+pub async fn convert_vm_disk_to_dynamic(name: String) -> Result<u64, String> {
+    let safe = ps_escape(&name);
+    let script = format!(r#"
+        $vm = Get-VM -Name '{}' -ErrorAction Stop
+        if ($vm.State -ne 'Off') {{
+            Write-Error 'VM이 실행 중입니다. 디스크를 변환하려면 먼저 VM을 종료하세요.'
+            exit 1
+        }}
+        if ((Get-VMSnapshot -VMName '{}' -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) {{
+            Write-Error '체크포인트가 있으면 변환할 수 없습니다. 스냅샷 페이지에서 먼저 삭제하세요.'
+            exit 1
+        }}
+        $drives = @(Get-VMHardDiskDrive -VMName '{}' -ErrorAction Stop)
+        $freed = [long]0
+        foreach ($drv in $drives) {{
+            $vhd = Get-VHD -Path $drv.Path -ErrorAction SilentlyContinue
+            if (-not $vhd) {{ continue }}
+            if ($vhd.VhdType.ToString() -ne 'Fixed') {{ continue }}
+            $src = $vhd.Path
+            $dir = Split-Path $src -Parent
+            $stem = [System.IO.Path]::GetFileNameWithoutExtension($src)
+            $ext = [System.IO.Path]::GetExtension($src)
+            $dst = Join-Path $dir ($stem + '-dyn' + $ext)
+            if (Test-Path $dst) {{ Write-Error "변환 대상 파일이 이미 존재합니다: $dst"; exit 1 }}
+            $before = [long]$vhd.FileSize
+            # Non-destructive copy first — source stays intact until this succeeds.
+            Convert-VHD -Path $src -DestinationPath $dst -VHDType Dynamic -ErrorAction Stop
+            # Re-point the SAME controller slot at the new dynamic disk, then drop
+            # the fixed original. If Set fails, the VM still holds the untouched
+            # source; if Remove fails, the source just lingers — never diskless.
+            Set-VMHardDiskDrive -VMName '{}' -ControllerType $drv.ControllerType -ControllerNumber $drv.ControllerNumber -ControllerLocation $drv.ControllerLocation -Path $dst -ErrorAction Stop
+            Remove-Item $src -Force -ErrorAction SilentlyContinue
+            $after = [long](Get-VHD -Path $dst).FileSize
+            if ($before -gt $after) {{ $freed += ($before - $after) }}
+        }}
+        $freed
+    "#, safe, safe, safe, safe);
+
+    let out = run_powershell(&script)?;
+    out.trim().parse::<u64>().map_err(|_| format!("변환 결과를 해석하지 못했습니다: {}", out))
+}
+
 #[tauri::command]
 pub async fn get_vm_switches() -> Result<Vec<crate::models::VmSwitch>, String> {
     let script = r#"
@@ -1536,7 +1802,10 @@ pub async fn get_vm_switches() -> Result<Vec<crate::models::VmSwitch>, String> {
         else { $result | ConvertTo-Json -Depth 2 }
     "#;
 
-    let json = run_powershell_warm(script).unwrap_or_else(|_| "[]".to_string());
+    let json = tokio::task::spawn_blocking(|| run_powershell_warm(script))
+        .await
+        .map(|r| r.unwrap_or_else(|_| "[]".to_string()))
+        .unwrap_or_else(|_| "[]".to_string());
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(vec![]);
     }
@@ -1576,7 +1845,10 @@ pub async fn get_vm_network_adapters() -> Result<Vec<crate::models::VmNetworkAda
         else { $result | ConvertTo-Json -Depth 2 }
     "#;
 
-    let json = run_powershell_warm(script).unwrap_or_else(|_| "[]".to_string());
+    let json = tokio::task::spawn_blocking(|| run_powershell_warm(script))
+        .await
+        .map(|r| r.unwrap_or_else(|_| "[]".to_string()))
+        .unwrap_or_else(|_| "[]".to_string());
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(vec![]);
     }

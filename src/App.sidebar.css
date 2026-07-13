@@ -20,7 +20,13 @@
   flex-direction: column;
   padding: 14px 10px;
   gap: 2px;
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  /* NO width transition. `.hd-main` is a flex sibling, so animating the
+     sidebar width reflowed the entire main content on EVERY frame for 250ms —
+     the dashboard's Recharts re-rendered ~15× and multiview's SwallowSlot
+     ResizeObserver fired a Win32 SetWindowPos per frame, which is the
+     "말도안되는 렉". Snapping the width means main reflows exactly ONCE. The
+     label/eyebrow opacity fades below are compositor-only (cheap) and still
+     give a soft cross-fade, so the snap doesn't read as abrupt. */
   overflow: hidden;
 }
 
@@ -70,9 +76,14 @@
 }
 
 .hd-sidebar__logo-name {
-  font-size: 24px;
+  /* 20px keeps "HYPERDESK" + the version pill inside the ~184px brand row for a
+     wide Korean gothic; flex-shrink keeps the wordmark from squeezing the
+     version out. Bump toward 22–24px only if the chosen --font runs narrow. */
+  font-size: 20px;
   font-weight: 800;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.4px;
+  flex-shrink: 1;
+  min-width: 0;
   background: linear-gradient(135deg, var(--accent-faint) 0%, var(--accent-soft) 60%, var(--accent-blue) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -86,6 +97,8 @@
   background: var(--accent-wash);
   padding: 1px 6px;
   border-radius: 20px;
+  flex-shrink: 0; /* never let the wordmark clip the version pill */
+  white-space: nowrap;
 }
 
 /* Eyebrow label */
@@ -844,10 +857,64 @@ body::before {
   border: 1px solid rgba(95, 176, 138, 0.25);
 }
 
+/* Light theme: the rack row/ear panels and column washes above were all
+   hardcoded near-black (#1A2130 etc.) with zero theme awareness — on light
+   mode the whole "원격 자산" list still rendered as dark server-rack panels
+   sitting on the light background. Re-tint to the light card/border tokens;
+   dark mode is untouched (these rules only apply under data-theme="light"). */
+[data-theme="light"] .mst-rack-row {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFD 50%, #EEF2F8 100%);
+  border-color: var(--border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .mst-rack-ear {
+  background: linear-gradient(90deg, #E4E9F2 0%, #DCE3EE 50%, #E4E9F2 100%);
+  border-right-color: var(--border);
+}
+
+[data-theme="light"] .mst-rack-ear::before,
+[data-theme="light"] .mst-rack-ear::after {
+  background: radial-gradient(circle at 35% 35%, #FFFFFF 0%, #C3CBDA 55%, #98A2B8 100%);
+  box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .mst-rack-status,
+[data-theme="light"] .mst-rack-name,
+[data-theme="light"] .mst-rack-addr,
+[data-theme="light"] .mst-rack-gauge {
+  border-right-color: var(--border);
+}
+
+[data-theme="light"] .mst-rack-status {
+  background: linear-gradient(180deg, rgba(58, 106, 170, 0.05), transparent);
+}
+
+[data-theme="light"] .mst-rack-name {
+  background: linear-gradient(180deg, rgba(58, 106, 170, 0.03), transparent);
+}
+
+[data-theme="light"] .mst-rack-gauge {
+  background: repeating-linear-gradient(90deg, rgba(15, 23, 42, 0.06) 0 1px, transparent 1px 4px);
+}
+
+[data-theme="light"] .mst-rack-track {
+  background: rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .mst-rack-connect,
+[data-theme="light"] .mst-rack-icon-btn {
+  background: rgba(15, 23, 42, 0.03);
+}
+
 /* ─── KPI 타일 ───────────────────────────────────────────────── */
 .hd-kpi-strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* auto-fit + minmax: 4-across when wide, folds to 2×2 then 1-col as the
+     content narrows, instead of squeezing 4 fixed columns until the values
+     clip. */
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 14px;
   margin-bottom: 4px;
 }

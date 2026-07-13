@@ -41,3 +41,12 @@ jobs:
           sellerId: ${{ secrets.MSSTORE_SELLER_ID }}
           productId: '9NPVXL622ZQQ' # HyperDesk Store ID (From your screenshot)
           packagePath: 'src-tauri/target/msix/HyperDesk_*.msixbundle'
+
+      - name: Create GitHub Release & Upload Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: 'src-tauri/target/msix/HyperDesk_*.msixbundle'
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

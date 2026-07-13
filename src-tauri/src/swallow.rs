@@ -46,6 +46,71 @@ pub fn lock_state() -> std::sync::MutexGuard<'static, HashMap<String, SwallowInf
     swallow_state().lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// hwnds a hunt loop has picked as ITS candidate but not yet committed to
+/// SWALLOW_STATE (perform_swallow hasn't returned yet). SWALLOW_STATE alone
+/// only excludes windows another slot has FINISHED swallowing — two slots
+/// whose hunts pick the same candidate within the same poll tick (before
+/// either reaches perform_swallow's insert) would otherwise both pass the
+/// exclusion check and race to reparent the same window. Insert here the
+/// instant a candidate is selected, remove once perform_swallow returns
+/// (success or failure — SWALLOW_STATE itself is authoritative from then on).
+static CLAIMED_HWNDS: OnceLock<Mutex<std::collections::HashSet<isize>>> = OnceLock::new();
+
+fn claimed_hwnds() -> &'static Mutex<std::collections::HashSet<isize>> {
+    CLAIMED_HWNDS.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+fn lock_claimed() -> std::sync::MutexGuard<'static, std::collections::HashSet<isize>> {
+    claimed_hwnds().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Every hwnd a slot search must never re-pick: already-swallowed (SWALLOW_STATE)
+/// union currently-being-claimed-by-another-hunt (CLAIMED_HWNDS).
+fn excluded_hwnds() -> Vec<isize> {
+    let mut v: Vec<isize> = lock_state().values().map(|i| i.child_hwnd).collect();
+    v.extend(lock_claimed().iter().copied());
+    v
+}
+
+/// Per-slot attempt counter. Bumped on every `swallow()` call AND every
+/// `unswallow()` call (cancel/disconnect) — whichever happens, it invalidates
+/// any OLDER in-flight hunt thread for the same slot. Without this, cancelling
+/// a slow connect (or disconnecting) leaves the original hunt thread running;
+/// it can later find a window and commit it (SWALLOW_STATE insert +
+/// swallow-success) well after the user thought they'd cancelled, or race a
+/// second hunt spawned by an immediate reconnect to the same slot.
+static SWALLOW_GEN: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+fn swallow_gen_map() -> &'static Mutex<HashMap<String, u64>> {
+    SWALLOW_GEN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn bump_generation(slot_id: &str) -> u64 {
+    let mut map = swallow_gen_map().lock().unwrap_or_else(|e| e.into_inner());
+    let g = map.entry(slot_id.to_string()).or_insert(0);
+    *g += 1;
+    *g
+}
+
+fn current_generation(slot_id: &str) -> u64 {
+    swallow_gen_map().lock().unwrap_or_else(|e| e.into_inner()).get(slot_id).copied().unwrap_or(0)
+}
+
+/// Mirrors MultiView.tsx's `anyConnecting` React state on the Rust side. The
+/// Alt+1~4 global shortcut handler (lib.rs) runs entirely in Rust and has no
+/// visibility into React state — without this, it kept force-focusing a
+/// mid-connect slot's native window (SetForegroundWindow/BringWindowToTop)
+/// even while the frontend lock disabled the UI buttons for exactly that.
+static CONNECT_LOCK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_connect_lock(locked: bool) {
+    CONNECT_LOCK.store(locked, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn is_connect_locked() -> bool {
+    CONNECT_LOCK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Pixel bounds of a grid slot, in WebView-container client coordinates.
 #[derive(Clone, Copy)]
 pub struct SlotBounds {
@@ -200,7 +265,7 @@ struct ChildParam {
 /// at call time — both passes skip them, so a fresh search can only ever
 /// re-find windows nobody has already claimed.
 pub fn find_main_window(pid: u32) -> Option<HWND> {
-    let excluded: Vec<isize> = lock_state().values().map(|i| i.child_hwnd).collect();
+    let excluded: Vec<isize> = excluded_hwnds();
 
     let mut param = EnumParam {
         target_pid: pid,
@@ -474,6 +539,9 @@ fn dump_owned_top_level_windows(pid: u32, skip: HWND) {
 
 pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: AppHandle, bounds: SlotBounds) -> Result<(), String> {
     let s_id = slot_id.to_string();
+    // Captured now, checked every poll below — a later swallow()/unswallow() call
+    // for this same slot bumps the generation and makes this hunt a no-op.
+    let my_gen = bump_generation(slot_id);
     let _parent_h = SendHWND(parent_hwnd);
     let actual_parent = SendHWND(find_webview_container(parent_hwnd));
     let app = app_handle.clone();
@@ -502,6 +570,14 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
         };
 
         while std::time::Instant::now() < deadline {
+            // Superseded by a newer swallow() (reconnect) or an unswallow()
+            // (cancel/disconnect) for this same slot — stop immediately, no
+            // events, no state writes. Silent by design: whichever call bumped
+            // the generation is responsible for the slot's visible state now.
+            if current_generation(&s_id) != my_gen {
+                return;
+            }
+
             // Preferred: a window with a KNOWN session class (pid-scoped first,
             // then the class-list fallback inside find_main_window).
             let mut candidate: Option<HWND> = find_main_window(target_pid)
@@ -525,10 +601,10 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
             // that the pid-scoped search never sees. Hunt for it by heuristic.
             if candidate.is_none() && is_horizon {
                 // Same exclusion as find_main_window: never hand back a window
-                // another slot already owns, not just ones this slot's own chain
-                // already tried.
+                // another slot already owns or has claimed, not just ones this
+                // slot's own chain already tried.
                 let mut exclude = chain.clone();
-                exclude.extend(lock_state().values().map(|i| i.child_hwnd));
+                exclude.extend(excluded_hwnds());
                 candidate = find_horizon_session_window(&exclude);
             }
 
@@ -557,16 +633,76 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
                     }
                 }
                 chain.push(h.0 as isize);
-                current = Some(h_wrap);
-                let _ = perform_swallow(&s_id, h_wrap, actual_parent, app.clone(), bounds);
+                // Claim BEFORE perform_swallow runs, not after: perform_swallow
+                // only writes SWALLOW_STATE once it's done, so without this claim
+                // another slot's concurrent hunt (same poll tick, before either
+                // commits) could pick the identical candidate and both race to
+                // reparent it. Released unconditionally once perform_swallow
+                // returns — from then on SWALLOW_STATE itself is authoritative on
+                // success, and a failed candidate is already excluded via `chain`.
+                lock_claimed().insert(h.0 as isize);
+                // `current` (and therefore the eventual swallow-success emission
+                // below) must only be set on a VERIFIED reparent — perform_swallow
+                // now returns Err if GetParent doesn't confirm the new parent
+                // (e.g. UIPI blocked it). chain already recorded this hwnd, so a
+                // failed candidate won't be retried; the hunt just keeps polling
+                // for another one until the deadline.
+                // perform_swallow currently always returns Ok — its GetParent-based
+                // failure detection was reverted (false-positived on real mstsc/
+                // vmconnect windows, see the note at its SetParent call). The
+                // Result plumbing and match below are kept because the generation/
+                // claim-set logic around it (V5/V6 fixes) still needs the call
+                // site structure; Err is simply unreachable for now.
+                let swallow_result = perform_swallow(&s_id, h_wrap, actual_parent, app.clone(), bounds);
+                lock_claimed().remove(&(h.0 as isize));
 
-                if is_session {
-                    session_found = true;
-                    break;
+                // A cancel/reconnect can bump the generation DURING perform_swallow
+                // — the top-of-loop check passed a moment too early. If so this
+                // hunt is stale: undo the embed rather than leave a window the user
+                // cancelled sitting in the slot (and never emit swallow-success for
+                // it). Remove the slot entry only if it still points at OUR window;
+                // a newer hunt may already own the slot and must not be disturbed.
+                if current_generation(&s_id) != my_gen {
+                    let our_info = {
+                        let mut st = lock_state();
+                        if matches!(st.get(&s_id), Some(info) if info.child_hwnd == h.0 as isize) {
+                            st.remove(&s_id)
+                        } else {
+                            None
+                        }
+                    };
+                    match our_info {
+                        Some(info) => restore_and_close(&info),
+                        // Slot was overwritten by a newer hunt: if we still managed
+                        // to reparent a window, close it so it isn't left orphaned
+                        // inside the container behind the newer session.
+                        None if swallow_result.is_ok() => unsafe {
+                            if IsWindow(h).as_bool() {
+                                let _ = SetParent(h, HWND(std::ptr::null_mut()));
+                                let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
+                            }
+                        },
+                        None => {}
+                    }
+                    return;
                 }
-                // Launcher/intermediate window swallowed — tell the frontend so
-                // it starts bounds-syncing, then keep hunting for the session.
-                let _ = app.emit("swallow-progress", s_id.clone());
+
+                match swallow_result {
+                    Ok(()) => {
+                        current = Some(h_wrap);
+                        if is_session {
+                            session_found = true;
+                            break;
+                        }
+                        // Launcher/intermediate window swallowed — tell the frontend
+                        // so it starts bounds-syncing, then keep hunting for the session.
+                        let _ = app.emit("swallow-progress", s_id.clone());
+                    }
+                    #[cfg(debug_assertions)]
+                    Err(e) => dlog!("[swallow] perform_swallow failed for hwnd={:?}: {}", h.0, e),
+                    #[cfg(not(debug_assertions))]
+                    Err(_) => {}
+                }
             }
 
             // Dev: while hunting a Horizon session, periodically dump every
@@ -776,6 +912,19 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
 
         let _ = SetParent(child_hwnd, actual_parent);
 
+        // REVERTED (2026-07): a GetParent()-based post-check used to live here,
+        // rejecting the swallow if GetParent didn't immediately report
+        // actual_parent. It false-positived on real mstsc/vmconnect windows —
+        // observed failing ordinary same-user RDP swallows (TscShellContainerClass,
+        // ALREADY-VISIBLE not vmconnect) that were in fact fine a moment later.
+        // Root cause not fully confirmed, but the prime suspect is the WS_EX_MDICHILD
+        // bit set above (this window has no real MDICLIENT parent, so its
+        // GetParent/SetParent bookkeeping isn't guaranteed to behave like a plain
+        // WS_CHILD window) combined with mstsc's own thread being busy establishing
+        // the RDP session at the exact moment we check. Do NOT re-add a
+        // GetParent-based verification here without live-testing against a real
+        // mstsc AND vmconnect swallow first — a synthetic same-process test window
+        // (no WS_EX_MDICHILD, idle thread) will not reproduce the false positive.
         let mut state = lock_state();
         
         // Final coordinate calibration:
@@ -983,24 +1132,39 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
 /// the app shows its own "really disconnect?" prompt and the user cancels —
 /// then it's left as an ordinary floating window instead of stuck invisible
 /// inside HyperDesk's webview container).
-pub fn unswallow(slot_id: &str) -> Result<(), String> {
-    let mut state = lock_state();
-    if let Some(info) = state.remove(slot_id) {
-        let child_hwnd = HWND(info.child_hwnd as *mut _);
-        unsafe {
-            if IsWindow(child_hwnd).as_bool() {
-                let _ = SetParent(child_hwnd, HWND(std::ptr::null_mut()));
-                let _ = SetWindowLongPtrW(child_hwnd, GWL_STYLE, info.original_style);
-                let _ = SetWindowLongPtrW(child_hwnd, GWL_EXSTYLE, info.original_ex_style);
-                let _ = SetWindowRgn(child_hwnd, HRGN::default(), BOOL::from(true));
-                if info.original_parent != 0 {
-                     let _ = SetParent(child_hwnd, HWND(info.original_parent as *mut _));
-                }
-                let _ = SetWindowPos(child_hwnd, HWND(std::ptr::null_mut()), 120, 120, 900, 650,
-                    SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER);
-                let _ = PostMessageW(child_hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+/// Win32 teardown shared by `unswallow` and the hunt loop's stale-commit
+/// cleanup: restore the child to a normal floating top-level window, then post
+/// WM_CLOSE. Caller must have already removed the slot from SWALLOW_STATE (this
+/// only touches the window). Deliberately does NOT hold lock_state — a Win32
+/// call must never block while holding the state mutex.
+fn restore_and_close(info: &SwallowInfo) {
+    let child_hwnd = HWND(info.child_hwnd as *mut _);
+    unsafe {
+        if IsWindow(child_hwnd).as_bool() {
+            let _ = SetParent(child_hwnd, HWND(std::ptr::null_mut()));
+            let _ = SetWindowLongPtrW(child_hwnd, GWL_STYLE, info.original_style);
+            let _ = SetWindowLongPtrW(child_hwnd, GWL_EXSTYLE, info.original_ex_style);
+            let _ = SetWindowRgn(child_hwnd, HRGN::default(), BOOL::from(true));
+            if info.original_parent != 0 {
+                 let _ = SetParent(child_hwnd, HWND(info.original_parent as *mut _));
             }
+            let _ = SetWindowPos(child_hwnd, HWND(std::ptr::null_mut()), 120, 120, 900, 650,
+                SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER);
+            let _ = PostMessageW(child_hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
         }
+    }
+}
+
+pub fn unswallow(slot_id: &str) -> Result<(), String> {
+    // Invalidate any in-flight hunt for this slot FIRST — cancelling a connect
+    // before a session window ever appears has nothing in SWALLOW_STATE to
+    // remove below, so without this the hunt thread would keep running and
+    // could commit a "connected" slot well after the user cancelled it.
+    bump_generation(slot_id);
+    // Take the entry out under the lock, then release BEFORE the Win32 teardown.
+    let removed = lock_state().remove(slot_id);
+    if let Some(info) = removed {
+        restore_and_close(&info);
     }
     Ok(())
 }
@@ -1497,5 +1661,36 @@ mod tests {
         let r = chrome_region_rect(2, 53, 48, 1000, 800).unwrap();
         assert_eq!(r.1, 53 + 48); // ribbon offset + reveal band
         assert_eq!(r.0, 2);       // left chrome unchanged by the band
+    }
+
+    // ---- Code-review fixes: generation counter (V5) + claim set (V6) ----
+    // Both are plain data-structure invariants with no Win32 dependency, so they
+    // get direct unit tests instead of relying only on manual verification.
+
+    #[test]
+    fn generation_bump_is_monotonic_and_per_slot() {
+        use super::{bump_generation, current_generation};
+        let slot = format!("test-slot-{}", std::process::id()); // avoid cross-test collisions
+        assert_eq!(current_generation(&slot), 0); // never bumped -> 0
+        let g1 = bump_generation(&slot);
+        assert_eq!(g1, 1);
+        assert_eq!(current_generation(&slot), 1);
+        let g2 = bump_generation(&slot);
+        assert_eq!(g2, 2, "second bump must move forward, not reset");
+        assert_eq!(current_generation(&slot), 2);
+        // A different slot's counter is independent.
+        let other = format!("test-slot-other-{}", std::process::id());
+        assert_eq!(current_generation(&other), 0);
+    }
+
+    #[test]
+    fn claim_set_excludes_only_while_held() {
+        use super::{lock_claimed, excluded_hwnds};
+        let fake_hwnd = 0x7fff_0000_isize; // arbitrary, never a real hwnd in this test
+        assert!(!excluded_hwnds().contains(&fake_hwnd));
+        lock_claimed().insert(fake_hwnd);
+        assert!(excluded_hwnds().contains(&fake_hwnd), "claimed hwnd must be excluded");
+        lock_claimed().remove(&fake_hwnd);
+        assert!(!excluded_hwnds().contains(&fake_hwnd), "release must un-exclude it");
     }
 }

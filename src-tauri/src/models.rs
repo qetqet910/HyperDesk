@@ -22,6 +22,18 @@ pub struct VmNetworkAdapter {
     pub switch_name: String,
 }
 
+/// One link in a VM's virtual-disk chain (base .vhdx + each checkpoint .avhdx).
+/// Surfaced by get_vm_disk_info so the user can see what's actually eating space
+/// — a dynamic disk ballooned to its max, plus differencing layers per checkpoint.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VmDiskEntry {
+    pub path: String,
+    pub disk_type: String,       // "Dynamic" | "Fixed" | "Differencing"
+    pub file_size: u64,          // actual bytes on disk NOW
+    pub max_size: u64,           // virtual max (what the guest sees)
+    pub is_checkpoint: bool,     // Differencing layer (an .avhdx from a checkpoint)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HyperVEvent {
     pub time_created: String,
@@ -31,7 +43,6 @@ pub struct HyperVEvent {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct VmInfo {
     pub name: String,
     pub state: String,

@@ -64,15 +64,7 @@ export function CardWrapper({
         <div style={{ width: '3px', height: '3px', borderRadius: '50%', background: '#fff', opacity: 0.4 }} />
       </div>
 
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: '50px 220px 140px 1fr 220px', 
-        alignItems: 'center', 
-        width: '100%', 
-        height: '100%',
-        padding: '0 20px',
-        gap: '0'
-      }}>
+      <div className="vm-card-grid">
         {/* 1. Status Icon Section */}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <div style={{
@@ -170,20 +162,33 @@ export function HyperVCard({ vm, animDelay = 0, onError, onSuccess, onSettings }
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
         <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>CPU Load</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-          <span style={{ fontSize: '18px', fontWeight: 900, color: isRunning ? 'var(--text-main)' : 'var(--text-muted)', fontFamily: '"JetBrains Mono", monospace' }}>
+          <span style={{ fontSize: '18px', fontWeight: 900, color: isRunning ? 'var(--text-main)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>
             {cpu.toString().padStart(2, '0')}
           </span>
           <span style={{ fontSize: '10px', opacity: 0.4, fontWeight: 800 }}>%</span>
         </div>
       </div>
-      <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
+      <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px', minWidth: 0, overflow: 'hidden' }}>
         <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Memory Allocation</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
-          <span style={{ fontSize: '18px', fontWeight: 900, fontFamily: '"JetBrains Mono", monospace' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '18px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>
             {isRunning ? memGB(vm.memory_assigned) : memGB(vm.memory_startup)}
           </span>
           <span style={{ fontSize: '11px', opacity: 0.4, fontWeight: 800 }}>GB</span>
-          {isRunning && <span style={{ fontSize: '9px', color: vm.memory_status === 'OK' ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 900, marginLeft: '4px', opacity: 0.7 }}>[{vm.memory_status}]</span>}
+          {/* Status dot instead of the raw enum string: on a Korean host
+              MemoryStatus can be a localized word that overflowed the column and
+              collided with the STOP button. A 6px dot conveys OK/not-OK without
+              ever growing the row. flexShrink:0 keeps it from being squeezed. */}
+          {isRunning && (
+            <span
+              title={vm.memory_status}
+              style={{
+                width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0,
+                alignSelf: 'center', marginLeft: '3px',
+                background: vm.memory_status === 'OK' ? 'var(--accent-green)' : 'var(--accent-orange)',
+              }}
+            />
+          )}
         </div>
       </div>
     </>
@@ -275,7 +280,7 @@ export function HorizonCard({ host, animDelay = 0, onEdit, onError, onSuccess }:
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
         <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Net Latency</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-          <span style={{ fontSize: '18px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: '"JetBrains Mono", monospace' }}>
+          <span style={{ fontSize: '18px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: 'var(--font-num)' }}>
             {isOffline ? '---' : host.latency?.toString().padStart(3, '0')}
           </span>
           <span style={{ fontSize: '10px', opacity: 0.4, fontWeight: 800 }}>ms</span>
@@ -284,7 +289,7 @@ export function HorizonCard({ host, animDelay = 0, onEdit, onError, onSuccess }:
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
         <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Server Load</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-          <span style={{ fontSize: '18px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: '"JetBrains Mono", monospace' }}>
+          <span style={{ fontSize: '18px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: 'var(--font-num)' }}>
             {isOffline ? '--' : Math.round(host.load ?? 0).toString().padStart(2, '0')}
           </span>
           <span style={{ fontSize: '10px', opacity: 0.4, fontWeight: 800 }}>%</span>

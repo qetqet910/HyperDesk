@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, ReactNode } from "react";
-import { Globe, Plus, X, RefreshCw, Terminal, AlertCircle, ZapOff, Monitor } from "lucide-react";
+import { Globe, Plus, X, RefreshCw, Terminal, AlertCircle, ZapOff, Monitor, ChevronDown } from "lucide-react";
 import { api } from "@/lib/tauri-api";
 import { VmInfo, RemoteHost } from "@/types";
 import { listen } from "@tauri-apps/api/event";
@@ -425,11 +425,23 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
           too (headerControls) instead of in a second bar. */}
       <div className={`slot-header-bar ${isSwallowed ? "slot-header-bar--active" : ""}`}>
         {isSwallowed ? (
-          // Static label only. The old "다른 연결로 변경" dropdown hid the Win32
-          // child (selector-open → setWindowVisibility(false)) and left the slot
-          // black — connection switching is X-disconnect → pick again, which is
-          // the same number of clicks without the broken intermediate state.
-          <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
+          <button
+            className="slot-change-btn"
+            onClick={async () => {
+              // Disconnect FIRST, then open the selector. The earlier version of
+              // this button opened the selector while still swallowed, which hid
+              // the Win32 child (setWindowVisibility(false)) and left the slot
+              // black — tearing the embed down before showing the picker avoids
+              // that broken intermediate state entirely, in the same one click.
+              await api.unswallowWindow(id).catch(console.error);
+              setIsSwallowed(false);
+              setShowSelector(true);
+            }}
+            title="다른 연결로 변경"
+          >
+            <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
+            <ChevronDown size={11} />
+          </button>
         ) : (
           <span className="slot-header-bar__label">
             {assignedId ? (selectedConnection?.name ?? assignedId) : "비어있음"}
@@ -458,7 +470,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
             {import.meta.env.DEV && (
               <button
                 className="retry-btn-sm"
-                style={{ marginTop: "10px", background: "rgba(91,130,190,0.15)", border: "1px solid rgba(91,130,190,0.35)" }}
+                style={{ marginTop: "10px", background: "rgba(91,130,190,0.15)", border: "1px solid rgba(91,130,190,0.35)", color: "var(--text-main)" }}
                 onClick={(e) => { e.stopPropagation(); handleSwallowTestWindow(); }}
                 title="DEV: 테스트용 Win32 창(문자표)을 이 슬롯에 swallow"
               >
@@ -477,10 +489,16 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                 {retryCountRef.current > 0 && <span className="retry-status">재연결 시퀀스 가동 ({retryCountRef.current} / 7)</span>}
                 <button
                   className="retry-btn-sm"
-                  style={{ marginTop: '12px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.3)' }}
+                  style={{ marginTop: '12px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.3)', color: 'var(--text-main)' }}
                   onClick={() => {
                     setIsConnecting(false);
                     retryCountRef.current = 0;
+                    // Bumps the backend's per-slot generation counter so the
+                    // in-flight hunt thread (which has nothing in SWALLOW_STATE
+                    // to tear down yet) notices it's been superseded and exits
+                    // quietly instead of possibly committing a session after
+                    // the user already cancelled it.
+                    api.unswallowWindow(id).catch(console.error);
                   }}
                 >
                   연결 취소
@@ -496,7 +514,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                   <button className="retry-btn-sm" onClick={() => selectedConnection && handleConnect(selectedConnection)}>
                     연결 시작
                   </button>
-                  <button className="retry-btn-sm" style={{ background: 'transparent', border: '1px solid var(--border)' }} onClick={handleClearAssignment}>
+                  <button className="retry-btn-sm" style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-main)' }} onClick={handleClearAssignment}>
                     슬롯 비우기
                   </button>
                 </div>

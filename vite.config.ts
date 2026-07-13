@@ -19,6 +19,25 @@ export default defineConfig(async () => ({
     },
   },
 
+  build: {
+    rollupOptions: {
+      output: {
+        // Split the heaviest vendors out of the single 1.2MB app chunk so they
+        // parse in parallel and cache independently across releases. Charts
+        // (recharts + its d3 deps) are by far the biggest; motion, the lottie
+        // player, and the icon set are the next tier. Everything else (React,
+        // query, tauri api) stays in the default vendor chunk.
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("recharts") || id.includes("/d3-") || id.includes("victory-vendor")) return "charts";
+          if (id.includes("framer-motion") || id.includes("motion-dom") || id.includes("motion-utils")) return "motion";
+          if (id.includes("lottiefiles") || id.includes("dotlottie")) return "lottie";
+          if (id.includes("lucide-react")) return "icons";
+        },
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

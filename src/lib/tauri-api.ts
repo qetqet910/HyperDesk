@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { DashboardData, SystemStats, VmSnapshot, VmCheckpoint, VmSwitch, VmNetworkAdapter, HyperVEvent } from "@/types";
+import { DashboardData, SystemStats, VmSnapshot, VmCheckpoint, VmSwitch, VmNetworkAdapter, VmDiskEntry, HyperVEvent } from "@/types";
 
 // Helper to provide mock data in non-Tauri environments (like the browser subagent)
 const getMockDashboardData = (): DashboardData => ({
@@ -71,6 +71,8 @@ export const api = {
   removeRemoteHost: (id: string) => invoke<void>("remove_remote_host", { id }),
   updateRemoteHost: (id: string, name: string, host: string, protocol: string, username?: string, tags?: string[]) =>
     invoke<void>("update_remote_host", { id, name, host, protocol, username, tags }),
+  createVm: (opts: { name: string; generation: number; memoryGb: number; cpuCount: number; diskGb: number; switchName?: string; isoPath?: string }) =>
+    invoke<void>("create_vm", opts),
   startVm: (name: string) => invoke<void>("start_vm", { name }),
   stopVm: (name: string) => invoke<void>("stop_vm", { name }),
   saveVm: (name: string) => invoke<void>("save_vm", { name }),
@@ -79,6 +81,7 @@ export const api = {
   connectVm: (host: string, protocol: string, username?: string, slotWidth?: number, slotHeight?: number, colorDepth?: number, quality?: string) =>
     invoke<number>("connect_vm", { host, protocol, username, slotWidth, slotHeight, colorDepth, quality }),
   focusSlotWindow: (slotId: string) => invoke<void>("focus_slot_window", { slotId }),
+  setConnectLock: (locked: boolean) => invoke<void>("set_connect_lock", { locked }),
   setFullscreen: (on: boolean) => invoke<void>("set_fullscreen", { on }),
   setImmersive: (on: boolean) => invoke<void>("set_immersive", { on }),
   flashImmersiveHeader: (ms?: number) => invoke<void>("flash_immersive_header", { ms }),
@@ -119,6 +122,9 @@ export const api = {
   checkpointVm: (name: string, snapshotName: string) => invoke<void>("checkpoint_vm", { name, snapshotName }),
   restoreVmCheckpoint: (vmName: string, checkpointName: string) => invoke<void>("restore_vm_checkpoint", { vmName, checkpointName }),
   deleteVmCheckpoint: (vmName: string, checkpointName: string) => invoke<void>("delete_vm_checkpoint", { vmName, checkpointName }),
+  getVmDiskInfo: (name: string) => invoke<VmDiskEntry[]>("get_vm_disk_info", { name }),
+  compactVmDisk: (name: string) => invoke<number>("compact_vm_disk", { name }),
+  convertVmDiskToDynamic: (name: string) => invoke<number>("convert_vm_disk_to_dynamic", { name }),
   getVmSwitches: () => invoke<VmSwitch[]>("get_vm_switches"),
   getVmNetworkAdapters: () => invoke<VmNetworkAdapter[]>("get_vm_network_adapters"),
   getHyperVEvents: (maxEvents?: number) => invoke<HyperVEvent[]>("get_hyper_v_events", { maxEvents }),

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Server } from "lucide-react";
+import { Server, Plus } from "lucide-react";
 import { HyperVCard } from "@/components/RackAsset";
 import type { VmInfo } from "@/types";
 
@@ -8,11 +8,12 @@ interface VmsPageProps {
   onError: (msg: string) => void;
   onSuccess: (msg: string) => void;
   onSettings: (vm: VmInfo) => void;
+  onCreate: () => void;
 }
 
 type VmFilter = "all" | "running" | "paused" | "off";
 
-export function VmsPage({ vms, onError, onSuccess, onSettings }: VmsPageProps) {
+export function VmsPage({ vms, onError, onSuccess, onSettings, onCreate }: VmsPageProps) {
   const [vmFilter, setVmFilter] = useState<VmFilter>("all");
 
   const filteredVms = useMemo(() => {
@@ -47,9 +48,9 @@ export function VmsPage({ vms, onError, onSuccess, onSettings }: VmsPageProps) {
             </button>
           ))}
         </div>
-        <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.5px" }}>
-          {vms.length} VMs · GEN1/2 · Hyper-V
-        </span>
+        <button className="hd-segment-btn" onClick={onCreate} style={{ fontWeight: 800 }} title="새 가상 머신 생성">
+          <Plus size={13} /> 새 VM
+        </button>
       </div>
 
       <div className="section-label" style={{ gridColumn: "1 / -1" }}>
@@ -58,7 +59,7 @@ export function VmsPage({ vms, onError, onSuccess, onSettings }: VmsPageProps) {
         <div className="section-line" />
       </div>
 
-      <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div className="vm-card-list" style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "12px" }}>
         {filteredVms.length > 0 ? filteredVms.map((vm, idx) => (
           <HyperVCard
             key={vm.name}

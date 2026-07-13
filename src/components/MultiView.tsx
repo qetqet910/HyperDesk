@@ -46,6 +46,14 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   const handleConnectingChange = useCallback((slotId: string, connecting: boolean) => {
     setConnectingSlots(prev => (prev[slotId] === connecting ? prev : { ...prev, [slotId]: connecting }));
   }, []);
+  // Mirrors `anyConnecting` into Rust (lib.rs's Alt+1~4 handler has no visibility
+  // into React state otherwise, so it kept force-focusing a mid-connect slot's
+  // native window regardless of this lock). Cleared unconditionally on unmount
+  // so navigating away mid-connect can never leave the native side stuck locked.
+  useEffect(() => { api.setConnectLock(anyConnecting).catch(console.error); }, [anyConnecting]);
+  useEffect(() => {
+    return () => { api.setConnectLock(false).catch(console.error); };
+  }, []);
 
   useEffect(() => {
     const unlisten = listen<boolean>("immersive-edge", (e) => setEdgeRevealed(e.payload));
@@ -97,6 +105,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
         e.preventDefault();
         handleToggleOSFullscreen();
       } else if (e.key === "Escape") {
+        if (anyConnectingRef.current) return; // connect-lock: no state changes mid-swallow
         if (immersiveRef.current) {
           handleToggleImmersive(); // exits immersive
         } else if (fullscreenRef.current) {
