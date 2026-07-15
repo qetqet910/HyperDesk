@@ -8,6 +8,12 @@
   [![Rust](https://img.shields.io/badge/Rust-1.80%2B-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
   [![Windows Only](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](#)
   [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-red.svg?style=flat-square)](LICENSE)
+
+  <br />
+
+  <!-- 설치는 Microsoft Store 경유 — Microsoft가 서명·검증하고 자동 업데이트한다.
+       GitHub 릴리즈의 .msixbundle은 Store 제출용 미서명 원본이라 직접 설치되지 않는다. -->
+  [![Get it from Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-설치하기-0078D6?style=for-the-badge&logo=microsoftstore&logoColor=white)](https://apps.microsoft.com/detail/9NPVXL622ZQQ)
 </div>
 
 ---
@@ -73,14 +79,25 @@ Win32 API와 Tauri v2를 활용하여 독립된 외부 프로세스 윈도우를
 * **System API**: Win32 API (`SetParent`, `SetWindowPos`, `EnumWindows`, `SetWindowRgn` 등), PowerShell (Hyper-V 자동화), Windows Registry (RDP/Horizon 접속 기록 감지)
 * **CI/CD**: GitHub Actions (Stable Rust Toolchain, v2 Release)
 
-## Getting Started
+## Install
+
+일반 사용자는 **Microsoft Store**에서 설치하세요 — Microsoft가 서명·검증하며 자동으로 업데이트됩니다.
+
+> **[▶ Microsoft Store에서 설치](https://apps.microsoft.com/detail/9NPVXL622ZQQ)**
+
+> ⚠️ GitHub 릴리즈에 첨부되는 `.msixbundle`은 **Store 제출용 미서명 원본**입니다. 직접 설치되지 않으니 위 Store 링크로 받으세요.
+
+**요구 사항**
+* Windows 10/11 · [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (Windows 11 기본 탑재)
+* Hyper-V 기능 활성화. VM 관리(Get-VM/Start-VM 등)를 쓰려면 사용자 계정이 로컬 **Hyper-V Administrators** 그룹에 속해야 합니다 — 앱 자체는 관리자 권한 없이(asInvoker) 실행됩니다.
+
+## Getting Started (개발)
 
 ### Prerequisites
 
 * [Rust](https://www.rust-lang.org/tools/install) (1.80+)
 * [Node.js](https://nodejs.org/) (LTS 권장)
 * [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (Windows 10/11 기본 탑재)
-* **관리자 권한**: 외부 윈도우 프로세스를 제어하기 위해 앱 실행 시 관리자 권한이 요구됩니다.
 
 ### Installation & Development
 

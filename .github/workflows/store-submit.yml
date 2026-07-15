@@ -49,5 +49,14 @@ jobs:
         with:
           files: 'src-tauri/target/msix/*.msixbundle'
           generate_release_notes: true
+          body: |
+            ## 설치 (Microsoft Store)
+
+            👉 **https://apps.microsoft.com/detail/9NPVXL622ZQQ**
+
+            Store 버전은 Microsoft가 서명·검증하며 자동으로 업데이트됩니다.
+
+            > ⚠️ 아래 첨부된 `.msixbundle`은 Store 제출용 **미서명 원본 아티팩트**입니다.
+            > 서명되어 있지 않아 직접 설치되지 않습니다 — 반드시 위 Store 링크로 받으세요.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
