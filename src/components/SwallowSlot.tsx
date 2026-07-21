@@ -346,6 +346,11 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
       const slotH = Math.round(rect.height * dpr);
 
       let pid: number;
+      // Hyper-V console only: vmconnect's window title contains the VM name,
+      // and the backend hunt needs it — the spawned PID may hand off to an
+      // existing vmconnect instance and exit (single-instance-per-VM), in
+      // which case PID matching finds nothing (or worse, the wrong window).
+      let expectedTitle: string | undefined;
       if ("state" in conn) { // VmInfo
         const ip = conn.ip_addresses?.find((a) => a && a.trim()) ?? "";
         if (ip) {
@@ -359,6 +364,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
           // NOTE: vmconnect carries its own title/menu/toolbar chrome; stripping it
           // to a clean slot still needs work (see swallow.rs vmconnect diagnostics).
           pid = await api.connectConsole(conn.name);
+          expectedTitle = conn.name;
         }
       } else { // RemoteHost → RDP / Horizon
         pid = await api.connectVm(conn.host, conn.protocol, conn.username || undefined, slotW, slotH, settings.rdpColorDepth, settings.rdpQuality);
@@ -371,7 +377,8 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
         Math.round(rect.x * dpr),
         Math.round(rect.y * dpr),
         slotW,
-        slotH
+        slotH,
+        expectedTitle
       );
     } catch (e) {
       setIsConnecting(false);

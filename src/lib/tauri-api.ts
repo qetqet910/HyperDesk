@@ -99,8 +99,11 @@ export const api = {
   setVmMemo: (vmName: string, memo: string) => invoke<void>("set_vm_memo", { vmName, memo }),
   setRemoteHostMemo: (id: string, memo: string) => invoke<void>("set_remote_host_memo", { id, memo }),
   getHorizonPath: () => invoke<string>("get_horizon_path"),
-  swallowWindow: (slotId: string, pid: number, x: number, y: number, width: number, height: number) => 
-    invoke<void>("swallow_window", { slotId, pid, x, y, width, height }),
+  // expectedTitle: VM name for Hyper-V console connects — vmconnect is
+  // single-instance-per-VM (spawned PID may hand off and exit), so the backend
+  // hunt matches the window TITLE against it instead of trusting the PID.
+  swallowWindow: (slotId: string, pid: number, x: number, y: number, width: number, height: number, expectedTitle?: string) =>
+    invoke<void>("swallow_window", { slotId, pid, x, y, width, height, expectedTitle }),
   unswallowWindow: (slotId: string) => invoke<void>("unswallow_window", { slotId }),
   // DEV-ONLY: spawn a throwaway Win32 window (Character Map) to test SwallowGrid
   // without a real VM/RDP. Backend command exists only in debug builds; callers

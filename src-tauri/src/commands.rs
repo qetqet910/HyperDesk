@@ -1342,15 +1342,19 @@ pub async fn is_window_valid(slot_id: String) -> bool {
 
 #[tauri::command]
 pub async fn swallow_window(
-    window: tauri::Window, 
-    slot_id: String, 
+    window: tauri::Window,
+    slot_id: String,
     pid: u32,
-    x: i32, y: i32, width: i32, height: i32
+    x: i32, y: i32, width: i32, height: i32,
+    // VM name for Hyper-V console connects (window-title discriminator —
+    // vmconnect's spawned PID can hand off to an existing instance and exit,
+    // so the title is the only reliable way to find the right window).
+    expected_title: Option<String>
 ) -> Result<(), String> {
     use windows::Win32::Foundation::HWND;
     let parent_hwnd = HWND(window.hwnd().map_err(|e| e.to_string())?.0);
     let bounds = crate::swallow::SlotBounds { x, y, width, height };
-    crate::swallow::swallow(&slot_id, pid, parent_hwnd, window.app_handle().clone(), bounds)
+    crate::swallow::swallow(&slot_id, pid, parent_hwnd, window.app_handle().clone(), bounds, expected_title)
 }
 
 // ─── Borderless fullscreen (flash-free, layout-correct) ──────────────────────
@@ -1365,6 +1369,10 @@ pub async fn swallow_window(
 
 struct SavedWindowState {
     pos: tauri::PhysicalPosition<i32>,
+    /// INNER size. `set_size` sets the inner/client size (tao set_inner_size),
+    /// so the saved size must be inner too — the earlier code saved outer_size
+    /// and restored it through set_size, growing the window by the invisible
+    /// border on every fullscreen round-trip.
     size: tauri::PhysicalSize<u32>,
     maximized: bool,
 }
@@ -1373,6 +1381,32 @@ static FS_SAVED: OnceLock<Mutex<Option<SavedWindowState>>> = OnceLock::new();
 
 fn fs_saved() -> &'static Mutex<Option<SavedWindowState>> {
     FS_SAVED.get_or_init(|| Mutex::new(None))
+}
+
+/// ITaskbarList2::MarkFullscreenWindow — explicitly registers/unregisters the
+/// window as fullscreen with the shell, so the taskbar keeps itself BELOW it
+/// while the window is active. Geometry-based "rude app" detection alone is not
+/// enough here: keyboard focus lives on a swallowed CHILD that belongs to a
+/// foreign process (mstsc), and after an Alt+Tab round-trip the shell re-
+/// evaluates against that child instead of our fullscreen frame — which is when
+/// the taskbar popped back over the fullscreen RDP view. vmconnect didn't show
+/// it because its input window sits on our thread tree differently. Best-effort:
+/// on failure the geometric detection still applies.
+fn mark_fullscreen_native(window: &tauri::Window, on: bool) {
+    use windows::Win32::Foundation::BOOL;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{ITaskbarList2, TaskbarList};
+    let Ok(h) = window.hwnd() else { return };
+    let hwnd = windows::Win32::Foundation::HWND(h.0);
+    unsafe {
+        // Tauri commands run on worker threads with no guaranteed COM state.
+        // Per-thread init is idempotent (RPC_E_CHANGED_MODE == already up, fine).
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if let Ok(tb) = CoCreateInstance::<_, ITaskbarList2>(&TaskbarList, None, CLSCTX_INPROC_SERVER) {
+            let _ = tb.HrInit();
+            let _ = tb.MarkFullscreenWindow(hwnd, BOOL::from(on));
+        }
+    }
 }
 
 fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
@@ -1385,13 +1419,32 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
             let _ = window.unmaximize();
         }
         let pos = window.outer_position().map_err(|e| e.to_string())?;
-        let size = window.outer_size().map_err(|e| e.to_string())?;
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        let inner_pos = window.inner_position().map_err(|e| e.to_string())?;
         let monitor = window.current_monitor().map_err(|e| e.to_string())?
             .ok_or("no monitor")?;
         *saved = Some(SavedWindowState { pos, size, maximized });
-        window.set_position(*monitor.position()).map_err(|e| e.to_string())?;
+
+        // tao keeps WS_THICKFRAME on a decorations:false window (resize/snap),
+        // and on Win10/11 that style carries an INVISIBLE resize border: the
+        // outer rect (GetWindowRect) is ~7px wider than the client area the
+        // webview actually paints, on the left/right/bottom. Fullscreen must
+        // align the CLIENT rect with the monitor, not the outer rect —
+        // positioning by outer bounds rendered the content inset from the left
+        // edge and spilling off the right ("앱이 우측으로 밀림" in 32e3d4b).
+        // So: shift the outer rect up/left by the measured inset, and set the
+        // INNER size to the monitor size exactly. The outer rect then overhangs
+        // the screen edges by the border width — invisible by definition, and
+        // still covering the monitor, which geometric fullscreen detection needs.
+        let inset_l = inner_pos.x - pos.x;
+        let inset_t = inner_pos.y - pos.y;
+        let mon_pos = *monitor.position();
+        window.set_position(tauri::PhysicalPosition::new(mon_pos.x - inset_l, mon_pos.y - inset_t))
+            .map_err(|e| e.to_string())?;
         window.set_size(*monitor.size()).map_err(|e| e.to_string())?;
+        mark_fullscreen_native(window, true);
     } else if let Some(s) = saved.take() {
+        mark_fullscreen_native(window, false);
         if s.maximized {
             let _ = window.maximize();
         } else {

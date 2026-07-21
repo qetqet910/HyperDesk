@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_CLIPSIBLINGS, WS_EX_TOPMOST, WS_EX_APPWINDOW, WS_EX_MDICHILD,
     SWP_SHOWWINDOW, SWP_FRAMECHANGED, SWP_ASYNCWINDOWPOS, SWP_NOCOPYBITS,
     SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
-    EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
+    EnumWindows, GetWindowThreadProcessId, IsWindowVisible, GetWindowTextW,
     EnumChildWindows, IsWindow, HWND_TOP, GetWindowRect,
     SetForegroundWindow, BringWindowToTop, SetMenu, PostMessageW, WM_CLOSE,
 };
@@ -247,10 +247,42 @@ struct EnumParam {
     /// hwnds already owned by an existing swallow (any slot). Must be excluded
     /// from both passes — see find_main_window for why.
     excluded: Vec<isize>,
+    /// Lowercased window-title fragment (the VM name for Hyper-V console
+    /// connects, None otherwise). When set, the candidate is chosen by TITLE,
+    /// not class or PID: vmconnect is single-instance-per-VM (the spawned PID
+    /// can hand off and exit, making pid-scoping useless) and — confirmed by
+    /// live probe 2026-07-21 — its console frame is a generic
+    /// "WindowsForms10.Window.8.app.*" window, NOT in the class list below and
+    /// NOT containing "vmconnect". So neither the class match nor the pid
+    /// fallback can find it; only the title can. The real console title is
+    /// "<host>의 <VM> - 가상 컴퓨터 연결" (localized), and a small transient
+    /// "<VM>에 연결" progress window (477x224) coexists with the full console
+    /// frame (650x508+). We therefore keep the LARGEST-area title match
+    /// (`best_area`) — locale-independent, and reliably the console over the
+    /// progress popup.
+    title_needle: Option<String>,
+    /// For the title_needle path: area (px²) of the current best (largest)
+    /// title-matching window. 0 = none yet.
+    best_area: i64,
 }
 
-struct ChildParam { 
-    found: HWND 
+/// Pure core of the title-driven candidate selection (unit-testable without a
+/// live desktop). Given a window's title, its area, and the current best area,
+/// returns Some(new_best_area) if this window should REPLACE the current best
+/// (title contains the needle AND is strictly larger), else None. The callback
+/// keeps the largest match so the full vmconnect console frame beats the small
+/// transient "connecting" popup — see EnumParam::title_needle. `needle` must be
+/// pre-lowercased; `title` is lowercased here.
+fn title_match_better(title: &str, needle: &str, area: i64, best_area: i64) -> Option<i64> {
+    if title.to_lowercase().contains(needle) && area > best_area {
+        Some(area)
+    } else {
+        None
+    }
+}
+
+struct ChildParam {
+    found: HWND
 }
 
 /// Finds the target process's main/session window. `pid` here is the PID
@@ -264,13 +296,16 @@ struct ChildParam {
 /// slot. `excluded` is every hwnd already tracked in SWALLOW_STATE (any slot)
 /// at call time — both passes skip them, so a fresh search can only ever
 /// re-find windows nobody has already claimed.
-pub fn find_main_window(pid: u32) -> Option<HWND> {
+pub fn find_main_window(pid: u32, title_needle: Option<&str>) -> Option<HWND> {
     let excluded: Vec<isize> = excluded_hwnds();
+    let needle = title_needle.map(|s| s.to_lowercase());
 
     let mut param = EnumParam {
         target_pid: pid,
         found_hwnd: HWND(std::ptr::null_mut()),
         excluded: excluded.clone(),
+        title_needle: needle.clone(),
+        best_area: 0,
     };
     unsafe {
         let _ = EnumWindows(Some(enum_windows_callback), LPARAM(&mut param as *mut EnumParam as isize));
@@ -284,6 +319,8 @@ pub fn find_main_window(pid: u32) -> Option<HWND> {
         target_pid: 0,
         found_hwnd: HWND(std::ptr::null_mut()),
         excluded,
+        title_needle: needle,
+        best_area: 0,
     };
     unsafe {
         let _ = EnumWindows(Some(enum_windows_callback), LPARAM(&mut fallback_param as *mut EnumParam as isize));
@@ -450,12 +487,36 @@ extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
         if thread_id == 0 { return BOOL::from(true); }
 
         if (param.target_pid == 0 || pid == param.target_pid) && IsWindowVisible(hwnd).as_bool() {
+             // ── Title-driven path (Hyper-V console) ──────────────────────────
+             // When a VM name is given, the title is the ONLY reliable
+             // discriminator (see EnumParam::title_needle). Class and pid can't
+             // find vmconnect's WindowsForms console frame. We DON'T stop at the
+             // first match: we keep the largest-area title match so the full
+             // console frame wins over the small transient "connecting" popup,
+             // and so a handoff-owned window in pass 2 (target_pid==0) is found.
+             if let Some(needle) = &param.title_needle {
+                 let mut tbuf = [0u16; 512];
+                 let tlen = GetWindowTextW(hwnd, &mut tbuf);
+                 let title = String::from_utf16_lossy(&tbuf[..tlen as usize]).to_lowercase();
+                 let mut r = RECT::default();
+                 if GetWindowRect(hwnd, &mut r).is_ok() {
+                     let area = (r.right - r.left) as i64 * (r.bottom - r.top) as i64;
+                     // title already lowercased above; pass needle as-is (lowercased in find_main_window)
+                     if let Some(new_best) = title_match_better(&title, needle.as_str(), area, param.best_area) {
+                         param.best_area = new_best;
+                         param.found_hwnd = hwnd;
+                     }
+                 }
+                 return BOOL::from(true); // scan every window; pick the biggest
+             }
+
+             // ── Class-driven path (RDP / Horizon, no title needle) ───────────
              let mut class_name = [0u16; 256];
              let len = GetClassNameW(hwnd, &mut class_name);
              if len > 0 {
                  let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
-                 if class_str.contains("TscShellContainerClass") || 
-                    class_str.contains("VMConnect") || 
+                 if class_str.contains("TscShellContainerClass") ||
+                    class_str.contains("VMConnect") ||
                     class_str.contains("UIWindow") ||
                     class_str.contains("VMWindow") ||
                     class_str.contains("VMware-view-MainWindow") ||
@@ -537,7 +598,7 @@ fn dump_owned_top_level_windows(pid: u32, skip: HWND) {
     }
 }
 
-pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: AppHandle, bounds: SlotBounds) -> Result<(), String> {
+pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: AppHandle, bounds: SlotBounds, expected_title: Option<String>) -> Result<(), String> {
     let s_id = slot_id.to_string();
     // Captured now, checked every poll below — a later swallow()/unswallow() call
     // for this same slot bumps the generation and makes this hunt a no-op.
@@ -580,7 +641,7 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
 
             // Preferred: a window with a KNOWN session class (pid-scoped first,
             // then the class-list fallback inside find_main_window).
-            let mut candidate: Option<HWND> = find_main_window(target_pid)
+            let mut candidate: Option<HWND> = find_main_window(target_pid, expected_title.as_deref())
                 .filter(|h| !chain.contains(&(h.0 as isize)));
 
             // After the first stage, only KNOWN session classes may come from the
@@ -1582,7 +1643,66 @@ pub fn focus_window(slot_id: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{framed_rect, chrome_region_rect, HORIZONTAL_BUFFER};
+    use super::{framed_rect, chrome_region_rect, title_match_better, HORIZONTAL_BUFFER};
+
+    // ── vmconnect console window selection (ground-truthed via live probe
+    // 2026-07-21 against VM "Windows 10 MSIX packaging environment") ──────────
+    //
+    // Two visible top-level windows carry the VM name in their title:
+    //   1. "<VM>에 연결"                         — transient progress, 477x224
+    //   2. "<host>의 <VM> - 가상 컴퓨터 연결"     — the console frame, 650x508
+    // The hunt must land on #2. Selection is by LARGEST title-matching area, so
+    // it's locale-independent (no reliance on the " - 가상 컴퓨터 연결" suffix).
+
+    /// Simulates the callback's accumulation over an EnumWindows pass: folds the
+    /// window list, keeping the hwnd-index whose title matches and area is max.
+    fn pick_best(windows: &[(&str, i64)], needle: &str) -> Option<usize> {
+        let needle = needle.to_lowercase();
+        let mut best_area = 0i64;
+        let mut best_idx = None;
+        for (i, (title, area)) in windows.iter().enumerate() {
+            if let Some(nb) = title_match_better(title, &needle, *area, best_area) {
+                best_area = nb;
+                best_idx = Some(i);
+            }
+        }
+        best_idx
+    }
+
+    #[test]
+    fn vmconnect_picks_console_over_connecting_popup() {
+        let vm = "Windows 10 MSIX packaging environment";
+        let windows = [
+            ("Windows 10 MSIX packaging environment에 연결", 477 * 224),
+            ("localhost의 Windows 10 MSIX packaging environment - 가상 컴퓨터 연결", 650 * 508),
+        ];
+        // Regardless of enumeration order, the larger console frame wins.
+        assert_eq!(pick_best(&windows, vm), Some(1));
+        let mut rev = windows;
+        rev.reverse();
+        assert_eq!(pick_best(&rev, vm), Some(0)); // console is now index 0
+    }
+
+    #[test]
+    fn vmconnect_title_gate_rejects_unrelated_and_usage_dialog() {
+        let vm = "Ubuntu 20.04 LTS";
+        let windows = [
+            ("가상 컴퓨터 연결 사용", 500 * 300),          // vmconnect usage/error dialog — no VM name
+            ("localhost의 SAP_B1_9.3 - 가상 컴퓨터 연결", 650 * 508), // a DIFFERENT VM's console
+            ("Program Manager", 1920 * 1080),               // huge unrelated window
+        ];
+        // None contains "ubuntu 20.04 lts" → no match, hunt keeps polling.
+        assert_eq!(pick_best(&windows, vm), None);
+    }
+
+    #[test]
+    fn vmconnect_case_insensitive_and_substring() {
+        // The needle is a substring of a longer localized title, any case.
+        assert!(title_match_better("LOCALHOST의 MyVM - 가상 컴퓨터 연결", "myvm", 100, 0).is_some());
+        // Not larger than current best → not chosen even though it matches.
+        assert!(title_match_better("MyVM console", "myvm", 100, 100).is_none());
+    }
+
 
     // The invariant that fixes the white-border bug: the swallowed frame is
     // positioned/sized so the CONTENT (client area, inset by the symmetric
