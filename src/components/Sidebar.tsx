@@ -35,6 +35,9 @@ interface SidebarProps {
   vmCount?: number;
   remoteCount?: number;
   runningCount?: number;
+  /** Number of multiview slots (0–4) currently holding a connection assignment.
+      Rendered as an "N/4" pill on the 멀티 뷰 nav item. */
+  occupiedSlots?: number;
 }
 
 const WORKSPACE_ITEMS: NavItem[] = [
@@ -50,7 +53,7 @@ const SYSTEM_ITEMS: NavItem[] = [
   { id: "settings", label: "설정", icon: <Settings size={15} /> },
 ];
 
-export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningCount = 0 }: SidebarProps) {
+export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningCount = 0, occupiedSlots = 0 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(() =>
     localStorage.getItem("hd_sidebar_collapsed") === "true"
   );
@@ -111,6 +114,9 @@ export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningC
             <span className="hd-nav-item__label">{item.label}</span>
             {item.count != null && item.count > 0 && (
               <span className="hd-nav-item__count">{item.count}</span>
+            )}
+            {item.id === "multiview" && occupiedSlots > 0 && (
+              <span className="hd-nav-item__slots" title={`${occupiedSlots}개 슬롯 연결됨`}>{occupiedSlots}/4</span>
             )}
             {item.badge && (
               <span

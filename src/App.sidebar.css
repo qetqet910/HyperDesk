@@ -208,16 +208,29 @@
 }
 
 .hd-nav-item__count,
+.hd-nav-item__slots,
 .hd-nav-item__badge {
   flex-shrink: 0;
   opacity: 1;
   transition: opacity 0.16s ease;
 }
 
+/* Occupied-slots pill on the 멀티 뷰 item (N/4). Sits just left of the LIVE badge. */
+.hd-nav-item__slots {
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--accent-green);
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
 /* Fade-only: trailing text/badges disappear while the icon stays put.
    The sidebar's overflow:hidden clips whatever extends past the collapsed width. */
 .hd-sidebar--collapsed .hd-nav-item__label,
 .hd-sidebar--collapsed .hd-nav-item__count,
+.hd-sidebar--collapsed .hd-nav-item__slots,
 .hd-sidebar--collapsed .hd-nav-item__badge {
   opacity: 0;
   pointer-events: none;

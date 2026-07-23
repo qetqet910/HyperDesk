@@ -1808,8 +1808,122 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
    header floating over that band duplicates the header visually, and anything
    below 36px gets eaten by the VM window. MultiView's controls therefore render
    INSIDE the slot header bar (SwallowSlot headerControls). */
+/* Stage: horizontal flex row holding the slot grid (flex:1) + the session rail.
+   The rail is a real sibling, so shrinking it re-flows the grid width and the
+   swallowed Win32 child re-fits via its ResizeObserver — never an overlay. */
+.multiview-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 8px;
+}
+.multiview-container.immersive .multiview-stage { gap: 0; }
+
+/* Right session rail — the marketing "SESSIONS" panel, moved to the right and
+   made real. Lists the 4 slots as cards; clicking one pages to it (same as
+   Alt+1~4). Hidden while immersive (VM owns the full screen). */
+.multiview-rail {
+  flex-shrink: 0;
+  width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-surface, rgba(14,16,22,0.6));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-y: auto;
+}
+.multiview-rail__title {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 2px 4px;
+}
+.multiview-rail__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.session-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.session-card:hover:not(:disabled) {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(91,130,190,0.35);
+}
+.session-card:active:not(:disabled) { transform: scale(0.98); }
+.session-card:disabled { opacity: 0.4; cursor: not-allowed; }
+.session-card.active {
+  background: var(--accent-wash, rgba(91,130,190,0.12));
+  border-color: var(--accent-blue);
+  box-shadow: inset 3px 0 0 var(--accent-blue);
+}
+.session-card.empty { color: var(--text-muted); }
+.session-card__icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-secondary);
+}
+.session-card.active .session-card__icon { color: var(--accent-blue); }
+.session-card.empty .session-card__icon { color: var(--text-muted); opacity: 0.6; }
+.session-card__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.session-card__name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-card.empty .session-card__name { color: var(--text-muted); font-weight: 600; }
+.session-card__sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-card__hint {
+  flex-shrink: 0;
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  padding: 2px 5px;
+  border-radius: 5px;
+}
+[data-theme="light"] .multiview-rail { background: var(--bg-card); }
+
 .multiview-grid {
   flex: 1;
+  min-width: 0;
   display: grid;
   gap: 8px;
   background: #000; border-radius: var(--radius); overflow: hidden;
@@ -2220,6 +2334,48 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* ── License modal (SettingsPage → LicenseModal) ── */
+.license-section { margin-bottom: 16px; }
+.license-section__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.license-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.license-row__name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.license-row__tag {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  background: var(--accent-wash);
+  padding: 2px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
 }
 /* .slot-overlay.bg-placeholder replaced by .slot-overlay-security (see SwallowSlot section) */
 

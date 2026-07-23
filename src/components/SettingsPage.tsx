@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { User, Bell, Sun, Moon, Monitor, Palette, Shield, RefreshCw, MonitorPlay, Keyboard, Database, FolderOpen, EyeOff, Trash2 } from "lucide-react";
+import { User, Bell, Sun, Moon, Monitor, Palette, Shield, RefreshCw, MonitorPlay, Keyboard, Database, FolderOpen, EyeOff, Trash2, Package } from "lucide-react";
 import { useSettings } from "@/contexts/SettingsContext";
 import { applyTheme } from "@/lib/theme";
 import { api } from "@/lib/tauri-api";
 import type { ToastType } from "@/hooks/useToast";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { LicenseModal } from "@/components/LicenseModal";
 
 type UpdateState = "idle" | "checking" | "upToDate" | "available" | "error";
 
@@ -38,6 +39,7 @@ interface SettingsPageProps {
 export function SettingsPage({ addToast }: SettingsPageProps) {
   const { settings, updateSettings } = useSettings();
   const [confirmAction, setConfirmAction] = useState<"resetHidden" | "clearData" | null>(null);
+  const [showLicenses, setShowLicenses] = useState(false);
 
   const openDataDir = async () => {
     try {
@@ -244,7 +246,7 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
           <div className="settings-fields">
             <div className="settings-row col">
               <div className="settings-row-label">데이터 저장 위치</div>
-              <div className="settings-row-desc">자산 · 메모 · 태그가 저장되는 폴더 경로를 복사합니다</div>
+              <div className="settings-row-desc"><p>자산 · 메모 · 태그가 저장되는</p> 폴더 경로를 복사합니다</div>
               <button className="hd-segment-btn" style={{ alignSelf: "flex-start" }} onClick={openDataDir}>
                 <FolderOpen size={13} /> 경로 복사
               </button>
@@ -258,7 +260,7 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
             </div>
             <div className="settings-row col">
               <div className="settings-row-label">저장 데이터 삭제</div>
-              <div className="settings-row-desc">수동 등록 자산, 메모, 태그를 모두 삭제합니다 (되돌릴 수 없음)</div>
+              <div className="settings-row-desc"><p>수동 등록 자산, 메모, 태그를 모두</p> 삭제합니다 (되돌릴 수 없음)</div>
               <button className="hd-segment-btn hd-segment-btn--danger" style={{ alignSelf: "flex-start" }} onClick={() => setConfirmAction("clearData")}>
                 <Trash2 size={13} /> 삭제
               </button>
@@ -276,6 +278,13 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
               <span className="hd-sidebar__version" style={{ fontSize: "11px", alignSelf: "flex-start" }}>
                 {appVersion ? `v${appVersion}` : "—"}
               </span>
+            </div>
+            <div className="settings-row col">
+              <div className="settings-row-label">오픈소스 라이선스</div>
+              <div className="settings-row-desc">HyperDesk가 사용하는 오픈소스 구성요소와 라이선스 고지</div>
+              <button className="hd-segment-btn" style={{ alignSelf: "flex-start" }} onClick={() => setShowLicenses(true)}>
+                <Package size={13} /> 라이선스 보기
+              </button>
             </div>
             <div className="settings-row col">
               <div className="settings-row-label">업데이트</div>
@@ -332,6 +341,7 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
           onClose={() => setConfirmAction(null)}
         />
       )}
+      {showLicenses && <LicenseModal onClose={() => setShowLicenses(false)} />}
     </div>
   );
 }

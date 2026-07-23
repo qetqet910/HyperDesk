@@ -674,6 +674,7 @@ export default function App() {
             vmCount={vms.length}
             remoteCount={remoteHosts.length}
             runningCount={runningVms}
+            occupiedSlots={Object.keys(settings.slotAssignments ?? {}).length}
           />
 
           {/* ── Main area ── */}

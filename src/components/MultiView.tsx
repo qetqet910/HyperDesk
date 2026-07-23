@@ -1,7 +1,7 @@
 import { useSettings } from "@/contexts/SettingsContext";
 import { SwallowSlot } from "@/components/SwallowSlot";
 import { VmInfo, RemoteHost } from "@/types";
-import { Expand, Shrink, Maximize } from "lucide-react";
+import { Expand, Shrink, Maximize, Server, Monitor, Globe, RefreshCw, Plus } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -169,26 +169,56 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
     updateSettings({ slotAssignments: newAssignments });
   };
 
-  // Slot switcher + fullscreen toggle, rendered INSIDE the active slot's 36px
-  // header bar. Deliberately NOT a separate header: a second bar floating over
-  // the slot's own header was the "duplicated header" bug, and any HTML below
-  // the 36px band is physically covered by the swallowed Win32 window anyway.
+  // Resolve a slot index to its assigned session's display metadata, for the
+  // right rail. Kind drives the icon/label; null name means the slot is empty.
+  const slotMeta = (i: number): { name: string | null; kind: "hyperv" | "rdp" | "horizon" | null } => {
+    const assignedId = settings.slotAssignments[i] || null;
+    if (!assignedId) return { name: null, kind: null };
+    const vm = data.vms.find((v) => v.name === assignedId);
+    if (vm) return { name: vm.name, kind: "hyperv" };
+    const host = data.remoteHosts.find((h) => h.id === assignedId);
+    if (host) return { name: host.name, kind: host.protocol === "HORIZON" ? "horizon" : "rdp" };
+    return { name: assignedId, kind: null };
+  };
+  const kindIcon = (kind: ReturnType<typeof slotMeta>["kind"]) => {
+    if (kind === "hyperv") return <Server size={15} />;
+    if (kind === "horizon") return <Globe size={15} />;
+    if (kind === "rdp") return <Monitor size={15} />;
+    return <Plus size={15} />;
+  };
+  const kindLabel = (kind: ReturnType<typeof slotMeta>["kind"]) =>
+    kind === "hyperv" ? "Hyper-V" : kind === "horizon" ? "Horizon" : kind === "rdp" ? "RDP" : "비어있음";
+
+  // Header controls rendered INSIDE the active slot's 36px header bar. Deliberately
+  // NOT a separate header: a second bar floating over the slot's own header was the
+  // "duplicated header" bug, and any HTML below the 36px band is physically covered
+  // by the swallowed Win32 window anyway.
+  //
+  // The 1~4 slot switcher only appears while IMMERSIVE — there the right rail is
+  // hidden (VM owns the whole screen), so the header's numbers are the only visual
+  // "which slot is active" feedback (see the flashImmersiveHeader effect above). In
+  // normal mode the right rail is the switcher, so the header just carries the
+  // fullscreen/immersive toggles and the numbers would be redundant with the rail.
   const headerControls = (
     <>
-      <div className="control-group">
-        {Array.from({ length: SLOT_COUNT }).map((_, i) => (
-          <button
-            key={i}
-            className={activeSlot === i ? "active" : ""}
-            disabled={anyConnecting && activeSlot !== i}
-            onClick={() => setActiveSlot(i)}
-            title={anyConnecting && activeSlot !== i ? "연결 중에는 슬롯을 전환할 수 없습니다" : `슬롯 ${i + 1} (Alt+${i + 1})`}
-          >
-            {i + 1}
-          </button>
-        ))}
-      </div>
-      <div className="control-divider" />
+      {isImmersive && (
+        <>
+          <div className="control-group">
+            {Array.from({ length: SLOT_COUNT }).map((_, i) => (
+              <button
+                key={i}
+                className={activeSlot === i ? "active" : ""}
+                disabled={anyConnecting && activeSlot !== i}
+                onClick={() => setActiveSlot(i)}
+                title={anyConnecting && activeSlot !== i ? "연결 중에는 슬롯을 전환할 수 없습니다" : `슬롯 ${i + 1} (Alt+${i + 1})`}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+          <div className="control-divider" />
+        </>
+      )}
       <div className="control-group">
         <button
           className={isImmersive ? "active" : ""}
@@ -211,25 +241,66 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
 
   return (
     <div className={`multiview-container ${isImmersive ? "immersive" : ""} ${isImmersive && edgeRevealed ? "edge-revealed" : ""}`}>
-      <div className="multiview-grid" style={{ gridTemplateColumns: "1fr", gridTemplateRows: "1fr" }}>
-        {Array.from({ length: SLOT_COUNT }).map((_, i) => {
-          const slotId = `slot-${i}`;
-          return (
-            <SwallowSlot
-              key={slotId}
-              id={slotId}
-              assignedId={settings.slotAssignments[i] || null}
-              data={data}
-              onAssign={(id) => handleUpdateSlot(i, id)}
-              onError={onError}
-              isVisible={activeSlot === i}
-              isOverlayActive={isOverlayActive}
-              isSyncLocked={isSwitching}
-              headerControls={headerControls}
-              onConnectingChange={handleConnectingChange}
-            />
-          );
-        })}
+      {/* Stage = grid + rail as a flex ROW. The rail is a real SIBLING that shrinks
+          the grid (and therefore each slot's .slot-content-area), so the swallowed
+          Win32 window re-fits the narrower area via its ResizeObserver — it is NOT
+          an overlay over the VM (a swallowed child renders physically above WebView2
+          and can't be covered by DOM z-index). Hidden while immersive so the VM keeps
+          the full screen. */}
+      <div className="multiview-stage">
+        <div className="multiview-grid" style={{ gridTemplateColumns: "1fr", gridTemplateRows: "1fr" }}>
+          {Array.from({ length: SLOT_COUNT }).map((_, i) => {
+            const slotId = `slot-${i}`;
+            return (
+              <SwallowSlot
+                key={slotId}
+                id={slotId}
+                assignedId={settings.slotAssignments[i] || null}
+                data={data}
+                onAssign={(id) => handleUpdateSlot(i, id)}
+                onError={onError}
+                isVisible={activeSlot === i}
+                isOverlayActive={isOverlayActive}
+                isSyncLocked={isSwitching}
+                headerControls={headerControls}
+                onConnectingChange={handleConnectingChange}
+              />
+            );
+          })}
+        </div>
+
+        {!isImmersive && (
+          <aside className="multiview-rail">
+            <div className="multiview-rail__title">세션</div>
+            <div className="multiview-rail__list">
+              {Array.from({ length: SLOT_COUNT }).map((_, i) => {
+                const meta = slotMeta(i);
+                const slotId = `slot-${i}`;
+                const connecting = !!connectingSlots[slotId];
+                const isActive = activeSlot === i;
+                const locked = anyConnecting && !isActive;
+                return (
+                  <button
+                    key={i}
+                    className={`session-card ${isActive ? "active" : ""} ${meta.name ? "filled" : "empty"}`}
+                    disabled={locked}
+                    onClick={() => setActiveSlot(i)}
+                    title={locked ? "연결 중에는 슬롯을 전환할 수 없습니다" : `슬롯 ${i + 1} (Alt+${i + 1})`}
+                  >
+                    <span className="session-card__icon">
+                      {connecting ? <RefreshCw size={15} className="spinning" /> : kindIcon(meta.kind)}
+                    </span>
+                    <span className="session-card__text">
+                      <span className="session-card__name">{meta.name ?? `슬롯 ${i + 1}`}</span>
+                      <span className="session-card__sub">{connecting ? "연결 중…" : kindLabel(meta.kind)}</span>
+                    </span>
+                    <span className="session-card__hint">Alt+{i + 1}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );
