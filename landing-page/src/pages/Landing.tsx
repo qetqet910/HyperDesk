@@ -1,6 +1,6 @@
 import { motion, AnimatePresence, useDragControls } from "framer-motion";
 import { Lang } from "../types";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 // @ts-ignore
 import readmeText from "../../../README.md?raw";
 
@@ -14,7 +14,7 @@ const translations = {
     heroTitle: "HYPERDESK",
     heroSub: "COMMAND YOUR VIRTUAL WORLD",
     heroDesc: "The ultimate Multi-View VDI & VM Monitoring Hub. Experience native performance and seamless Window Swallowing technology.",
-    downloadBtn: "DOWNLOAD .EXE",
+    downloadBtn: "GET IT ON MICROSOFT STORE",
     githubBtn: "SOURCE CODE",
     marquee: "⚡ WELCOME TO HYPERDESK ⚡ THE FUTURE OF VDI IS RETRO ⚡ NO DEADLOCKS ⚡ NO LAG ⚡ JUST RAW SPEED ⚡",
     f1Title: "SwallowGrid™",
@@ -57,7 +57,7 @@ const translations = {
     heroTitle: "하이퍼데스크",
     heroSub: "모든 인프라를 한 곳에서 완벽하게",
     heroDesc: "차원이 다른 VDI 및 VM 통합 관제 허브. Tauri와 Rust로 완성된 압도적인 성능과 독자적인 윈도우 임베딩 기술을 경험하세요.",
-    downloadBtn: "다운로드 .EXE",
+    downloadBtn: "Microsoft Store에서 받기",
     githubBtn: "소스코드",
     marquee: "⚡ HYPERDESK에 오신 것을 환영합니다 ⚡ VDI의 미래는 레트로에 있습니다 ⚡ 데드락 제로 ⚡ 렉 제로 ⚡ 압도적 속도 ⚡",
     f1Title: "SwallowGrid™",
@@ -98,28 +98,11 @@ const translations = {
   }
 };
 
-const REPO = "qetqet910/HyperDesk";
-
-// GitHub's releases/latest API has no version baked into the URL, so this never
-// needs a code change when a new version ships. Falls back to the releases page
-// (still always-current, just not a one-click .exe) if the API call fails or there
-// are no releases yet.
-function useLatestDownloadUrl() {
-  const fallback = `https://github.com/${REPO}/releases/latest`;
-  const [url, setUrl] = useState(fallback);
-
-  useEffect(() => {
-    fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        const exeAsset = data?.assets?.find((a: any) => a.name?.endsWith(".exe"));
-        if (exeAsset) setUrl(exeAsset.browser_download_url);
-      })
-      .catch(() => {});
-  }, []);
-
-  return url;
-}
+// Store-only distribution now (no more .exe releases) — this is a fixed link,
+// not a hook, because there's nothing to fetch: the Store always serves the
+// current version itself. A future direct-download (bypass the Store app)
+// automation is still just an idea, not built — see conversation 2026-07-23.
+const MS_STORE_URL = "https://apps.microsoft.com/detail/9NPVXL622ZQQ";
 
 function RetroWindow({ title, children, color = "bg-[#000080]", className = "", initialZ = 10, onClose, resizable = false }: any) {
   const [zIndex, setZIndex] = useState(initialZ);
@@ -183,7 +166,6 @@ const MicroBanner = ({ text, bg, border1, border2 }: any) => (
 
 export default function Landing({ lang }: { lang: Lang }) {
   const t = translations[lang];
-  const downloadUrl = useLatestDownloadUrl();
 
   const [isReadmeOpen, setIsReadmeOpen] = useState(false);
   const [isInternetOpen, setIsInternetOpen] = useState(false);
@@ -359,7 +341,7 @@ export default function Landing({ lang }: { lang: Lang }) {
                 {t.heroDesc}
               </p>
               <div className="flex flex-wrap gap-4 pt-4 border-t-2 border-gray-300">
-                <a href={downloadUrl} target="_blank" rel="noreferrer" className="flex-1 text-center border-2 border-white border-b-black border-r-black bg-[#C0C0C0] text-black font-black py-2 px-4 active:border-black active:border-b-white active:border-r-white active:translate-y-[1px] transition-all text-sm shadow-[1px_1px_0_0_rgba(0,0,0,1)] hover:bg-[#dfdfdf]">
+                <a href={MS_STORE_URL} target="_blank" rel="noreferrer" className="flex-1 text-center border-2 border-white border-b-black border-r-black bg-[#C0C0C0] text-black font-black py-2 px-4 active:border-black active:border-b-white active:border-r-white active:translate-y-[1px] transition-all text-sm shadow-[1px_1px_0_0_rgba(0,0,0,1)] hover:bg-[#dfdfdf]">
                   {t.downloadBtn}
                 </a>
                 <a href="https://github.com/qetqet910/HyperDesk" target="_blank" rel="noreferrer" className="flex-1 text-center border-2 border-white border-b-black border-r-black bg-[#C0C0C0] text-black font-black py-2 px-4 active:border-black active:border-b-white active:border-r-white active:translate-y-[1px] transition-all text-sm shadow-[1px_1px_0_0_rgba(0,0,0,1)] hover:bg-[#dfdfdf]">

@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import { Server, Plus } from "lucide-react";
 import { HyperVCard } from "@/components/RackAsset";
+import { ColumnToggle } from "@/components/ColumnToggle";
+import { useSettings } from "@/contexts/SettingsContext";
 import type { VmInfo } from "@/types";
 
 interface VmsPageProps {
@@ -14,6 +16,7 @@ interface VmsPageProps {
 type VmFilter = "all" | "running" | "paused" | "off";
 
 export function VmsPage({ vms, onError, onSuccess, onSettings, onCreate }: VmsPageProps) {
+  const { settings, updateSettings } = useSettings();
   const [vmFilter, setVmFilter] = useState<VmFilter>("all");
 
   const filteredVms = useMemo(() => {
@@ -48,9 +51,12 @@ export function VmsPage({ vms, onError, onSuccess, onSettings, onCreate }: VmsPa
             </button>
           ))}
         </div>
-        <button className="hd-segment-btn" onClick={onCreate} style={{ fontWeight: 800 }} title="새 가상 머신 생성">
-          <Plus size={13} /> 새 VM
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <ColumnToggle value={settings.vmColumns} onChange={(v) => updateSettings({ vmColumns: v })} />
+          <button className="hd-segment-btn" onClick={onCreate} style={{ fontWeight: 800 }} title="새 가상 머신 생성">
+            <Plus size={13} /> 새 VM
+          </button>
+        </div>
       </div>
 
       <div className="section-label" style={{ gridColumn: "1 / -1" }}>
@@ -59,7 +65,12 @@ export function VmsPage({ vms, onError, onSuccess, onSettings, onCreate }: VmsPa
         <div className="section-line" />
       </div>
 
-      <div className="vm-card-list" style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div className="vm-card-list" style={settings.vmColumns === 2
+        // Mirror RemotePage's remoteAssetColumns grid: auto-fit + minmax so 2
+        // columns only apply while each card keeps ~600px of breathing room,
+        // else it collapses to 1 column instead of clipping the card contents.
+        ? { gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(600px, 1fr))", gap: "12px" }
+        : { gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "12px" }}>
         {filteredVms.length > 0 ? filteredVms.map((vm, idx) => (
           <HyperVCard
             key={vm.name}

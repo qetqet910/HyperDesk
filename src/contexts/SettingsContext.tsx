@@ -12,6 +12,9 @@ export interface Settings {
   /** Remote-asset list layout, shared by the Dashboard's remote-assets section
       and the Remote Assets page (same list, same preference either place). */
   remoteAssetColumns: 1 | 2;
+  /** VM cluster list layout — same 1/2-column toggle as remoteAssetColumns, but
+      independent so the VM page and the remote-asset page remember their own. */
+  vmColumns: 1 | 2;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -24,6 +27,7 @@ const DEFAULT_SETTINGS: Settings = {
   rdpColorDepth: 32,
   rdpQuality: "balanced",
   remoteAssetColumns: 1,
+  vmColumns: 1,
 };
 
 const STORAGE_KEY = "hyperdesk_settings";

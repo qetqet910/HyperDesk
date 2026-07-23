@@ -6,12 +6,28 @@ import { api } from "@/lib/tauri-api";
 import type { ToastType } from "@/hooks/useToast";
 import { ConfirmModal } from "@/components/ConfirmModal";
 
-type UpdateState = "idle" | "checking" | "upToDate" | "available" | "installing" | "error";
+type UpdateState = "idle" | "checking" | "upToDate" | "available" | "error";
+
+const MS_STORE_URL = "https://apps.microsoft.com/detail/9NPVXL622ZQQ";
+
+// Store-distributed (MSIX) installs can't write to their own install
+// directory, so an in-app self-updater (tauri-plugin-updater's
+// downloadAndInstall) can't work — this only checks the latest GitHub release
+// tag against the running version and, if newer, sends the user to the Store
+// listing (MS handles the actual update from there).
+function isNewerVersion(latest: string, current: string): boolean {
+  const l = latest.split(".").map(Number);
+  const c = current.split(".").map(Number);
+  for (let i = 0; i < Math.max(l.length, c.length); i++) {
+    const a = l[i] ?? 0, b = c[i] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return false;
+}
 
 const HOTKEYS: { keys: string; desc: string }[] = [
-  { keys: "Alt + 1 ~ 4", desc: "슬롯 1~4번으로 전환 (VM에 포커스가 있어도 동작)" },
-  { keys: "Win / Alt + Tab", desc: "VM에 포커스가 있으면 VM 내부로 전달" },
-  { keys: "F11", desc: "창 전체화면 전환" },
+  { keys: "Alt + 1 ~ 4", desc: "멀티뷰 슬롯 전환" },
+  { keys: "Ctrl + B", desc: "사이드 바 축소/확대" },
   { keys: "Ctrl + K", desc: "검색 모달 열기" },
 ];
 
@@ -69,28 +85,15 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
   const handleCheckUpdate = async () => {
     setUpdateState("checking");
     try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
-      if (update?.available) {
-        setUpdateVersion(update.version);
+      const res = await fetch("https://api.github.com/repos/qetqet910/HyperDesk/releases/latest");
+      if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+      const data = await res.json();
+      const latest = String(data.tag_name ?? "").replace(/^v/, "");
+      if (latest && isNewerVersion(latest, appVersion)) {
+        setUpdateVersion(latest);
         setUpdateState("available");
       } else {
         setUpdateState("upToDate");
-      }
-    } catch {
-      setUpdateState("error");
-    }
-  };
-
-  const handleInstallUpdate = async () => {
-    setUpdateState("installing");
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      const update = await check();
-      if (update?.available) {
-        await update.downloadAndInstall();
-        await relaunch();
       }
     } catch {
       setUpdateState("error");
@@ -280,20 +283,25 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
                 {updateState === "idle" && "최신 버전인지 확인합니다"}
                 {updateState === "checking" && "확인 중..."}
                 {updateState === "upToDate" && "최신 버전을 사용하고 있습니다"}
-                {updateState === "available" && `새 버전 v${updateVersion} 사용 가능`}
-                {updateState === "installing" && "다운로드 및 설치 중... 곧 재시작됩니다"}
-                {updateState === "error" && "확인할 수 없습니다 (개발 모드이거나 네트워크 오류)"}
+                {updateState === "available" && `새 버전 v${updateVersion} 사용 가능 — Microsoft Store에서 업데이트해주세요`}
+                {updateState === "error" && "확인할 수 없습니다 (네트워크 오류)"}
               </div>
               {updateState === "available" ? (
-                <button className="hd-btn" style={{ alignSelf: "flex-start" }} onClick={handleInstallUpdate}>
-                  <RefreshCw size={13} /> 설치 후 재시작
-                </button>
+                <a
+                  className="hd-btn"
+                  style={{ alignSelf: "flex-start" }}
+                  href={MS_STORE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <RefreshCw size={13} /> Store에서 업데이트
+                </a>
               ) : (
                 <button
                   className="hd-btn"
                   style={{ alignSelf: "flex-start" }}
                   onClick={handleCheckUpdate}
-                  disabled={updateState === "checking" || updateState === "installing"}
+                  disabled={updateState === "checking"}
                 >
                   <RefreshCw size={13} /> 업데이트 확인
                 </button>

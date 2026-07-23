@@ -92,26 +92,24 @@ export function TagEditor({ tags, onChange, placeholder = "태그 추가...", ma
         )}
       </div>
 
-      {/* Suggestions dropdown */}
+      {/* Suggestions — rendered INLINE (in normal flow), not position:absolute.
+          The editor lives inside a scrollable modal body (overflowY:auto), which
+          clips any absolutely-positioned child; an inline box can't be clipped
+          and simply pushes the rows below it down. */}
       {showSuggestions && filteredSuggestions.length > 0 && (
         <div style={{
-          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, marginTop: "4px",
-          background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "8px",
-          overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
+          marginTop: "6px", display: "flex", flexWrap: "wrap", gap: "6px",
+          padding: "8px", background: "var(--bg-surface)",
+          border: "1px solid var(--border)", borderRadius: "8px",
         }}>
-          {filteredSuggestions.slice(0, 6).map(s => (
-            <div key={s} onMouseDown={() => addTag(s)}
-              style={{ padding: "8px 12px", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = "rgba(110,113,255,0.08)"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
-            >
-              <span style={tagColor(s) as React.CSSProperties}>
-                <span style={{
-                  background: tagColor(s).bg, border: `1px solid ${tagColor(s).border}`,
-                  color: tagColor(s).text, borderRadius: "4px", padding: "1px 6px", fontSize: "11px", fontWeight: 600,
-                }}>{s}</span>
-              </span>
-            </div>
+          {filteredSuggestions.slice(0, 8).map(s => (
+            <button key={s} type="button" onMouseDown={(e) => { e.preventDefault(); addTag(s); }}
+              style={{
+                background: tagColor(s).bg, border: `1px solid ${tagColor(s).border}`,
+                color: tagColor(s).text, borderRadius: "5px", padding: "3px 9px",
+                fontSize: "11px", fontWeight: 600, cursor: "pointer",
+              }}
+            >{s}</button>
           ))}
         </div>
       )}
