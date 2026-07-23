@@ -177,6 +177,13 @@ pub fn run() {
                 tauri::WindowEvent::Destroyed => {
                     swallow::unswallow_all();
                 }
+                // Native maximize()/restore on this decorations:false window needs the
+                // same shell fullscreen mark F11 uses, or the taskbar draws over the
+                // last ~40px at the bottom (and a few px on the right) once maximized —
+                // see commands::sync_fullscreen_mark_for_maximize.
+                tauri::WindowEvent::Resized(_) => {
+                    commands::sync_fullscreen_mark_for_maximize(window);
+                }
                 _ => {}
             }
         })

@@ -1393,26 +1393,87 @@ fn fs_saved() -> &'static Mutex<Option<SavedWindowState>> {
 /// it because its input window sits on our thread tree differently. Best-effort:
 /// on failure the geometric detection still applies.
 fn mark_fullscreen_native(window: &tauri::Window, on: bool) {
-    use windows::Win32::Foundation::BOOL;
-    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
-    use windows::Win32::UI::Shell::{ITaskbarList2, TaskbarList};
     let Ok(h) = window.hwnd() else { return };
-    let hwnd = windows::Win32::Foundation::HWND(h.0);
-    unsafe {
-        // Tauri commands run on worker threads with no guaranteed COM state.
-        // Per-thread init is idempotent (RPC_E_CHANGED_MODE == already up, fine).
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        if let Ok(tb) = CoCreateInstance::<_, ITaskbarList2>(&TaskbarList, None, CLSCTX_INPROC_SERVER) {
-            let _ = tb.HrInit();
-            let _ = tb.MarkFullscreenWindow(hwnd, BOOL::from(on));
+    crate::swallow::mark_fullscreen_native(windows::Win32::Foundation::HWND(h.0), on);
+    // Also lets focus_window (Alt+1~4 slot switch) re-assert this after
+    // SetForegroundWindow on a swallowed child drops it — see swallow.rs.
+    crate::swallow::set_fullscreen_active(on);
+}
+
+static LAST_NATIVE_MAXIMIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn mark_fullscreen_from_thread(hwnd: crate::swallow::SendHWND, on: bool) {
+    crate::swallow::mark_fullscreen_native(hwnd.0, on);
+    crate::swallow::set_fullscreen_active(on);
+}
+
+/// Called on every WindowEvent::Resized (lib.rs). The window is decorations:false
+/// (WS_CAPTION stripped for the custom Topbar), and a plain WS_POPUP-style window's
+/// native maximize() covers the FULL monitor rect instead of the work area — Windows
+/// only reserves taskbar space against maximize for windows that still have
+/// WS_CAPTION. Without the same MarkFullscreenWindow treatment apply_fullscreen (F11)
+/// already uses, the shell draws the taskbar on top of the last ~40px at the bottom
+/// (and a few px at the right, DWM's snap margin for un-marked maximized windows) of
+/// whatever's rendered there — including a swallowed VM. F11 owns the mark while
+/// active (apply_fullscreen unmaximizes first), so this only acts when it's not.
+pub(crate) fn sync_fullscreen_mark_for_maximize(window: &tauri::Window) {
+    if lock_or_recover(fs_saved()).is_some() { return; }
+    let now_max = window.is_maximized().unwrap_or(false);
+    if LAST_NATIVE_MAXIMIZED.swap(now_max, std::sync::atomic::Ordering::Relaxed) != now_max {
+        #[cfg(debug_assertions)]
+        {
+            // mark_fullscreen_native firing made no visible difference to the
+            // Hyper-V right/bottom crop — meaning the taskbar-Z-order theory this
+            // whole mechanism was built on may be wrong. Log the actual geometry
+            // (does maximize truly cover the full monitor, or only the work area
+            // excluding the taskbar?) to settle it with numbers instead of theory.
+            let mon_str = match window.current_monitor() {
+                Ok(Some(m)) => format!("pos={:?} size={:?}", m.position(), m.size()),
+                Ok(None) => "none".to_string(),
+                Err(e) => format!("err={:?}", e),
+            };
+            crate::swallow::dlog(&format!(
+                "[maximize-sync] state changed now_max={} outer_pos={:?} outer_size={:?} inner_pos={:?} inner_size={:?} monitor=({})",
+                now_max, window.outer_position(), window.outer_size(),
+                window.inner_position(), window.inner_size(), mon_str
+            ));
         }
+        // This runs inside on_window_event, invoked SYNCHRONOUSLY from within
+        // Windows' own WM_SIZE/WM_WINDOWPOSCHANGED handling for the maximize —
+        // calling ITaskbarList2 (a cross-process COM call into explorer.exe) from
+        // inside that nested callback hung the whole app on hitting the maximize
+        // button (confirmed live: "응답 없음"). Microsoft's own guidance is to
+        // never call ITaskbarList* from inside WM_SIZE. Defer it to a throwaway
+        // thread, fully outside the window-proc call stack.
+        let Ok(h) = window.hwnd() else { return };
+        let hwnd = crate::swallow::SendHWND(windows::Win32::Foundation::HWND(h.0));
+        // Passing the whole SendHWND as a function argument (not accessing `.0`
+        // inline in the closure) is required — RFC 2229 disjoint closure capture
+        // would otherwise capture just the inner (non-Send) HWND field, sidestepping
+        // the unsafe impl Send on the wrapper and failing to compile.
+        std::thread::spawn(move || mark_fullscreen_from_thread(hwnd, now_max));
     }
 }
 
 fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
-    let mut saved = lock_or_recover(fs_saved());
+    // CRITICAL: never hold the fs_saved() lock across a window.set_size/
+    // set_position/maximize/unmaximize call. Those run on the main thread and
+    // synchronously fire WindowEvent::Resized (WM_SIZE/WM_WINDOWPOSCHANGED),
+    // which commands::sync_fullscreen_mark_for_maximize handles by locking this
+    // SAME mutex — while THIS function (running on a tokio worker thread, since
+    // it's invoked from an async #[tauri::command]) is blocked waiting for the
+    // main thread to finish that very window call. That's a cross-thread
+    // deadlock: worker holds the lock + waits on main; main (mid-dispatch) waits
+    // on the lock. Confirmed live: hitting F11 (or immersive, which also calls
+    // setFullscreen) left this mutex locked forever, so it looked fine at first
+    // but froze the ENTIRE app ("응답 없음") the next time anything resized the
+    // window (e.g. clicking maximize) — see dlog trail 2026-07-23. Keep every
+    // lock scope here to a bare read/write, dropped before any window.* call.
     if on {
-        if saved.is_some() { return Ok(()); } // already fullscreen
+        {
+            let saved = lock_or_recover(fs_saved());
+            if saved.is_some() { return Ok(()); } // already fullscreen
+        }
         let maximized = window.is_maximized().unwrap_or(false);
         if maximized {
             // A maximized window ignores/mangles direct resizes — restore first.
@@ -1423,7 +1484,10 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
         let inner_pos = window.inner_position().map_err(|e| e.to_string())?;
         let monitor = window.current_monitor().map_err(|e| e.to_string())?
             .ok_or("no monitor")?;
-        *saved = Some(SavedWindowState { pos, size, maximized });
+        {
+            let mut saved = lock_or_recover(fs_saved());
+            *saved = Some(SavedWindowState { pos, size, maximized });
+        }
 
         // tao keeps WS_THICKFRAME on a decorations:false window (resize/snap),
         // and on Win10/11 that style carries an INVISIBLE resize border: the
@@ -1443,13 +1507,19 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         window.set_size(*monitor.size()).map_err(|e| e.to_string())?;
         mark_fullscreen_native(window, true);
-    } else if let Some(s) = saved.take() {
-        mark_fullscreen_native(window, false);
-        if s.maximized {
-            let _ = window.maximize();
-        } else {
-            let _ = window.set_size(s.size);
-            let _ = window.set_position(s.pos);
+    } else {
+        let taken = {
+            let mut saved = lock_or_recover(fs_saved());
+            saved.take()
+        };
+        if let Some(s) = taken {
+            mark_fullscreen_native(window, false);
+            if s.maximized {
+                let _ = window.maximize();
+            } else {
+                let _ = window.set_size(s.size);
+                let _ = window.set_position(s.pos);
+            }
         }
     }
     Ok(())

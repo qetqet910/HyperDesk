@@ -10,6 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "@/lib/tauri-api";
 import { useDashboard, useSystemStats, useHostActions } from "@/hooks/useDashboard";
 import { parseError } from "@/lib/error-utils";
+import { pickReachableIp } from "@/lib/net";
 import { useSettings } from "@/contexts/SettingsContext";
 import { useToast } from "@/hooks/useToast";
 import { applyTheme } from "@/lib/theme";
@@ -730,7 +731,7 @@ export default function App() {
             onVmPause={(name) => { vmActions.pause.mutate(name); addToast(`${name} 일시정지 중...`, "info"); }}
             onVmResume={(name) => { vmActions.resume.mutate(name); addToast(`${name} 재개 중...`, "info"); }}
             onVmConnect={(vm) => {
-              const ip = vm.ip_addresses?.[0];
+              const ip = pickReachableIp(vm.ip_addresses);
               if (ip) vmActions.connect.mutate({ host: ip, username: undefined });
             }}
             onVmConsole={(name) => vmActions.console.mutate(name)}

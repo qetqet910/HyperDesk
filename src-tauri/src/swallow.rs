@@ -513,22 +513,31 @@ extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
              // ── Class-driven path (RDP / Horizon, no title needle) ───────────
              let mut class_name = [0u16; 256];
              let len = GetClassNameW(hwnd, &mut class_name);
-             if len > 0 {
-                 let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
-                 if class_str.contains("TscShellContainerClass") ||
-                    class_str.contains("VMConnect") ||
-                    class_str.contains("UIWindow") ||
-                    class_str.contains("VMWindow") ||
-                    class_str.contains("VMware-view-MainWindow") ||
-                    class_str.contains("BlastWindowClass") ||
-                    class_str.contains("VMUIFrame") ||
-                    class_str.contains("TClient") ||
-                    class_str.contains("Omnissa") {
-                     param.found_hwnd = hwnd;
-                     return BOOL::from(false);
-                 }
+             let class_str = if len > 0 { String::from_utf16_lossy(&class_name[..len as usize]) } else { String::new() };
+             if class_str.contains("TscShellContainerClass") ||
+                class_str.contains("VMConnect") ||
+                class_str.contains("UIWindow") ||
+                class_str.contains("VMWindow") ||
+                class_str.contains("VMware-view-MainWindow") ||
+                class_str.contains("BlastWindowClass") ||
+                class_str.contains("VMUIFrame") ||
+                class_str.contains("TClient") ||
+                class_str.contains("Omnissa") {
+                 param.found_hwnd = hwnd;
+                 return BOOL::from(false);
              }
-             if param.target_pid != 0 && param.found_hwnd.is_invalid() {
+             // "#32770" is the generic Windows dialog-box class — mstsc's "publisher
+             // could not be verified" security prompt is one of these.
+             // "TSC_POPUP_PARENT_WNDCLASS" is mstsc's dedicated OWNER window for that
+             // same dialog (confirmed via live dlog: EnumWindows returns both, in
+             // either order, for the same pid, before TscShellContainerClass exists —
+             // the dialog itself has no content of its own to stretch, so grabbing
+             // its owner produced the empty-frame-with-content-pinned-top-left look).
+             // Neither is the session window; the blind any-visible-window-of-this-
+             // pid fallback below must skip both and keep polling, letting the
+             // warning stay a normal floating window until the user answers it.
+             if param.target_pid != 0 && param.found_hwnd.is_invalid()
+                && class_str != "#32770" && class_str != "TSC_POPUP_PARENT_WNDCLASS" {
                  param.found_hwnd = hwnd;
              }
         }
@@ -649,7 +658,19 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
             // would otherwise hand us vmconnect's floating toolbar (BBar) or an
             // IME window as a bogus next stage.
             if let Some(h) = candidate {
-                if !chain.is_empty() {
+                // This class gate exists for the PID-scoped BLIND fallback (RDP/
+                // Horizon, no title needle) — that fallback can hand back a bogus
+                // next stage (vmconnect's floating BBar, an IME window) since it
+                // doesn't look at class at all. The title-driven path (Hyper-V
+                // console) never goes through that blind fallback — find_main_window
+                // only returns a title+largest-area match there — so this gate must
+                // not apply to it. Without this exception, once a wrong vmconnect
+                // dialog (e.g. its display-settings picker, also a generic
+                // WindowsForms class) got chained first, the REAL console frame
+                // (also WindowsForms, not Blast/VMUI/TClient/TscShellContainerClass)
+                // could never replace it — the hunt got stuck on the wrong window
+                // until the deadline hit and locked it in as "the session".
+                if !chain.is_empty() && expected_title.is_none() {
                     let c = read_class(h);
                     let is_sess = c.contains("Blast") || c.contains("VMUI") ||
                                   c.contains("TClient") || c.contains("TscShellContainerClass");
@@ -1258,9 +1279,19 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
                         SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE
                     );
                 } else {
+                    // Move off-screen WITHOUT resizing (previously a hardcoded 800x600).
+                    // That resize was a real WM_SIZE on a live mstsc session — classic
+                    // mstsc renegotiates its smart-sizing scale on resize (see
+                    // swallow-resize-is-rdp-limit memory), so shrinking to 800x600 here
+                    // and back to the slot size on reveal could desync that scale,
+                    // leaving the RDP content rendering at native/unscaled resolution
+                    // (overflowing the slot, including over the taskbar) after a slot
+                    // switch. Keeping the size stable across hide/show avoids the
+                    // resize event entirely.
+                    let (_, _, fw, fh) = framed_rect(info.x, info.y, info.width, info.height, info.offset_x, info.offset);
                     let _ = SetWindowPos(
                         hwnd, HWND(std::ptr::null_mut()),
-                        -10000, -10000, 800, 600,
+                        -10000, -10000, fw, fh,
                         SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE
                     );
                 }
@@ -1637,6 +1668,44 @@ pub fn focus_window(slot_id: &str) {
         // also re-hides it but only polls at 1s when idle — do it here immediately.
         if let Some(pid) = vmconnect_pid {
             hide_vmconnect_bbar(pid);
+        }
+        // SetForegroundWindow above targets a swallowed CHILD owned by a foreign
+        // process (mstsc/vmconnect) — same as an Alt+Tab round-trip, which is
+        // exactly what makes the shell drop the fullscreen taskbar exemption
+        // (see mark_fullscreen_native). Alt+1~4 slot-switch focus hits this same
+        // path, so it needs the same re-mark, not just Alt+Tab.
+        if FULLSCREEN_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+            let main = HWND(MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed) as *mut _);
+            if !main.0.is_null() {
+                mark_fullscreen_native(main, true);
+            }
+        }
+    }
+}
+
+static FULLSCREEN_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Tracks OS-fullscreen state (set by commands::apply_fullscreen) so
+/// focus_window knows whether a re-mark is needed.
+pub fn set_fullscreen_active(on: bool) {
+    FULLSCREEN_ACTIVE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// ITaskbarList2::MarkFullscreenWindow on the main window. Single-sourced here
+/// so both commands::apply_fullscreen (enter/exit) and focus_window (slot
+/// switch, see above) can re-assert it — best-effort: on failure the
+/// geometric fullscreen detection still applies.
+pub fn mark_fullscreen_native(hwnd: HWND, on: bool) {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{ITaskbarList2, TaskbarList};
+    unsafe {
+        // Tauri commands/hotkey handlers run on worker threads with no
+        // guaranteed COM state. Per-thread init is idempotent (RPC_E_CHANGED_MODE
+        // == already up, fine).
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if let Ok(tb) = CoCreateInstance::<_, ITaskbarList2>(&TaskbarList, None, CLSCTX_INPROC_SERVER) {
+            let _ = tb.HrInit();
+            let _ = tb.MarkFullscreenWindow(hwnd, BOOL::from(on));
         }
     }
 }
