@@ -50,7 +50,11 @@
   --accent-purple: #8FABD4;
   --cream: #EFECE3;
   --text-main: #EFECE3;
-  --text-muted: #6B7486;
+  /* WCAG 2.1 AA: 4.5:1 for small body text. Old #6B7486 was 3.48-4.14 on the
+     card/surface/main backgrounds (passed 3:1 UI-element but not 4.5:1 body).
+     #828B9E clears 4.5:1 on all three while staying clearly dimmer than
+     text-secondary, so the muted/secondary/main hierarchy is preserved. */
+  --text-muted: #828B9E;
   --text-secondary: #AEB7C7;
   --border: rgba(143, 171, 212, 0.12);
   --border-focus: #8FABD4;
@@ -100,7 +104,9 @@
   --accent-purple: #3A6AAA;
   --cream: #1A2035;
   --text-main: #1A2035;
-  --text-muted: #64748B;
+  /* WCAG AA 4.5:1: old #64748B was 4.16 on bg-surface. #5A6577 clears 4.5:1
+     on all light backgrounds while staying dimmer than text-secondary. */
+  --text-muted: #5A6577;
   --text-secondary: #475569;
   --border: rgba(58, 106, 170, 0.15);
   --border-focus: #3A6AAA;
@@ -874,6 +880,11 @@ html, body {
   background: var(--bg-main);
   color: var(--text-main);
   font-family: var(--font);
+  /* WCAG/readability baseline for flowing text (settings descriptions, memos,
+     empty-state copy). Fixed-height chrome (36px slot header, 68px cards,
+     buttons) sets its own height + flex-centers, so this only affects wrapping
+     body text, not the dense single-line UI. */
+  line-height: 1.5;
   /* Fixed-width digits everywhere (tabular-nums where the face supports it):
      telemetry values re-render every 2s, and proportional digits made every
      stat/latency/uptime readout wobble in width on each tick. */
@@ -1831,7 +1842,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   padding: 10px;
   background: var(--bg-surface, rgba(14,16,22,0.6));
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  /* border-radius: var(--radius); */
   overflow-y: auto;
 }
 .multiview-rail__title {
