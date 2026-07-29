@@ -48,7 +48,10 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "HyperDesk ${{ github.ref_name }}"
-          releaseBody: 'HyperDesk ${{ github.ref_name }} 정기 릴리즈입니다.\n\n### 변경 사항\n- 멀티 뷰 데드락(인증 창 프리징) 문제 완전 해결\n- RDP 해상도 및 리사이징 품질 대폭 최적화\n- 연결 취소 시 무한 재접속 루프 방지 로직 적용\n- 릴리즈 자동화 워크플로우 최적화'
+          # 변경 사항을 여기 하드코딩하지 말 것 — 이전에 그렇게 두었다가 몇 번의
+          # 릴리즈 동안 낡은 내용이 그대로 게시됐다(releaseDraft:false라 검토 없이
+          # 바로 공개된다). 커밋 목록이 유일하게 항상 최신인 출처다.
+          releaseBody: 'HyperDesk ${{ github.ref_name }} 릴리즈입니다.\n\n변경 사항은 아래 **Commits** 목록을 참고하세요.\n\n설치는 [Microsoft Store](https://apps.microsoft.com/detail/9NPVXL622ZQQ)를 이용해 주세요 — 여기 첨부되는 `.msixbundle`은 Store 제출용 미서명 원본이라 직접 설치되지 않습니다.'
           releaseDraft: false
           prerelease: false
 
