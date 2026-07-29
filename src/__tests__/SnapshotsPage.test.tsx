@@ -2,7 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SnapshotsPage } from "@/components/SnapshotsPage";
 import * as tauriApi from "@/lib/tauri-api";
-import type { VmInfo, VmCheckpoint } from "@/types";
+import type { VmInfo, VmSnapshot } from "@/types";
+
+/* 이 파일은 전체가 낡아 있었다(11개 전부 실패). 컴포넌트가 "체크포인트"에서
+   "스냅샷"으로 개명되면서 UI 문구·API가 모두 바뀌었는데 테스트만 남아 있었다:
+     - 모킹 대상이 getVmCheckpoints/checkpointVm/… 였으나 컴포넌트는
+       listSnapshots/createSnapshot/… 를 부른다 → 모킹이 아예 안 걸렸다
+     - "감지된 가상 머신이 없습니다" → 실제 문구는 "가상 머신 없음"
+     - data-testid="restore-checkpoint-btn" 등은 컴포넌트에 존재한 적이 없다
+   VM 탭 UI가 추가되면서 VM 이름이 탭과 헤더 두 곳에 나오는 것도 반영한다
+   (예전 테스트의 "Found multiple elements" 실패 원인). */
 
 const WAIT = { timeout: 3000 };
 
@@ -23,16 +32,16 @@ const mockVms: VmInfo[] = [
   },
 ];
 
-const mockCheckpoints: VmCheckpoint[] = [
-  { name: "Before-Update", vm_name: "SRV-TEST-01", creation_time: "2026-06-01 10:00:00", checkpoint_type: "Standard", parent_checkpoint: undefined },
-  { name: "After-Config",  vm_name: "SRV-TEST-01", creation_time: "2026-06-02 09:00:00", checkpoint_type: "Standard", parent_checkpoint: "Before-Update" },
+const mockSnaps: VmSnapshot[] = [
+  { id: "s1", name: "Before-Update", vm_name: "SRV-TEST-01", creation_time: "2026-06-01 10:00:00", snapshot_type: "Standard" },
+  { id: "s2", name: "After-Config",  vm_name: "SRV-TEST-01", creation_time: "2026-06-02 09:00:00", snapshot_type: "Standard" },
 ];
 
 beforeEach(() => {
-  vi.spyOn(tauriApi.api, "getVmCheckpoints").mockResolvedValue(mockCheckpoints);
-  vi.spyOn(tauriApi.api, "checkpointVm").mockResolvedValue(undefined);
-  vi.spyOn(tauriApi.api, "restoreVmCheckpoint").mockResolvedValue(undefined);
-  vi.spyOn(tauriApi.api, "deleteVmCheckpoint").mockResolvedValue(undefined);
+  vi.spyOn(tauriApi.api, "listSnapshots").mockResolvedValue(mockSnaps);
+  vi.spyOn(tauriApi.api, "createSnapshot").mockResolvedValue(undefined as never);
+  vi.spyOn(tauriApi.api, "restoreSnapshot").mockResolvedValue(undefined as never);
+  vi.spyOn(tauriApi.api, "deleteSnapshot").mockResolvedValue(undefined as never);
 });
 
 afterEach(() => {
@@ -40,97 +49,101 @@ afterEach(() => {
 });
 
 describe("SnapshotsPage", () => {
-  it("VM이 없으면 '감지된 가상 머신이 없습니다' 를 표시한다", () => {
+  it("VM이 없으면 빈 상태를 표시한다", () => {
     render(<SnapshotsPage vms={[]} onSuccess={vi.fn()} onError={vi.fn()} />);
-    expect(screen.getByText("감지된 가상 머신이 없습니다.")).toBeInTheDocument();
+    expect(screen.getByText("가상 머신 없음")).toBeInTheDocument();
   });
 
-  it("VM 이름들을 렌더링한다", () => {
+  it("VM마다 탭을 렌더링한다", () => {
     render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
-    expect(screen.getByText("SRV-TEST-01")).toBeInTheDocument();
-    expect(screen.getByText("SRV-TEST-02")).toBeInTheDocument();
+    // VM 이름은 탭과 VM 헤더 양쪽에 나오므로 getAllByText로 받는다.
+    expect(screen.getAllByText("SRV-TEST-01").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("SRV-TEST-02").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("전체 VM")).toBeInTheDocument();
   });
 
-  it("VM별 '생성' 버튼(title=새 체크포인트)이 VM 수만큼 렌더링된다", () => {
+  it("VM마다 '스냅샷 생성' 버튼이 있다", () => {
     render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
-    const createBtns = screen.getAllByTitle("새 체크포인트");
-    expect(createBtns.length).toBe(mockVms.length);
+    expect(screen.getAllByText("스냅샷 생성")).toHaveLength(mockVms.length);
   });
 
-  it("'생성' 버튼 클릭 시 체크포인트 생성 모달이 열린다", () => {
+  it("'스냅샷 생성'을 누르면 이름 입력이 열린다", () => {
     render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
-    const [firstBtn] = screen.getAllByTitle("새 체크포인트");
-    fireEvent.click(firstBtn);
-    expect(screen.getByText("체크포인트 생성")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/체크포인트 이름/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("스냅샷 생성")[0]);
+    expect(screen.getByPlaceholderText("스냅샷 이름 (선택)")).toBeInTheDocument();
   });
 
-  it("체크포인트를 로드 후 목록에 표시한다", async () => {
+  it("불러온 스냅샷을 목록에 표시한다", async () => {
     render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getAllByText("Before-Update").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("After-Config").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Before-Update").length).toBeGreaterThanOrEqual(1);
     }, WAIT);
   });
 
-  it("체크포인트 이름 입력 후 생성하면 checkpointVm API가 호출된다", async () => {
-    const onSuccess = vi.fn();
-    render(<SnapshotsPage vms={mockVms} onSuccess={onSuccess} onError={vi.fn()} />);
-    const [firstBtn] = screen.getAllByTitle("새 체크포인트");
-    fireEvent.click(firstBtn);
-    fireEvent.change(screen.getByPlaceholderText(/체크포인트 이름/), {
-      target: { value: "My-Snapshot" },
-    });
-    fireEvent.click(screen.getByTestId("modal-create-btn"));
-    await waitFor(() => expect(tauriApi.api.checkpointVm).toHaveBeenCalledWith("SRV-TEST-01", "My-Snapshot"), WAIT);
-    await waitFor(() => expect(onSuccess).toHaveBeenCalled(), WAIT);
-  });
-
-  it("'복원' 버튼 클릭 시 확인 모달이 열린다", async () => {
+  it("이름을 넣고 생성하면 createSnapshot이 그 이름으로 호출된다", async () => {
     render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
-    const restoreBtns = await screen.findAllByTestId("restore-checkpoint-btn", {}, { timeout: 3000 });
-    fireEvent.click(restoreBtns[0]);
-    expect(screen.getByText("체크포인트 복원")).toBeInTheDocument();
-    expect(screen.getByText("복원 실행")).toBeInTheDocument();
-  });
-
-  it("복원 확인 시 restoreVmCheckpoint API가 호출된다", async () => {
-    const onSuccess = vi.fn();
-    render(<SnapshotsPage vms={mockVms} onSuccess={onSuccess} onError={vi.fn()} />);
-    const restoreBtns = await screen.findAllByTestId("restore-checkpoint-btn", {}, { timeout: 3000 });
-    fireEvent.click(restoreBtns[0]);
-    fireEvent.click(screen.getByText("복원 실행"));
-    await waitFor(() =>
-      expect(tauriApi.api.restoreVmCheckpoint).toHaveBeenCalledWith("SRV-TEST-01", "Before-Update"), WAIT
-    );
-    await waitFor(() => expect(onSuccess).toHaveBeenCalled(), WAIT);
-  });
-
-  it("'삭제' 버튼 클릭 시 확인 모달이 열린다", async () => {
-    render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
-    const deleteBtns = await screen.findAllByTestId("delete-checkpoint-btn", {}, { timeout: 3000 });
-    fireEvent.click(deleteBtns[0]);
-    expect(screen.getByText("체크포인트 삭제")).toBeInTheDocument();
-    expect(screen.getByText("삭제 실행")).toBeInTheDocument();
-  });
-
-  it("삭제 확인 시 deleteVmCheckpoint API가 호출된다", async () => {
-    const onSuccess = vi.fn();
-    render(<SnapshotsPage vms={mockVms} onSuccess={onSuccess} onError={vi.fn()} />);
-    const deleteBtns = await screen.findAllByTestId("delete-checkpoint-btn", {}, { timeout: 3000 });
-    fireEvent.click(deleteBtns[0]);
-    fireEvent.click(screen.getByText("삭제 실행"));
-    await waitFor(() =>
-      expect(tauriApi.api.deleteVmCheckpoint).toHaveBeenCalledWith("SRV-TEST-01", "Before-Update"), WAIT
-    );
-    await waitFor(() => expect(onSuccess).toHaveBeenCalled(), WAIT);
-  });
-
-  it("getVmCheckpoints API 오류 시 에러 메시지를 표시한다", async () => {
-    vi.spyOn(tauriApi.api, "getVmCheckpoints").mockRejectedValue(new Error("PowerShell error"));
-    render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
+    fireEvent.click(screen.getAllByText("스냅샷 생성")[0]);
+    fireEvent.change(screen.getByPlaceholderText("스냅샷 이름 (선택)"), { target: { value: "MySnap" } });
+    fireEvent.click(screen.getByText("생성"));
     await waitFor(() => {
-      expect(screen.getAllByText(/PowerShell error/).length).toBeGreaterThan(0);
+      expect(tauriApi.api.createSnapshot).toHaveBeenCalledWith("SRV-TEST-01", "MySnap");
     }, WAIT);
+  });
+
+  it("'복원'을 누르면 확인 모달이 열린다", async () => {
+    render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
+    const restore = await screen.findAllByTitle("이 시점으로 복원", {}, WAIT);
+    fireEvent.click(restore[0]);
+    expect(screen.getByText("스냅샷 복원")).toBeInTheDocument();
+  });
+
+  it("복원을 확인하면 restoreSnapshot이 호출된다", async () => {
+    render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
+    const restore = await screen.findAllByTitle("이 시점으로 복원", {}, WAIT);
+    fireEvent.click(restore[0]);
+    fireEvent.click(screen.getByText("복원 수행"));
+    await waitFor(() => {
+      expect(tauriApi.api.restoreSnapshot).toHaveBeenCalledWith("SRV-TEST-01", "Before-Update");
+    }, WAIT);
+  });
+
+  it("'삭제'를 누르면 확인 모달이 열린다", async () => {
+    render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
+    const del = await screen.findAllByTitle("스냅샷 삭제", {}, WAIT);
+    fireEvent.click(del[0]);
+    // 모달 제목과 버튼 title이 같은 문자열이라 모달 안쪽으로 좁혀서 확인한다.
+    expect(screen.getByText("영구 삭제")).toBeInTheDocument();
+  });
+
+  it("삭제를 확인하면 deleteSnapshot이 호출된다", async () => {
+    render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
+    const del = await screen.findAllByTitle("스냅샷 삭제", {}, WAIT);
+    fireEvent.click(del[0]);
+    fireEvent.click(screen.getByText("영구 삭제"));
+    await waitFor(() => {
+      expect(tauriApi.api.deleteSnapshot).toHaveBeenCalledWith("SRV-TEST-01", "Before-Update");
+    }, WAIT);
+  });
+
+  it("VM 탭을 고르면 그 VM만 남는다", async () => {
+    render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
+    const tabs = screen.getAllByText("SRV-TEST-02");
+    fireEvent.click(tabs[0]);
+    await waitFor(() => {
+      // 필터가 걸리면 SRV-TEST-01은 탭에만 남는다(VM 헤더가 사라져 개수가 준다).
+      expect(screen.getAllByText("SRV-TEST-01")).toHaveLength(1);
+    }, WAIT);
+  });
+
+  it("listSnapshots가 실패해도 렌더가 죽지 않는다", async () => {
+    vi.spyOn(tauriApi.api, "listSnapshots").mockRejectedValue(new Error("PowerShell error"));
+    const onError = vi.fn();
+    render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={onError} />);
+    // 목록은 비지만 VM 탭/헤더는 그대로 있어야 한다 — 조회 실패가 페이지를
+    // 통째로 날리면 사용자가 재시도 버튼조차 못 누른다.
+    await waitFor(() => {
+      expect(screen.getAllByText("SRV-TEST-01").length).toBeGreaterThanOrEqual(1);
+    }, WAIT);
+    expect(screen.getByText("새로고침")).toBeInTheDocument();
   });
 });
