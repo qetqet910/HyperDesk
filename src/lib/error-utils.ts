@@ -1,20 +1,31 @@
+import type { Key } from "@/lib/i18n";
+
+/* 이 함수는 순수 함수라 useT()를 못 쓴다. 그래서 완성된 문구가 아니라 **번역
+   키**를 돌려주고 표시는 호출자(UI)가 한다 — 분류는 로직, 문구는 UI라는
+   분리가 원래 더 맞다. 부수 효과로 error-utils 테스트가 표시 문구가 아니라
+   분류 결과를 검증하게 되어, 카피를 다듬어도 테스트가 안 깨진다. */
 export interface ParsedError {
-  title: string;
-  body: string;
+  titleKey: Key;
+  /** 어느 패턴에도 안 걸렸을 땐 `detail`(원문 일부)을 대신 보여준다. */
+  bodyKey: Key;
+  detail?: string;
 }
 
 export function parseError(raw: string): ParsedError {
   if (raw.includes("Insufficient system resources") || raw.includes("0x800705AA"))
-    return { title: "시스템 RAM이 부족합니다", body: "가상 머신을 시작하기 위한 메모리(RAM)가 부족합니다." };
+    return { titleKey: "error.ram.title", bodyKey: "error.ram.body" };
+  // 이 한글 조각은 commands.rs가 PowerShell로 내보내는 원문(Write-Error)과 맞춘
+  // 것이다 — 표시용이 아니라 **매칭 패턴**이므로 번역하면 안 된다. 백엔드 메시지를
+  // 영문화하게 되면 여기 패턴도 같이 바꿔야 매칭이 유지된다.
   if (raw.includes("Hyper-V PowerShell 모듈") || (raw.includes("Get-VM") && raw.includes("not recognized")))
-    return { title: "Hyper-V를 사용할 수 없습니다", body: "Hyper-V PowerShell 모듈이 설치되어 있지 않습니다." };
+    return { titleKey: "error.hyperv.title", bodyKey: "error.hyperv.body" };
   if (raw.includes("Cannot find vm") || raw.includes("No virtual machine"))
-    return { title: "가상 머신을 찾을 수 없습니다", body: "지정한 이름의 VM이 존재하지 않습니다." };
+    return { titleKey: "error.vmNotFound.title", bodyKey: "error.vmNotFound.body" };
   if (raw.includes("Access is denied") || raw.includes("access denied"))
-    return { title: "권한이 없습니다", body: "Hyper-V 관리 권한이 없습니다. 설정 > 계정 > 다른 사용자 에서 이 계정을 'Hyper-V Administrators' 그룹에 추가한 뒤 다시 로그인해주세요." };
+    return { titleKey: "error.denied.title", bodyKey: "error.denied.body" };
   if (raw.includes("already running") || raw.includes("already started"))
-    return { title: "이미 실행 중입니다", body: "VM이 이미 실행 중 상태입니다." };
+    return { titleKey: "error.running.title", bodyKey: "error.running.body" };
   if (raw.includes("timed out") || raw.includes("Connection timed out"))
-    return { title: "연결 시간 초과", body: "지정한 시간 내에 연결에 실패했습니다." };
-  return { title: "작업 실패", body: raw.substring(0, 200) };
+    return { titleKey: "error.timeout.title", bodyKey: "error.timeout.body" };
+  return { titleKey: "error.generic.title", bodyKey: "error.generic.body", detail: raw.substring(0, 200) };
 }

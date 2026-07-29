@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useSettings } from "@/contexts/SettingsContext";
 import { applyTheme } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 
 interface TopbarProps {
   title: string;
@@ -27,6 +28,7 @@ function getTauriWindow() {
 export function Topbar({ title, subtitle, isRefreshing, onRefresh, actions, onSearch }: TopbarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const { settings, updateSettings } = useSettings();
+  const t = useT();
 
   useEffect(() => {
     const appWindow = getTauriWindow();
@@ -57,7 +59,7 @@ export function Topbar({ title, subtitle, isRefreshing, onRefresh, actions, onSe
       <div className="hd-topbar__right">
         <div className="hd-topbar__actions" data-tauri-drag-region="false">
           {onSearch && (
-            <button className="tool-btn" onClick={(e) => { e.stopPropagation(); onSearch(); }} title="검색 (Ctrl+K)">
+            <button className="tool-btn" onClick={(e) => { e.stopPropagation(); onSearch(); }} title={t("topbar.search")}>
               <Search size={14} />
             </button>
           )}
@@ -70,20 +72,20 @@ export function Topbar({ title, subtitle, isRefreshing, onRefresh, actions, onSe
             {settings.theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
           </button>
           {onRefresh && (
-            <button className={`tool-btn ${isRefreshing ? "spinning" : ""}`} onClick={(e) => { e.stopPropagation(); onRefresh(); }} title="새로고침">
+            <button className={`tool-btn ${isRefreshing ? "spinning" : ""}`} onClick={(e) => { e.stopPropagation(); onRefresh(); }} title={t("topbar.refresh")}>
               <RefreshCw size={14} />
             </button>
           )}
         </div>
 
         <div className="hd-topbar__window-controls" data-tauri-drag-region="false">
-          <button className="window-control-btn" onClick={() => getTauriWindow()?.minimize()} title="최소화">
+          <button className="window-control-btn" onClick={() => getTauriWindow()?.minimize()} title={t("topbar.minimize")}>
             <Minus size={14} />
           </button>
-          <button className="window-control-btn" onClick={() => getTauriWindow()?.toggleMaximize()} title={isMaximized ? "복원" : "최대화"}>
+          <button className="window-control-btn" onClick={() => getTauriWindow()?.toggleMaximize()} title={isMaximized ? t("topbar.restore") : t("topbar.maximize")}>
             {isMaximized ? <Copy size={13} /> : <Square size={13} />}
           </button>
-          <button className="window-control-btn window-control-btn--close" onClick={() => getTauriWindow()?.close()} title="닫기">
+          <button className="window-control-btn window-control-btn--close" onClick={() => getTauriWindow()?.close()} title={t("topbar.close")}>
             <X size={15} />
           </button>
         </div>

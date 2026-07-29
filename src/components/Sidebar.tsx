@@ -10,6 +10,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
+import { useT, type Key } from "@/lib/i18n";
 
 export type Page =
   | "dashboard"
@@ -22,7 +23,9 @@ export type Page =
 
 interface NavItem {
   id: Page;
-  label: string;
+  /** 번역 키. 완성된 문자열이 아니라 키를 들고 있어야 언어를 바꿨을 때 이 상수
+      배열이 아니라 렌더가 다시 평가된다(모듈 상수는 한 번만 만들어진다). */
+  label: Key;
   icon: React.ReactNode;
   count?: number;
   badge?: string;
@@ -41,16 +44,16 @@ interface SidebarProps {
 }
 
 const WORKSPACE_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "대시보드",    icon: <LayoutDashboard size={15} /> },
-  { id: "multiview", label: "멀티 뷰",     icon: <Layers size={15} />, badge: "LIVE", badgeColor: "var(--accent-green)" },
-  { id: "vms",       label: "가상 머신",   icon: <Server size={15} /> },
-  { id: "remote",    label: "원격 자산",   icon: <Globe size={15} /> },
-  { id: "snapshots", label: "스냅샷",      icon: <Camera size={15} /> },
-  { id: "events",    label: "이벤트 로그", icon: <Terminal size={15} /> },
+  { id: "dashboard", label: "nav.dashboard", icon: <LayoutDashboard size={15} /> },
+  { id: "multiview", label: "nav.multiview", icon: <Layers size={15} />, badge: "LIVE", badgeColor: "var(--accent-green)" },
+  { id: "vms",       label: "nav.vms",       icon: <Server size={15} /> },
+  { id: "remote",    label: "nav.remote",    icon: <Globe size={15} /> },
+  { id: "snapshots", label: "nav.snapshots", icon: <Camera size={15} /> },
+  { id: "events",    label: "nav.events",    icon: <Terminal size={15} /> },
 ];
 
 const SYSTEM_ITEMS: NavItem[] = [
-  { id: "settings", label: "설정", icon: <Settings size={15} /> },
+  { id: "settings", label: "nav.settings", icon: <Settings size={15} /> },
 ];
 
 export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningCount = 0, occupiedSlots = 0 }: SidebarProps) {
@@ -58,6 +61,7 @@ export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningC
     localStorage.getItem("hd_sidebar_collapsed") === "true"
   );
   const [appVersion, setAppVersion] = useState("");
+  const t = useT();
 
   useEffect(() => {
     localStorage.setItem("hd_sidebar_collapsed", String(collapsed));
@@ -101,22 +105,24 @@ export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningC
       </div>
 
       {/* Workspace nav */}
-      <div className="hd-sidebar__eyebrow">Workspace</div>
+      <div className="hd-sidebar__eyebrow">{t("sidebar.workspace")}</div>
       <nav className="hd-sidebar__nav">
         {workspaceItems.map((item) => (
           <button
             key={item.id}
             className={`hd-nav-item ${current === item.id ? "hd-nav-item--active" : ""} ${collapsed ? "hd-nav-item--icon-only" : ""}`}
-            title={collapsed ? item.label : undefined}
+            title={collapsed ? t(item.label) : undefined}
+            /* 활성 항목은 색/보더로만 구분돼 있어 스크린 리더엔 안 보인다. */
+            aria-current={current === item.id ? "page" : undefined}
             onClick={() => onNav(item.id)}
           >
             <span className="hd-nav-item__icon">{item.icon}</span>
-            <span className="hd-nav-item__label">{item.label}</span>
+            <span className="hd-nav-item__label">{t(item.label)}</span>
             {item.count != null && item.count > 0 && (
               <span className="hd-nav-item__count">{item.count}</span>
             )}
             {item.id === "multiview" && occupiedSlots > 0 && (
-              <span className="hd-nav-item__slots" title={`${occupiedSlots}개 슬롯 연결됨`}>{occupiedSlots}/4</span>
+              <span className="hd-nav-item__slots" title={t("sidebar.slotsConnected", { n: occupiedSlots })}>{occupiedSlots}/4</span>
             )}
             {item.badge && (
               <span
@@ -131,17 +137,18 @@ export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningC
       </nav>
 
       {/* System nav */}
-      <div className="hd-sidebar__eyebrow hd-sidebar__eyebrow--system">System</div>
+      <div className="hd-sidebar__eyebrow hd-sidebar__eyebrow--system">{t("sidebar.system")}</div>
       <nav className="hd-sidebar__nav">
         {SYSTEM_ITEMS.map((item) => (
           <button
             key={item.id}
             className={`hd-nav-item ${current === item.id ? "hd-nav-item--active" : ""} ${collapsed ? "hd-nav-item--icon-only" : ""}`}
-            title={collapsed ? item.label : undefined}
+            title={collapsed ? t(item.label) : undefined}
+            aria-current={current === item.id ? "page" : undefined}
             onClick={() => onNav(item.id)}
           >
             <span className="hd-nav-item__icon">{item.icon}</span>
-            <span className="hd-nav-item__label">{item.label}</span>
+            <span className="hd-nav-item__label">{t(item.label)}</span>
           </button>
         ))}
       </nav>
@@ -154,15 +161,15 @@ export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningC
           className="hd-sidebar__collapse-btn"
           onClick={() => setCollapsed((c) => !c)}
           style={{position: "absolute"}}
-          title={collapsed ? "사이드바 펼치기 (Ctrl+B)" : "사이드바 접기 (Ctrl+B)"}
+          title={collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
         >
           {collapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
         </button>
 
         <div className="hd-sidebar__status">
           <div className="hd-sidebar__status-text">
-            <div className="hd-sidebar__status-label">Core Online</div>
-            <div className="hd-sidebar__status-sub">{runningCount} nodes active</div>
+            <div className="hd-sidebar__status-label">{t("sidebar.coreOnline")}</div>
+            <div className="hd-sidebar__status-sub">{t("sidebar.nodesActive", { n: runningCount })}</div>
           </div>
         </div>
       </div>

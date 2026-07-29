@@ -36,9 +36,10 @@ const EventsPage = lazy(() => import("@/components/EventsPage").then(m => ({ def
 const VmsPage = lazy(() => import("@/components/VmsPage").then(m => ({ default: m.VmsPage })));
 const RemotePage = lazy(() => import("@/components/RemotePage").then(m => ({ default: m.RemotePage })));
 import { CommandPalette } from "@/components/CommandPalette";
+import { useT, type Key } from "@/lib/i18n";
 import { useVmActions } from "@/hooks/useDashboard";
 import type { VmInfo, RemoteHost } from "@/types";
-import { Reorder, AnimatePresence, motion } from 'framer-motion';
+import { Reorder, AnimatePresence, motion, MotionConfig } from 'framer-motion';
 import { DotLottieReact, setWasmUrl } from "@lottiefiles/dotlottie-react";
 // dotlottie-web fetches its WASM from a CDN by default (cdn.jsdelivr.net), which
 // the production CSP (connect-src 'self') blocks → the loading animation silently
@@ -52,28 +53,24 @@ import "./App.css";
 import "./App.sidebar.css";
 
 // ─── Loading screen copy — one is picked at random per app launch ────────────
-const LOADING_PHRASES = [
-  "시스템 부팅 중...",
-  "가상 자산을 스캔하는 중...",
-  "세션 텔레메트리 동기화 중...",
-  "네트워크 토폴로지 확인 중...",
-  "하이퍼데스크에 접속하는 중...",
-  "원격 자산 인벤토리 수집 중...",
-  "리소스 상태를 점검하는 중...",
+const LOADING_KEYS: Key[] = [
+  "loading.1", "loading.2", "loading.3", "loading.4", "loading.5", "loading.6", "loading.7",
 ];
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 // ─── Page metadata ────────────────────────────────────────────────────────────
 
-const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
-  dashboard: { title: "대시보드",     subtitle: "Virtualization Control Hub · Cool Blue" },
-  multiview: { title: "멀티 뷰",      subtitle: "SwallowGrid™ · Live Remote Desktops" },
-  vms:       { title: "가상 머신",    subtitle: "Hyper-V Units · Gen 1 + Gen 2" },
-  remote:    { title: "원격 자산",    subtitle: "RDP · Horizon · MST" },
-  snapshots: { title: "스냅샷",       subtitle: "복원 지점 및 체크포인트 관리" },
-  events:    { title: "이벤트 로그",  subtitle: "실시간 시스템 스트림" },
-  settings:  { title: "설정",         subtitle: "테마 · 동기화 · 업데이트" },
+// 사이드바 라벨과 같은 nav.* 키를 공유한다 — 같은 문구를 두 벌 번역하면
+// 반드시 어긋난다.
+const PAGE_KEYS: Record<Page, { title: Key; subtitle: Key }> = {
+  dashboard: { title: "nav.dashboard", subtitle: "page.dashboard.sub" },
+  multiview: { title: "nav.multiview", subtitle: "page.multiview.sub" },
+  vms:       { title: "nav.vms",       subtitle: "page.vms.sub" },
+  remote:    { title: "nav.remote",    subtitle: "page.remote.sub" },
+  snapshots: { title: "nav.snapshots", subtitle: "page.snapshots.sub" },
+  events:    { title: "nav.events",    subtitle: "page.events.sub" },
+  settings:  { title: "nav.settings",  subtitle: "page.settings.sub" },
 };
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
@@ -82,8 +79,9 @@ export default function App() {
   // Picked once per launch (not per render) — the loading screen only shows
   // during the initial fetch, so "매번 다르게" means "different each time you
   // start the app", not re-rolling on every re-render.
-  const [loadingPhrase] = useState(() => LOADING_PHRASES[Math.floor(Math.random() * LOADING_PHRASES.length)]);
+  const [loadingKey] = useState(() => LOADING_KEYS[Math.floor(Math.random() * LOADING_KEYS.length)]);
   const { settings, updateSettings } = useSettings();
+  const t = useT();
   const { toasts, addToast, removeToast } = useToast();
   const { data, isLoading, refetch } = useDashboard();
   const { data: statsData } = useSystemStats();
@@ -264,8 +262,16 @@ export default function App() {
     return () => timers.forEach(clearTimeout);
   }, [isLoading]);
 
+  // parseError는 키만 분류하고 표시는 여기서 한다. detail이 있으면(어느 패턴에도
+  // 안 걸린 경우) 번역된 안내문 대신 원문 일부를 보여준다 — 분류 못 한 에러는
+  // 원문이 유일한 단서다.
+  const showError = (e: ReturnType<typeof parseError>) => ({
+    title: t(e.titleKey),
+    body: e.detail ?? t(e.bodyKey),
+  });
+
   const handleError = (raw: string) => {
-    const err = parseError(raw);
+    const err = showError(parseError(raw));
     setErrorModal(err);
     addLog(`[ERROR] ${err.title}: ${err.body}`, "error");
   };
@@ -274,10 +280,10 @@ export default function App() {
     try {
       if (editingHost) {
         await updateHost.mutateAsync({ id: editingHost.id, ...hostData });
-        addToast(`${hostData.name} 자산 정보가 동기화되었습니다.`, "success");
+        addToast(t("toast.assetSynced", { name: hostData.name }), "success");
       } else {
         await addHost.mutateAsync(hostData);
-        addToast(`${hostData.name} 자산이 등록되었습니다.`, "success");
+        addToast(t("toast.assetAdded", { name: hostData.name }), "success");
       }
       setShowAssetModal(false);
       setEditingHost(null);
@@ -288,7 +294,7 @@ export default function App() {
     if (!confirmDelete) return;
     try {
       await removeHost.mutateAsync(confirmDelete);
-      addToast("자산 삭제가 완료되었습니다.", "info");
+      addToast(t("toast.assetDeleted"), "info");
       setConfirmDelete(null);
     } catch (e) { handleError(String(e)); }
   };
@@ -303,18 +309,18 @@ export default function App() {
         <button
           className="tool-btn"
           onClick={() => { setEditingHost(null); setShowAssetModal(true); }}
-          title="자산 추가"
+          title={t("dash.addAsset")}
         >
           <Plus size={15} />
         </button>
       )}
-      <button className="tool-btn" onClick={() => setPage("settings")} title="설정">
+      <button className="tool-btn" onClick={() => setPage("settings")} title={t("common.settings")}>
         <LucideSettings size={15} />
       </button>
     </>
   );
 
-  const meta = PAGE_META[page];
+  const meta = { title: t(PAGE_KEYS[page].title), subtitle: t(PAGE_KEYS[page].subtitle) };
 
   // ─── Content Components ───────────────────────────────────────────────────
 
@@ -348,10 +354,10 @@ export default function App() {
           const memTotalGB = ((statsData?.memory_total ?? data?.system_memory_total ?? 1) / 1024 / 1024);
           const memPct = memTotalGB > 0 ? ((memUsedGB / memTotalGB) * 100).toFixed(1) : "0";
           return [
-            { label: "활성 VM",     value: `${runningVms}/${vms.length}`,  delta: `${runningVms}개 실행 중`,    up: runningVms > 0, color: "var(--accent-green)" },
-            { label: "메모리 사용",  value: `${memUsedGB.toFixed(1)} GB`,   delta: `${memPct}%`,                 up: true,           color: "var(--accent-blue)" },
-            { label: "원격 자산",   value: `${onlineRemote}개 온라인`,      delta: `전체 ${remoteHosts.length}개`, up: true,          color: "var(--accent-blue)" },
-            { label: "평균 레이턴시", value: `${avgLatency} ms`,            delta: `${latencyHosts.length}개 호스트`, up: avgLatency < 50, color: avgLatency < 50 ? "var(--accent-green)" : "var(--accent-orange)" },
+            { label: t("dash.kpi.activeVms"), value: `${runningVms}/${vms.length}`, delta: t("dash.kpi.activeVmsDelta", { n: runningVms }), up: runningVms > 0, color: "var(--accent-green)" },
+            { label: t("dash.kpi.memory"), value: `${memUsedGB.toFixed(1)} GB`, delta: `${memPct}%`, up: true, color: "var(--accent-blue)" },
+            { label: t("dash.kpi.remote"), value: t("dash.kpi.remoteValue", { n: onlineRemote }), delta: t("dash.kpi.remoteDelta", { n: remoteHosts.length }), up: true, color: "var(--accent-blue)" },
+            { label: t("dash.kpi.latency"), value: `${avgLatency} ms`, delta: t("dash.kpi.latencyDelta", { n: latencyHosts.length }), up: avgLatency < 50, color: avgLatency < 50 ? "var(--accent-green)" : "var(--accent-orange)" },
           ].map((kpi) => (
             <div key={kpi.label} className="hd-kpi-tile">
               <div className="hd-kpi-label">{kpi.label}</div>
@@ -370,7 +376,7 @@ export default function App() {
           visible: { opacity: 1, x: 0, transition: { duration: 0.3 } }
         }}
       >
-        <h3>시스템 현황</h3><div className="section-line" />
+        <h3>{t("dash.systemStatus")}</h3><div className="section-line" />
       </motion.div>
 
       <motion.div
@@ -387,11 +393,11 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <Cpu size={14} color="var(--accent-blue)" />
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-main)" }}>리소스 모니터</span>
+              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-main)" }}>{t("dash.resourceMonitor")}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: 500, color: "var(--accent-green)" }}>
               <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent-green)", display: "inline-block" }} />
-              {runningVms}/{vms.length} 실행 중
+              {t("dash.running", { n: runningVms, total: vms.length })}
             </div>
           </div>
 
@@ -404,7 +410,7 @@ export default function App() {
             </div>
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "10px", color: "var(--text-muted)" }}>
-                <span>메모리</span><span>{(((statsData?.memory_used ?? data?.system_memory_used) ?? 0) / 1024 / 1024).toFixed(1)} GB</span>
+                <span>{t("dash.memory")}</span><span>{(((statsData?.memory_used ?? data?.system_memory_used) ?? 0) / 1024 / 1024).toFixed(1)} GB</span>
               </div>
               <Sparkline data={memHistory} color="var(--accent-green)" height={70} />
             </div>
@@ -413,7 +419,7 @@ export default function App() {
           {/* Bottom stat bar */}
           <div className="hub-stat-bar">
             <div className="hub-stat-item">
-              <span className="hub-stat-label">디스크 여유</span>
+              <span className="hub-stat-label">{t("dash.diskFree")}</span>
               <div className="hub-stat-track">
                 {/* Fill shows the FREE fraction (matches the label + green color) */}
                 <div className="hub-stat-fill" style={{ width: `${statsData?.disk_total ? Math.round((statsData.disk_free / statsData.disk_total) * 100) : 0}%`, background: "var(--accent-green)" }} />
@@ -424,7 +430,7 @@ export default function App() {
             </div>
             <div className="hub-stat-sep" />
             <div className="hub-stat-item">
-              <span className="hub-stat-label">네트워크</span>
+              <span className="hub-stat-label">{t("dash.network")}</span>
               <div className="hub-stat-track">
                 <div className="hub-stat-fill" style={{ width: `${Math.min(100, ((statsData?.network_io ?? data?.system_network_io ?? 0) / 102400) * 100)}%`, background: "var(--accent-blue)" }} />
               </div>
@@ -434,7 +440,7 @@ export default function App() {
             </div>
             <div className="hub-stat-sep" />
             <div className="hub-stat-item">
-              <span className="hub-stat-label">vCPU 합계</span>
+              <span className="hub-stat-label">{t("dash.vcpuTotal")}</span>
               <div className="hub-stat-track">
                 <div className="hub-stat-fill" style={{ width: `${Math.min(100, vms.reduce((s, v) => s + (v.processor_count ?? 0), 0) * 2)}%`, background: "var(--accent-blue)" }} />
               </div>
@@ -476,7 +482,7 @@ export default function App() {
               );
             })}
             {vms.filter(v => (v.checkpoint_count ?? 0) > 0).length === 0 && (
-              <div style={{ textAlign: "center", opacity: 0.3, padding: "24px", fontSize: "11px" }}>스냅샷 없음</div>
+              <div style={{ textAlign: "center", opacity: 0.3, padding: "24px", fontSize: "11px" }}>{t("dash.noSnapshots")}</div>
             )}
           </div>
         </BentoCell>
@@ -490,7 +496,7 @@ export default function App() {
           visible: { opacity: 1, x: 0, transition: { duration: 0.3 } }
         }}
       >
-        <h3>가상 머신 클러스터</h3>
+        <h3>{t("dash.vmCluster")}</h3>
         <div className="section-line" />
       </motion.div>
       <motion.div
@@ -507,14 +513,14 @@ export default function App() {
       >
         <BentoCell className="cell-4x2" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: "12px", fontWeight: 500, color: "var(--text-muted)" }}>{vms.length + horizonHosts.length}개 노드</span>
+          <span style={{ fontSize: "12px", fontWeight: 500, color: "var(--text-muted)" }}>{t("dash.nodes", { n: vms.length + horizonHosts.length })}</span>
           <span style={{ fontSize: "11px", color: "var(--accent-green)", fontWeight: 600, background: "rgba(34,197,94,0.08)", padding: "2px 10px", borderRadius: "6px", border: "1px solid rgba(34,197,94,0.2)" }}>
-            {runningVms + horizonHosts.filter(h => h.status !== "Offline").length} / {vms.length + horizonHosts.length} 온라인
+            {t("dash.online", { n: runningVms + horizonHosts.filter(h => h.status !== "Offline").length, total: vms.length + horizonHosts.length })}
           </span>
         </div>
         <div className="rack-container no-scrollbar" style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "scroll", maxHeight: "480px" }}>
           {data?.vm_error && (() => {
-            const err = parseError(data.vm_error);
+            const err = showError(parseError(data.vm_error));
             return (
               <div style={{ padding: "14px 16px", borderRadius: "10px", border: "1px solid rgba(244,63,94,0.3)", background: "rgba(244,63,94,0.08)", display: "flex", gap: "10px", alignItems: "flex-start" }}>
                 <AlertTriangle size={16} color="var(--accent-red)" style={{ flexShrink: 0, marginTop: "1px" }} />
@@ -539,7 +545,7 @@ export default function App() {
           ) : (
             <div style={{ padding: "40px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
               <Server size={24} style={{ marginBottom: "10px" }} />
-              <div style={{ fontSize: "12px", fontWeight: 500 }}>감지된 VM이 없습니다</div>
+              <div style={{ fontSize: "12px", fontWeight: 500 }}>{t("dash.noVms")}</div>
             </div>
           )}
         </div>
@@ -553,9 +559,9 @@ export default function App() {
             visible: { opacity: 1, x: 0, transition: { duration: 0.3 } }
           }}
         >
-          <Globe size={14} color="var(--accent-blue)" /><h3>원격 자산</h3><div className="section-line" />
+          <Globe size={14} color="var(--accent-blue)" /><h3>{t("dash.remoteAssets")}</h3><div className="section-line" />
           <ColumnToggle value={settings.remoteAssetColumns} onChange={(v) => updateSettings({ remoteAssetColumns: v })} />
-          <button className="hd-segment-btn" onClick={() => { setEditingHost(null); setShowAssetModal(true); }} title="원격 자산 등록">
+          <button className="hd-segment-btn" onClick={() => { setEditingHost(null); setShowAssetModal(true); }} title={t("dash.registerAsset")}>
             <Plus size={13} />
           </button>
         </motion.div>
@@ -613,7 +619,7 @@ export default function App() {
                       >
                         <Play/>
                       </button>
-                      <button className="mst-rack-icon-btn" title="메모장 (접속정보/메모)" onClick={() => setMemoHost(host)}>✎</button>
+                      <button className="mst-rack-icon-btn" title={t("dash.memo")} onClick={() => setMemoHost(host)}>✎</button>
                     </div>
                   </div>
                 </Reorder.Item>
@@ -631,7 +637,7 @@ export default function App() {
     <div className="stats-bar">
       <div className="stat-item"><Server size={12} /><span>VM <strong>{vms.length}</strong> · <strong>{runningVms}</strong> UP</span></div>
       <span className="stat-sep">|</span>
-      <div className="stat-item"><Globe size={12} /><span>원격지 <strong>{remoteHosts.length}</strong></span></div>
+      <div className="stat-item"><Globe size={12} /><span>{t("dash.statusRemote")} <strong>{remoteHosts.length}</strong></span></div>
       <span className="stat-sep">|</span>
       <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
         <Cpu size={12} />
@@ -643,6 +649,12 @@ export default function App() {
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
+    // framer-motion 애니메이션은 JS로 값을 직접 쓰기 때문에 App.css의 전역
+    // `@media (prefers-reduced-motion: reduce)` 블록이 **닿지 않는다**. 이 앱엔
+    // motion 사용처가 24곳 있는데 그동안 전부 OS 모션 감소 설정을 무시하고 있었다.
+    // reducedMotion="user"가 그 설정을 읽어 transform/layout 애니메이션을 끄고
+    // opacity만 남긴다(사라지는 게 아니라 전정기관을 자극하는 움직임만 제거).
+    <MotionConfig reducedMotion="user">
     <AnimatePresence mode="wait">
       {isLoading && !data ? (
         <motion.div
@@ -653,7 +665,7 @@ export default function App() {
           className="loading-screen"
         >
           <DotLottieReact src="/loading.lottie" loop autoplay speed={1} className="loading-lottie" />
-          <p>{loadingPhrase}</p>
+          <p>{t(loadingKey)}</p>
         </motion.div>
       ) : (
         <motion.div
@@ -699,7 +711,7 @@ export default function App() {
               {/* Suspense fallback covers the brief chunk-load of a lazily-imported
                   route (near-instant off local disk); the dashboard is eager so it
                   never shows the fallback on first paint. */}
-              <Suspense fallback={<div className="hd-page" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "12px" }}>로딩 중…</div>}>
+              <Suspense fallback={<div className="hd-page" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "12px" }}>{t("common.loading")}</div>}>
                 {page === "multiview" ? (
                   <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} onError={(msg) => { addToast(msg, "error"); addLog(`[MULTIVIEW] ${msg}`, "error"); }} />
                 ) : (
@@ -726,11 +738,11 @@ export default function App() {
             vms={vms}
             remoteHosts={remoteHosts}
             onNav={(p) => { setPage(p); closeSearch(); }}
-            onVmStart={(name) => { vmActions.start.mutate(name); addToast(`${name} 시작 중...`, "info"); }}
-            onVmStop={(name) => { vmActions.stop.mutate(name); addToast(`${name} 종료 중...`, "info"); }}
-            onVmSave={(name) => { vmActions.save.mutate(name); addToast(`${name} 상태 저장 중...`, "info"); }}
-            onVmPause={(name) => { vmActions.pause.mutate(name); addToast(`${name} 일시정지 중...`, "info"); }}
-            onVmResume={(name) => { vmActions.resume.mutate(name); addToast(`${name} 재개 중...`, "info"); }}
+            onVmStart={(name) => { vmActions.start.mutate(name); addToast(t("toast.vmStarting", { name }), "info"); }}
+            onVmStop={(name) => { vmActions.stop.mutate(name); addToast(t("toast.vmStopping", { name }), "info"); }}
+            onVmSave={(name) => { vmActions.save.mutate(name); addToast(t("toast.vmSaving", { name }), "info"); }}
+            onVmPause={(name) => { vmActions.pause.mutate(name); addToast(t("toast.vmPausing", { name }), "info"); }}
+            onVmResume={(name) => { vmActions.resume.mutate(name); addToast(t("toast.vmResuming", { name }), "info"); }}
             onVmConnect={(vm) => {
               const ip = pickReachableIp(vm.ip_addresses);
               if (ip) vmActions.connect.mutate({ host: ip, username: undefined });
@@ -738,6 +750,10 @@ export default function App() {
             onVmConsole={(name) => vmActions.console.mutate(name)}
             onVmSettings={(vm) => { setShowVmSettings(vm); closeSearch(); }}
             onHostConnect={(host) => connectHost.mutate({ host: host.host, protocol: host.protocol, username: host.username })}
+            /* Quick connect: 등록 절차 없이 팔레트에 친 주소로 바로 RDP. 계정은
+               설정의 "기본 접속 계정"을 쓴다 — 이 설정의 존재 이유가 정확히 이거다.
+               비어 있으면 넘기지 않고 mstsc가 직접 묻게 둔다(빈 문자열을 넘기면
+               계정을 지정한 것으로 취급돼 인증이 곧바로 실패한다). */
             onHostEdit={(host) => { setEditingHost(host); setShowAssetModal(true); closeSearch(); }}
             onHostDelete={(host) => { setConfirmDelete(host.id); closeSearch(); }}
             onAddAsset={() => { setEditingHost(null); setShowAssetModal(true); closeSearch(); }}
@@ -747,16 +763,17 @@ export default function App() {
           {showVmSettings  && <VmSettingsModal vm={showVmSettings} onClose={() => setShowVmSettings(null)} onLog={addLog} />}
           {showCreateVm    && <CreateVmModal
             onClose={() => setShowCreateVm(false)}
-            onCreated={(name) => { setShowCreateVm(false); addToast(`${name} 가상 머신이 생성되었습니다.`, "success"); addLog(`[VM] 새 VM 생성: ${name}`, "success"); refetch(); }}
+            onCreated={(name) => { setShowCreateVm(false); addToast(t("toast.vmCreated", { name }), "success"); addLog(t("log.vmCreated", { name }), "success"); refetch(); }}
             onError={(msg) => { handleError(msg); }}
           />}
           {showAssetModal  && <AssetModal initialData={editingHost ?? undefined} isEditing={!!editingHost} isPending={addHost.isPending || updateHost.isPending} onClose={() => { setShowAssetModal(false); setEditingHost(null); }} onSubmit={handleAssetAction} />}
-          {confirmDelete   && <ConfirmModal title="자산 영구 삭제" message="선택한 원격 자산을 영구적으로 삭제하시겠습니까?" confirmText="영구 삭제 수행" type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
-          {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText="확인" onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}
-          {showQuitConfirm && <ConfirmModal title="HyperDesk 종료" message="백그라운드로 전환하면 실행 중인 세션이 유지되고 트레이에서 다시 열 수 있습니다. 완전 종료하면 모든 세션 연결이 정리됩니다." confirmText="백그라운드로 전환" cancelText="취소" extraText="완전 종료" onExtra={() => api.quitApp().catch(console.error)} onConfirm={handleMinimizeToTray} onClose={() => setShowQuitConfirm(false)} />}
-          {memoHost        && <MemoModal host={memoHost} onClose={() => setMemoHost(null)} onSaved={() => { refetch(); addToast("메모가 저장되었습니다.", "success"); }} />}
+          {confirmDelete   && <ConfirmModal title={t("modal.deleteAsset.title")} message={t("modal.deleteAsset.body")} confirmText={t("modal.deleteAsset.confirm")} type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
+          {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText={t("modal.ok")} onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}
+          {showQuitConfirm && <ConfirmModal title={t("modal.quit.title")} message={t("modal.quit.body")} confirmText={t("modal.quit.confirm")} cancelText={t("modal.cancel")} extraText={t("modal.quit.extra")} onExtra={() => api.quitApp().catch(console.error)} onConfirm={handleMinimizeToTray} onClose={() => setShowQuitConfirm(false)} />}
+          {memoHost        && <MemoModal host={memoHost} onClose={() => setMemoHost(null)} onSaved={() => { refetch(); addToast(t("toast.memoSaved"), "success"); }} />}
         </motion.div>
       )}
     </AnimatePresence>
+    </MotionConfig>
   );
 }
