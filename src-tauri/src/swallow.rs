@@ -33,6 +33,18 @@ macro_rules! dlog {
     ($($arg:tt)*) => { crate::swallow::dlog(&format!($($arg)*)) };
 }
 
+// 릴리즈용 no-op. **이게 없으면 `#[cfg(debug_assertions)]` 블록 밖에서 dlog!를
+// 부르는 순간 릴리즈 빌드만 "cannot find macro" 로 깨진다** — dev 빌드와
+// `cargo test`는 멀쩡히 통과하므로 `v*` 태그를 밀어 릴리즈 워크플로가 돌 때에야
+// 발견된다(실제로 그렇게 한 번 깨뜨렸다). 호출부마다 cfg 가드를 다는 대신
+// 매크로를 양쪽 프로파일에 다 정의해서 함정 자체를 없앤다.
+// 주의: 릴리즈에선 인자가 **평가되지 않는다**. dlog! 인자에 부수 효과가 있는
+// 식(함수 호출로 상태를 바꾸는 것 등)을 넣지 말 것.
+#[cfg(not(debug_assertions))]
+macro_rules! dlog {
+    ($($arg:tt)*) => {};
+}
+
 pub static SWALLOW_STATE: OnceLock<Arc<Mutex<HashMap<String, SwallowInfo>>>> = OnceLock::new();
 
 fn swallow_state() -> &'static Arc<Mutex<HashMap<String, SwallowInfo>>> {
@@ -888,6 +900,10 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     let child_hwnd = child_h.0;
     let actual_parent = actual_parent_h.0;
 
+    // 최초 스왈로우 시점의 슬롯 좌표. 이후 [bounds] 로그와 비교하면 "처음부터
+    // 넓게 잡혔는지" vs "처음엔 맞았는데 이후 갱신이 안 왔는지"가 바로 갈린다.
+    dlog!("[bounds] slot={} INITIAL=({},{} {}x{})", slot_id, x, y, width, height);
+
     #[cfg(debug_assertions)]
     let read_class = |h: HWND| -> String {
         let mut buf = [0u16; 256];
@@ -1304,6 +1320,15 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
 pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
     let mut state = lock_state();
     if let Some(info) = state.get_mut(slot_id) {
+        // 좌표 계측. "우측 세션 레일이 VM에 덮인다"류의 버그는 원인이 셋으로
+        // 갈리는데(프론트 측정이 틀림 / 백엔드가 적용을 안 함 / 애초에 호출이
+        // 안 옴) 로그 없이는 구분이 안 된다. 들어온 값과 델타 필터 통과 여부를
+        // 같이 남긴다. dev 빌드에서만 찍히고 %TEMP%\hyperdesk-swallow.log로 간다.
+        dlog!(
+            "[bounds] slot={} in=({},{} {}x{}) held=({},{} {}x{}) visible={}",
+            slot_id, x, y, width, height,
+            info.x, info.y, info.width, info.height, info.is_visible
+        );
         // Delta filtering: Only update if there is at least >1px change to avoid jitter
         if (info.x - x).abs() <= 1 &&
            (info.y - y).abs() <= 1 &&
