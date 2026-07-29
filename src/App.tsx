@@ -754,6 +754,7 @@ export default function App() {
                설정의 "기본 접속 계정"을 쓴다 — 이 설정의 존재 이유가 정확히 이거다.
                비어 있으면 넘기지 않고 mstsc가 직접 묻게 둔다(빈 문자열을 넘기면
                계정을 지정한 것으로 취급돼 인증이 곧바로 실패한다). */
+            onQuickConnect={(host) => connectHost.mutate({ host, protocol: "RDP", username: settings.defaultUsername || undefined })}
             onHostEdit={(host) => { setEditingHost(host); setShowAssetModal(true); closeSearch(); }}
             onHostDelete={(host) => { setConfirmDelete(host.id); closeSearch(); }}
             onAddAsset={() => { setEditingHost(null); setShowAssetModal(true); closeSearch(); }}
