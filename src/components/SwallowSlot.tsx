@@ -22,9 +22,15 @@ interface SwallowSlotProps {
       swapping the visible slot mid-swallow breaks the embed (bounds sync runs
       against a hidden slot while mstsc is still being captured). */
   onConnectingChange?: (id: string, connecting: boolean) => void;
+  /** Reports live-session state up to MultiView's right rail. `assignedId` only
+      says a slot is CONFIGURED — a slot whose session died still has one. This is
+      the only signal that distinguishes "연결됨" from "대기 중" in the rail, and
+      it is already validated by the 5s integrity poll below (isWindowValid), so
+      a crashed child flips it back to false on its own. */
+  onConnectedChange?: (id: string, connected: boolean) => void;
 }
 
-export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange }: SwallowSlotProps) {
+export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange }: SwallowSlotProps) {
   // contentRef points to slot-content-area (below the fixed 36px header bar).
   // syncBounds and handleConnect both measure this div so the Win32 window
   // is positioned to fill exactly the content area, never under the header.
@@ -45,6 +51,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
   // forever after the connection was already up.
   useEffect(() => { if (isSwallowed) setIsConnecting(false); }, [isSwallowed]);
   useEffect(() => { isSwallowedRef.current = isSwallowed; }, [isSwallowed]);
+  useEffect(() => { onConnectedChange?.(id, isSwallowed); }, [id, isSwallowed, onConnectedChange]);
   const [showSelector, setShowSelector] = useState(false);
   const [isGlitched, setIsGlitched] = useState(false);
   const [isActuallyHidden, setIsActuallyHidden] = useState(!isVisible);

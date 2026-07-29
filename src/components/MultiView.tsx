@@ -3,6 +3,10 @@ import { SwallowSlot } from "@/components/SwallowSlot";
 import { VmInfo, RemoteHost } from "@/types";
 import { Expand, Shrink, Maximize, Server, Monitor, Globe, RefreshCw, Plus } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { motion } from "framer-motion";
+import { useT } from "@/lib/i18n";
+import { Sparkline } from "@/components/Sparkline";
+import { useSystemStats } from "@/hooks/useDashboard";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "@/lib/tauri-api";
@@ -20,6 +24,10 @@ interface MultiViewProps {
 // arrives as the "hotkey-focus" event). There is no grid / theater / focus mode.
 export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   const { settings, updateSettings } = useSettings();
+  const t = useT();
+  // 대시보드와 같은 쿼리 키를 쓰므로 React Query가 캐시를 공유한다 — 멀티뷰에
+  // 들어왔다고 폴링이 하나 더 붙지 않는다.
+  const { data: stats } = useSystemStats();
   const [activeSlot, setActiveSlot] = useState(0);
   // Immersive: VM view fills the ENTIRE screen (OS fullscreen + container overlays
   // the app chrome; the slot header floats absolute UNDER the VM surface → the
@@ -46,6 +54,14 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   const handleConnectingChange = useCallback((slotId: string, connecting: boolean) => {
     setConnectingSlots(prev => (prev[slotId] === connecting ? prev : { ...prev, [slotId]: connecting }));
   }, []);
+  // Live-session state for the right rail. slotAssignments only records what a slot
+  // is CONFIGURED to hold — a slot whose mstsc/vmconnect died keeps its assignment,
+  // so without this the rail rendered a dead slot identically to a live one.
+  const [connectedSlots, setConnectedSlots] = useState<Record<string, boolean>>({});
+  const handleConnectedChange = useCallback((slotId: string, connected: boolean) => {
+    setConnectedSlots(prev => (prev[slotId] === connected ? prev : { ...prev, [slotId]: connected }));
+  }, []);
+  const liveCount = Object.values(connectedSlots).filter(Boolean).length;
   // Mirrors `anyConnecting` into Rust (lib.rs's Alt+1~4 handler has no visibility
   // into React state otherwise, so it kept force-focusing a mid-connect slot's
   // native window regardless of this lock). Cleared unconditionally on unmount
@@ -158,7 +174,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
       await invoke("toggle_fullscreen");
       fullscreenRef.current = !fullscreenRef.current;
     } catch (e) {
-      onError(`전체화면 전환 실패: ${e}`);
+      onError(t("mv.fullscreenFailed", { err: String(e) }));
     }
   };
 
@@ -169,25 +185,48 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
     updateSettings({ slotAssignments: newAssignments });
   };
 
-  // Resolve a slot index to its assigned session's display metadata, for the
-  // right rail. Kind drives the icon/label; null name means the slot is empty.
-  const slotMeta = (i: number): { name: string | null; kind: "hyperv" | "rdp" | "horizon" | null } => {
+  // Resolve a slot index to its assigned session, for the right rail. Kind drives
+  // the icon/label; null name means the slot is empty.
+  //
+  // The resolved vm/host object is carried through — it used to be looked up and
+  // then thrown away, keeping only name+kind, while `data` already holds live
+  // cpu/memory/uptime/latency refreshed on the dashboard's 5s poll. The rail's
+  // per-session metrics below are that already-paid-for data, not a new fetch.
+  const slotMeta = (i: number): { name: string | null; kind: "hyperv" | "rdp" | "horizon" | null; vm?: VmInfo; host?: RemoteHost } => {
     const assignedId = settings.slotAssignments[i] || null;
     if (!assignedId) return { name: null, kind: null };
     const vm = data.vms.find((v) => v.name === assignedId);
-    if (vm) return { name: vm.name, kind: "hyperv" };
+    if (vm) return { name: vm.name, kind: "hyperv", vm };
     const host = data.remoteHosts.find((h) => h.id === assignedId);
-    if (host) return { name: host.name, kind: host.protocol === "HORIZON" ? "horizon" : "rdp" };
+    if (host) return { name: host.name, kind: host.protocol === "HORIZON" ? "horizon" : "rdp", host };
     return { name: assignedId, kind: null };
   };
+  // **SystemStats의 단위가 필드마다 다르다** — memory_*는 KB, disk_free는 MB,
+  // VmInfo의 memory_*는 바이트다(App.tsx의 대시보드 변환과 대조해 확인). 헬퍼를
+  // 하나로 합치거나 서로 바꿔 쓰면 값이 1024배 틀어진 채 조용히 표시된다.
+  const gbFromBytes = (b: number) => (b > 0 ? (b / 1024 / 1024 / 1024).toFixed(1) : "0.0");
+  const gbFromKb = (k: number) => (k > 0 ? (k / 1024 / 1024).toFixed(0) : "0");
+  const gbFromMb = (m: number) => (m > 0 ? (m / 1024).toFixed(0) : "0");
   const kindIcon = (kind: ReturnType<typeof slotMeta>["kind"]) => {
     if (kind === "hyperv") return <Server size={15} />;
     if (kind === "horizon") return <Globe size={15} />;
     if (kind === "rdp") return <Monitor size={15} />;
     return <Plus size={15} />;
   };
+  // 프로토콜 이름(Hyper-V/Horizon/RDP)은 고유명사라 번역하지 않는다.
   const kindLabel = (kind: ReturnType<typeof slotMeta>["kind"]) =>
-    kind === "hyperv" ? "Hyper-V" : kind === "horizon" ? "Horizon" : kind === "rdp" ? "RDP" : "비어있음";
+    kind === "hyperv" ? "Hyper-V" : kind === "horizon" ? "Horizon" : kind === "rdp" ? "RDP" : t("rail.unknown");
+  // Rail card sub-line. The icon already carries WHAT the slot is, so this line
+  // carries its STATE — that's the thing slotAssignments alone could never say.
+  // rail.unknown is a real case: an assignment whose VM/host has since disappeared
+  // (renamed VM, deleted host) resolves to a name with no kind, and the old label
+  // rendered that as "비어있음" while the name sat right above it.
+  const subLabel = (kind: ReturnType<typeof slotMeta>["kind"], name: string | null, connecting: boolean, connected: boolean) => {
+    if (connecting) return t("rail.connecting");
+    if (!name) return t("rail.empty");
+    if (!kind) return t("rail.unknown");
+    return connected ? kindLabel(kind) : t("rail.idle");
+  };
 
   // Header controls rendered INSIDE the active slot's 36px header bar. Deliberately
   // NOT a separate header: a second bar floating over the slot's own header was the
@@ -210,7 +249,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
                 className={activeSlot === i ? "active" : ""}
                 disabled={anyConnecting && activeSlot !== i}
                 onClick={() => setActiveSlot(i)}
-                title={anyConnecting && activeSlot !== i ? "연결 중에는 슬롯을 전환할 수 없습니다" : `슬롯 ${i + 1} (Alt+${i + 1})`}
+                title={anyConnecting && activeSlot !== i ? t("rail.lockedSwitch") : t("rail.slotHint", { n: i + 1 })}
               >
                 {i + 1}
               </button>
@@ -224,14 +263,14 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
           className={isImmersive ? "active" : ""}
           disabled={anyConnecting}
           onClick={handleToggleImmersive}
-          title={anyConnecting ? "연결 중에는 전환할 수 없습니다" : isImmersive ? "VM 전체화면 해제" : "VM 전체화면 (앱 UI 숨김)"}
+          title={anyConnecting ? t("mv.lockedToggle") : isImmersive ? t("mv.immersiveOff") : t("mv.immersiveOn")}
         >
           {isImmersive ? <Shrink size={14} /> : <Expand size={14} />}
         </button>
         {/* OS-fullscreen toggle is hidden while immersive — immersive already IS
             fullscreen, and a second toggle desyncs the two (Shrink exits). */}
         {!isImmersive && (
-          <button onClick={handleToggleOSFullscreen} title="창 전체화면 전환 (F11)">
+          <button onClick={handleToggleOSFullscreen} title={t("mv.osFullscreen")}>
             <Maximize size={14} />
           </button>
         )}
@@ -264,6 +303,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
                 isSyncLocked={isSwitching}
                 headerControls={headerControls}
                 onConnectingChange={handleConnectingChange}
+                onConnectedChange={handleConnectedChange}
               />
             );
           })}
@@ -271,34 +311,125 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
 
         {!isImmersive && (
           <aside className="multiview-rail">
-            <div className="multiview-rail__title">세션</div>
+            <div className="multiview-rail__title">
+              <span>{t("rail.title")}</span>
+              {/* Live count, not assigned count — the sidebar's N/4 pill already
+                  reports assignments, so repeating that here would say nothing new. */}
+              <span className="multiview-rail__count">{liveCount}/{SLOT_COUNT}</span>
+            </div>
             <div className="multiview-rail__list">
               {Array.from({ length: SLOT_COUNT }).map((_, i) => {
                 const meta = slotMeta(i);
                 const slotId = `slot-${i}`;
                 const connecting = !!connectingSlots[slotId];
+                const connected = !!connectedSlots[slotId];
                 const isActive = activeSlot === i;
                 const locked = anyConnecting && !isActive;
                 return (
                   <button
                     key={i}
-                    className={`session-card ${isActive ? "active" : ""} ${meta.name ? "filled" : "empty"}`}
+                    className={`session-card ${isActive ? "active" : ""} ${meta.name ? "filled" : "empty"} ${connected ? "live" : ""}`}
                     disabled={locked}
+                    /* Not aria-current — this pages between slots, it isn't navigation. */
+                    aria-pressed={isActive}
                     onClick={() => setActiveSlot(i)}
-                    title={locked ? "연결 중에는 슬롯을 전환할 수 없습니다" : `슬롯 ${i + 1} (Alt+${i + 1})`}
+                    title={locked ? t("rail.lockedSwitch") : t("rail.slotHint", { n: i + 1 })}
                   >
-                    <span className="session-card__icon">
-                      {connecting ? <RefreshCw size={15} className="spinning" /> : kindIcon(meta.kind)}
+                    {/* 활성 마커. 카드마다 정적으로 그리지 않고 layoutId 하나를 공유해서
+                        슬롯을 바꾸면 막대가 카드 사이를 **미끄러진다** — Alt+1~4로 전환할 때
+                        포커스가 어디로 갔는지 눈이 따라갈 수 있게 하는 게 목적이다(장식 아님).
+                        모션 감소 설정은 App.tsx의 MotionConfig가 전역으로 처리한다. */}
+                    {isActive && (
+                      <motion.span
+                        layoutId="session-card-marker"
+                        className="session-card__marker"
+                        transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                      />
+                    )}
+                    <span className="session-card__top">
+                      <span className="session-card__icon">
+                        {connecting ? <RefreshCw size={15} className="spinning" /> : kindIcon(meta.kind)}
+                        {connected && <span className="session-card__live" aria-hidden="true" />}
+                      </span>
+                      <span className="session-card__text">
+                        <span className="session-card__name">{meta.name ?? t("rail.slot", { n: i + 1 })}</span>
+                        <span className="session-card__sub">{subLabel(meta.kind, meta.name, connecting, connected)}</span>
+                      </span>
+                      <span className="session-card__hint">Alt+{i + 1}</span>
                     </span>
-                    <span className="session-card__text">
-                      <span className="session-card__name">{meta.name ?? `슬롯 ${i + 1}`}</span>
-                      <span className="session-card__sub">{connecting ? "연결 중…" : kindLabel(meta.kind)}</span>
-                    </span>
-                    <span className="session-card__hint">Alt+{i + 1}</span>
+
+                    {/* 실시간 지표. 전부 이미 폴링 중인 data에서 나온다 — 새 커맨드 없음.
+                        VM은 실행 중일 때만(꺼진 VM의 CPU 0%는 정보가 아니라 소음),
+                        원격 호스트는 항상(지연/오프라인이 곧 그 카드의 상태다). */}
+                    {meta.vm && meta.vm.state === "Running" && (
+                      <span className="session-metrics">
+                        <span className="session-metric">
+                          <span className="session-metric__k">CPU</span>
+                          <span className="session-metric__bar">
+                            <i style={{ width: `${Math.min(Math.round(meta.vm.cpu_usage || 0), 100)}%` }} />
+                          </span>
+                          <span className="session-metric__v">{Math.min(Math.round(meta.vm.cpu_usage || 0), 100)}%</span>
+                        </span>
+                        <span className="session-metric">
+                          <span className="session-metric__k">MEM</span>
+                          <span className="session-metric__v session-metric__v--wide">
+                            {gbFromBytes(meta.vm.memory_demand || meta.vm.memory_assigned)} / {gbFromBytes(meta.vm.memory_assigned)} GB
+                          </span>
+                        </span>
+                        <span className="session-metric">
+                          <span className="session-metric__k">{t("rail.uptime")}</span>
+                          <span className="session-metric__v session-metric__v--wide">{meta.vm.uptime || "—"}</span>
+                        </span>
+                      </span>
+                    )}
+                    {meta.host && (
+                      <span className="session-metrics">
+                        <span className="session-metric">
+                          <span className="session-metric__k">{t("rail.latency")}</span>
+                          <span className="session-metric__v session-metric__v--wide">
+                            {meta.host.status === "TIMEOUT" || meta.host.status === "Offline"
+                              ? t("rail.offline")
+                              : `${meta.host.latency ?? "—"} ms`}
+                          </span>
+                        </span>
+                        {meta.host.host && (
+                          <span className="session-metric">
+                            <span className="session-metric__k">IP</span>
+                            <span className="session-metric__v session-metric__v--wide">{meta.host.host}</span>
+                          </span>
+                        )}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
+
+            {/* 호스트 시스템. 원격 세션 4개를 돌리는 화면이야말로 "내 PC가 버티고
+                있나"를 봐야 하는 자리다. useSystemStats/Sparkline 모두 대시보드가
+                이미 쓰는 것이라 새 폴링도, 새 컴포넌트도 없다. autoRefresh가 꺼져
+                있으면 갱신이 멈추는 것도 대시보드와 같은 동작. */}
+            {stats && (
+              <div className="rail-host">
+                <div className="rail-host__title">{t("rail.hostSystem")}</div>
+                <div className="rail-host__row">
+                  <span className="rail-host__k">CPU</span>
+                  <span className="rail-host__v">{Math.round(stats.cpu)}%</span>
+                </div>
+                <Sparkline data={stats.cpu_history} height={28} color="var(--accent-blue)" suffix="%" />
+                <div className="rail-host__row">
+                  <span className="rail-host__k">MEM</span>
+                  <span className="rail-host__v">
+                    {gbFromKb(stats.memory_used)} / {gbFromKb(stats.memory_total)} GB
+                  </span>
+                </div>
+                <Sparkline data={stats.mem_history} height={28} color="var(--accent-green)" suffix="%" />
+                <div className="rail-host__row">
+                  <span className="rail-host__k">{t("rail.disk")}</span>
+                  <span className="rail-host__v">{gbFromMb(stats.disk_free)} GB</span>
+                </div>
+              </div>
+            )}
           </aside>
         )}
       </div>
