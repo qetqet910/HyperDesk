@@ -91,7 +91,7 @@
 }
 
 .hd-sidebar__version {
-  font-size: 9px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   color: var(--accent-soft);
   background: var(--accent-wash);
@@ -161,7 +161,7 @@
   font-weight: 600;
   font-family: var(--font);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: var(--tr-ui);
   text-align: left;
   white-space: nowrap;
   width: 100%;
@@ -217,7 +217,7 @@
 
 /* Occupied-slots pill on the 멀티 뷰 item (N/4). Sits just left of the LIVE badge. */
 .hd-nav-item__slots {
-  font-size: 9px;
+  font-size: var(--fs-micro);
   font-weight: 800;
   color: var(--accent-green);
   background: rgba(34, 197, 94, 0.1);
@@ -237,7 +237,7 @@
 }
 
 .hd-nav-item__count {
-  font-size: 9px;
+  font-size: var(--fs-micro);
   font-weight: 800;
   color: var(--text-muted);
   background: var(--accent-wash);
@@ -252,7 +252,7 @@
 }
 
 .hd-nav-item__badge {
-  font-size: 8px;
+  font-size: var(--fs-micro);
   font-weight: 900;
   letter-spacing: 0.5px;
   padding: 1px 6px;
@@ -320,7 +320,7 @@
 }
 
 .hd-sidebar__status-sub {
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-muted);
   margin-top: 1px;
 }
@@ -466,7 +466,7 @@
   border-radius: 4px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: var(--tr-ui);
 }
 
 .tool-btn:hover,
@@ -816,7 +816,7 @@ body::before {
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: var(--tr-ui);
   margin-left: 4px;
   flex-shrink: 0;
 }
@@ -842,7 +842,7 @@ body::before {
 .mst-proto-tag {
   position: absolute;
   right: 10px;
-  font-size: 8px;
+  font-size: var(--fs-micro);
   padding: 2px 5px;
   border-radius: 2px;
   font-weight: 900;
@@ -1001,7 +1001,7 @@ body::before {
   font-weight: 700;
   font-family: var(--font);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: var(--tr-ui);
   letter-spacing: 0.3px;
 }
 
@@ -1021,7 +1021,7 @@ body::before {
 .hd-segment-count {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   font-weight: 900;
   padding: 1px 5px;
   border-radius: 8px;
@@ -1052,7 +1052,7 @@ body::before {
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: var(--tr-ui);
   margin-left: 4px;
   flex-shrink: 0;
 }

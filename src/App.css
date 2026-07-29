@@ -68,6 +68,14 @@
   --radius-sm: 8px;
   --shadow: 0 4px 20px rgba(6, 9, 14, 0.55);
   --shadow-lg: 0 14px 44px rgba(5, 8, 12, 0.66);
+  /* 모달/팝오버/강조버튼 그림자. 예전엔 이 넷이 각 규칙에 rgba(0,0,0,0.2~0.6)으로
+     하드코딩돼 있어서 라이트 테마에도 그대로 나갔다 — 흰 배경 위 순수 검정은
+     "떠 있다"가 아니라 "때가 탔다"로 읽힌다. 라이트 값은 알파를 낮추고 팔레트
+     네이비/블루로 tint한다(순수 검정 금지). */
+  --shadow-modal: 0 20px 50px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 30px 60px rgba(0, 0, 0, 0.6);
+  --shadow-accent: 0 2px 12px rgba(0, 0, 0, 0.2);
+  --shadow-accent-lg: 0 4px 16px rgba(0, 0, 0, 0.2);
   --neon-blue: #5B82BE;
   --neon-purple: #8FABD4;
   --glass-bg: rgba(20, 25, 35, 0.62);
@@ -114,6 +122,14 @@
   --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
   --shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
   --shadow-lg: 0 10px 40px rgba(15, 23, 42, 0.14);
+  /* 검정이 아니라 팔레트 네이비(15,23,42)로 tint하고 알파를 다크의 1/3로 줄인다.
+     흰 배경에선 넓게 번진 검정이 곧바로 얼룩으로 보이므로 blur도 함께 조인다. */
+  --shadow-modal: 0 16px 40px rgba(15, 23, 42, 0.16);
+  --shadow-pop: 0 24px 56px rgba(15, 23, 42, 0.20);
+  /* 강조 버튼(파란 pill)은 회색 후광 대신 자기 색으로 번지게 — 라이트 UI에서
+     채색 그림자는 요소가 떠 있게 보이면서도 배경을 더럽히지 않는다. */
+  --shadow-accent: 0 2px 10px rgba(58, 106, 170, 0.30);
+  --shadow-accent-lg: 0 4px 14px rgba(58, 106, 170, 0.28);
   --neon-blue: #3A6AAA;
   --neon-purple: #3A6AAA;
   --glass-bg: rgba(255, 255, 255, 0.88);
@@ -175,6 +191,11 @@
   --glass-blur: 0px;
   --shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
   --shadow-lg: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  /* 9x 룩은 blur가 0인 하드 오프셋이 전부다 — 번지는 그림자를 넣지 말 것. */
+  --shadow-modal: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  --shadow-pop: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  --shadow-accent: 2px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-accent-lg: 2px 2px 0 rgba(0, 0, 0, 0.5);
   --neon-blue: #000080;
   --neon-purple: #800080;
   --glass-bg: #c0c0c0;
@@ -471,6 +492,24 @@
   --glass-blur: 22px;
   --duration-calm: 280ms;
   --ease-calm: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  /* 인터랙티브 크롬(버튼/행/입력)의 단일 모션 계약. `transition: all`은 layout·
+     paint 속성까지 애니메이트해서 호버 때 미세 저크로 읽힌다 — 새 규칙에서도
+     `all` 대신 이 토큰을 쓸 것. 속성 목록을 여기서만 관리한다. */
+  --tr-ui: background-color 150ms var(--ease-standard),
+           border-color 150ms var(--ease-standard),
+           color 150ms var(--ease-standard),
+           box-shadow 200ms var(--ease-standard),
+           transform 200ms var(--ease-standard),
+           opacity 150ms var(--ease-standard);
+  --tr-ui-calm: background-color var(--duration-calm) var(--ease-calm),
+                border-color var(--duration-calm) var(--ease-calm),
+                color var(--duration-calm) var(--ease-calm),
+                box-shadow var(--duration-calm) var(--ease-calm),
+                transform var(--duration-calm) var(--ease-calm);
+  /* 마이크로 배지(LIVE, N/4, v1.1.7, RDP) 전용 최소 크기. 이전엔 8/8.5/9px이
+     섞여 있었다 — 9px 아래로 내리지 말 것(한글 글리프가 뭉갠다). */
+  --fs-micro: 9px;
 }
 
 /* ─── Light mode overrides for structural elements ─── */
@@ -554,7 +593,7 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: var(--tr-ui);
 }
 .settings-close-btn:hover { background: var(--accent-red); color: #fff; border-color: var(--accent-red); }
 
@@ -582,13 +621,13 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  transition: all var(--duration-calm) var(--ease-calm);
+  transition: var(--tr-ui-calm);
 }
 .settings-theme-btn.active {
   background: var(--accent-blue);
   color: #fff;
   border-color: var(--accent-blue);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+  box-shadow: var(--shadow-accent);
 }
 .settings-theme-btn:not(.active):hover { background: var(--sm-row-hover); color: var(--text-main); }
 
@@ -727,7 +766,7 @@
   gap: 8px;
   letter-spacing: 0.2px;
   transition: opacity 0.15s, transform 0.15s;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  box-shadow: var(--shadow-accent-lg);
 }
 .settings-save-btn:hover { opacity: 0.9; transform: translateY(-1px); }
 .settings-save-btn:active { transform: translateY(0); opacity: 1; }
@@ -934,7 +973,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   height: 70px; padding: 0 24px;
   display: flex; align-items: center; justify-content: space-between;
   background: var(--bg-main);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  /* 배경은 var(--bg-main)으로 테마를 따르는데 구분선만 흰색이라, 라이트에선
+     밝은 배경 위 3% 흰선 = 아예 안 보였다. */
+  border-bottom: 1px solid var(--border);
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .logo-icon {
@@ -967,7 +1008,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   border: 1px solid var(--border);
   background: transparent; color: var(--text-muted);
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s;
+  cursor: pointer; transition: var(--tr-ui);
 }
 .refresh-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
 
@@ -995,7 +1036,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: var(--tr-ui);
 }
 .view-toggle button svg {
   opacity: 0.7;
@@ -1084,7 +1125,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   border-radius: var(--radius);
   position: relative;
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: var(--tr-ui-calm);
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow);
@@ -1152,7 +1193,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 
 /* ─── Glow Border Engine ─── */
 .bento-cell:hover {
-  border-color: rgba(255, 255, 255, 0.1);
+  /* 라이트 테마에서 흰 카드에 10% 흰 테두리를 얹으면 호버할 때 테두리가 되레
+     사라진다. 518줄의 `[data-theme="light"] .bento-cell` 오버라이드는 특정도가
+     같고(둘 다 0,2,0) 여기보다 위에 있어서 이 :hover를 못 이긴다 — 토큰을 쓸 것. */
+  border-color: var(--accent-soft);
   box-shadow: var(--shadow-lg);
 }
 
@@ -1323,7 +1367,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   color: var(--text-main);
   font-size: 12px;
   outline: none;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: var(--tr-ui);
 }
 .edit-input:focus {
   border-color: var(--accent-soft);
@@ -1347,7 +1391,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: var(--tr-ui);
   color: var(--text-muted);
 }
 .edit-btn:hover { background: var(--accent-wash); color: var(--accent-soft); }
@@ -1507,7 +1551,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  transition: all 0.2s ease;
+  transition: var(--tr-ui);
   gap: 16px;
 }
 
@@ -1564,7 +1608,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid var(--glass-border) !important;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--glass-shine) !important;
+  box-shadow: var(--shadow-modal), inset 0 0 0 1px var(--glass-shine) !important;
   transform: translateZ(0); /* Hardware Acceleration */
   will-change: transform, opacity;
   animation: modal-scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
@@ -1840,32 +1884,62 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  background: var(--bg-surface, rgba(14,16,22,0.6));
+  /* 레일 배경색을 로컬 변수로 뽑아둔다 — .session-card__live의 링이 카드 바탕과
+     같은 색이어야 하는데, 라이트 테마는 아래에서 이 배경을 --bg-card로 갈아끼운다.
+     변수를 안 쓰면 링만 --bg-surface로 남아 흰 카드 위에 회색 후광이 생긴다. */
+  --rail-bg: var(--bg-surface, rgba(14,16,22,0.6));
+  background: var(--rail-bg);
   border: 1px solid var(--border);
-  /* border-radius: var(--radius); */
+  /* 모서리는 각진 채로 둔다 — .multiview-stage에 패딩이 없어 레일 우측이 창
+     가장자리에 붙는다. 거기에 radius를 주면 잘린 것처럼 보인다. */
   overflow-y: auto;
 }
 .multiview-rail__title {
-  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* 한글엔 text-transform: uppercase가 아무 효과가 없고, 10px 한글에 0.8px
+     자간은 글자를 흩어놓기만 한다. 둘 다 빼고 11px로 올려 가독성을 확보. */
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
   color: var(--text-muted);
   padding: 2px 4px;
+}
+.multiview-rail__count {
+  font-size: var(--fs-micro);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-soft);
+  background: var(--accent-wash);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 999px;
 }
 .multiview-rail__list {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
+/* 표면색은 전부 테마 토큰을 쓴다. 예전엔 `rgba(255,255,255,0.02~0.05)`를 카드
+   배경·호버·아이콘칩·힌트에 하드코딩했는데, 그건 어두운 바탕을 전제한 값이라
+   **라이트 테마에서 흰 레일 위에 흰색을 2% 얹는 꼴**이 됐다 — 카드 4장이 경계선만
+   남고 통째로 사라져 보였다(레일 자체만 `[data-theme="light"]` 오버라이드가 있어서
+   그동안 안 드러났다). 새 표면을 추가할 땐 `--sm-row-bg`/`--bg-inset` 같은
+   테마별로 정의된 토큰을 쓸 것 — rgba(255,255,255,…)를 다시 넣지 말 것. */
+/* 카드는 세로 스택이 됐다(상단 identity 행 + 지표 블록). 레일 **폭은 절대 늘리지
+   말 것** — 레일은 그리드의 형제라 넓히면 슬롯이 좁아지고, 살아있는 mstsc는 세션
+   해상도를 중간에 재협상하지 못해 smart-sizing이 화면을 뿌옇게 늘린다
+   (swallow-resize-is-rdp-limit). 채울 게 생기면 세로로만 채운다. */
 .session-card {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   width: 100%;
   padding: 10px;
   border-radius: 10px;
-  background: rgba(255,255,255,0.02);
+  background: var(--sm-row-bg);
   border: 1px solid var(--border);
   color: var(--text-secondary);
   cursor: pointer;
@@ -1873,18 +1947,50 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
 }
 .session-card:hover:not(:disabled) {
-  background: rgba(255,255,255,0.05);
-  border-color: rgba(91,130,190,0.35);
+  background: var(--sm-row-hover);
+  border-color: var(--accent-soft);
 }
 .session-card:active:not(:disabled) { transform: scale(0.98); }
 .session-card:disabled { opacity: 0.4; cursor: not-allowed; }
 .session-card.active {
   background: var(--accent-wash, rgba(91,130,190,0.12));
   border-color: var(--accent-blue);
-  box-shadow: inset 3px 0 0 var(--accent-blue);
+  /* 좌측 막대는 여기서 inset box-shadow로 그리던 것을 .session-card__marker로
+     옮겼다 — 카드마다 켜졌다 꺼지는 대신 하나가 카드 사이를 미끄러지게 하려면
+     실제 엘리먼트여야 한다(framer-motion layoutId). 여기에 box-shadow를 다시
+     넣으면 미끄러지는 막대와 겹쳐 두 줄로 보인다. */
 }
-.session-card.empty { color: var(--text-muted); }
+.session-card__marker {
+  position: absolute;
+  left: -1px;          /* 카드 1px 보더 위에 얹어 왼쪽 모서리에 딱 붙인다 */
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent-blue);
+}
+/* 빈 슬롯은 세션이 아니라 "여기에 할당하세요"다. 점선 테두리 + 배경 제거로
+   채워진 카드보다 뒤로 물러나게 해서, 훑어볼 때 실제 세션만 눈에 걸리게 한다. */
+/* `:not(.active)`가 필수다 — 이 규칙은 소스 순서상 `.session-card.active`보다
+   뒤에 있고 특정도가 같아서(0,2,0), 빼면 `background: transparent`가 활성 카드의
+   accent-wash를 이긴다. 첫 실행 땐 슬롯 0이 활성이면서 비어있는 게 기본 상태라
+   "활성인데 활성으로 안 보이는" 카드가 곧바로 눈에 띈다. */
+.session-card.empty:not(.active) {
+  background: transparent;
+}
+.session-card.empty {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+.session-card.empty:hover:not(:disabled) { background: var(--sm-row-bg); }
+.session-card__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
 .session-card__icon {
+  position: relative;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1892,11 +1998,37 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: rgba(255,255,255,0.04);
+  background: var(--bg-inset);
   color: var(--text-secondary);
 }
+/* 연결 상태 점 — 아이콘 칩 우하단에 붙는 프레즌스 배지. 텍스트 줄에 넣으면
+   이름의 ellipsis 계산에 끼어들어서 칩 모서리에 절대배치한다. 링은 카드 배경색과
+   같은 색으로 둘러 아이콘 위에서도 점이 또렷하게 떨어져 보이게 한 것. */
+.session-card__live {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 0 2px var(--rail-bg);
+}
+/* 연결된 슬롯은 칩에 옅은 초록을 깔아 대기 중인 슬롯과 한눈에 갈린다.
+   `:not(.active)`가 핵심 — 활성 슬롯은 파란 강조를 유지해야 하는데, 그냥
+   `.live .icon`으로 두면 초록 배경 위에 파란 아이콘이 겹쳐 색이 싸운다. */
+.session-card.live:not(.active) .session-card__icon {
+  background: rgba(95, 176, 138, 0.14);
+  color: var(--accent-green);
+}
 .session-card.active .session-card__icon { color: var(--accent-blue); }
-.session-card.empty .session-card__icon { color: var(--text-muted); opacity: 0.6; }
+.session-card.empty .session-card__icon {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+/* 빈 카드는 배경이 없다 — 칩만 채워져 있으면 물러나야 할 카드가 되레 튄다.
+   위와 같은 이유로 활성 카드는 제외(활성 표시가 칩까지 죽으면 안 된다). */
+.session-card.empty:not(.active) .session-card__icon { background: transparent; }
 .session-card__text {
   flex: 1;
   min-width: 0;
@@ -1922,15 +2054,114 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 }
 .session-card__hint {
   flex-shrink: 0;
-  font-size: 8.5px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   color: var(--text-muted);
-  background: rgba(255,255,255,0.04);
+  background: var(--bg-inset);
   border: 1px solid var(--border);
   padding: 2px 5px;
   border-radius: 5px;
 }
-[data-theme="light"] .multiview-rail { background: var(--bg-card); }
+/* ─── 세션 카드 실시간 지표 ───
+   210px 레일 안(패딩 제외 190px)에 들어가야 하므로 라벨은 고정 32px, 값은 남는
+   폭을 쓰고 넘치면 ellipsis. 새 데이터를 가져오는 게 아니라 이미 5초마다 폴링해
+   버려지던 필드(cpu_usage/memory_demand/uptime/latency)를 꺼내 쓴 것이다. */
+.session-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.session-metric {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* 라벨 칸 46px — 영어 라벨이 기준이다. 9px/800 기준으로 "Uptime"≈33px,
+   "Latency"≈38px라 처음 잡았던 32px는 한국어("가동"/"지연")에서만 맞고 영어에서
+   넘쳤다. 새 지표를 추가할 때 영어 라벨 폭을 먼저 볼 것 — 한국어가 항상 더 짧다. */
+.session-metric__k {
+  flex: 0 0 46px;
+  font-size: var(--fs-micro);
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-metric__bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+.session-metric__bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent-blue);
+  transition: width var(--duration-calm) var(--ease-calm);
+}
+.session-metric__v {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+/* 값이 긴 항목(메모리·가동시간·IP)은 남는 폭을 다 쓰고 넘치면 자른다 —
+   줄바꿈되면 카드 높이가 들쭉날쭉해져 4장이 어긋나 보인다. */
+.session-metric__v--wide {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* ─── 호스트 시스템 패널 ───
+   세션 카드 4장 아래 남던 빈 공간. 원격 세션을 4개 돌리는 중에 정작 이 PC가
+   버티는지를 볼 곳이 없었다. useSystemStats는 대시보드와 쿼리 키가 같아 캐시를
+   공유하므로 폴링이 늘지 않는다. */
+.rail-host {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rail-host__title {
+  font-size: var(--fs-micro);
+  font-weight: 800;
+  color: var(--text-muted);
+  padding: 0 4px 4px;
+}
+.rail-host__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 4px;
+}
+.rail-host__k {
+  font-size: var(--fs-micro);
+  font-weight: 800;
+  color: var(--text-muted);
+}
+.rail-host__v {
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .multiview-rail { --rail-bg: var(--bg-card); }
 
 .multiview-grid {
   flex: 1;
@@ -2078,7 +2309,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   border-radius: 24px; 
   padding: 32px; 
   width: 400px; 
-  box-shadow: 0 30px 60px rgba(0,0,0,0.6), inset 0 0 0 1px var(--glass-shine);
+  box-shadow: var(--shadow-pop), inset 0 0 0 1px var(--glass-shine);
   animation: modal-scale-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   position: relative;
   overflow: hidden;
@@ -2123,13 +2354,13 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .selector-item {
   display: flex; align-items: center; gap: 12px; padding: 12px;
   background: rgba(255,255,255,0.03); border-radius: 10px; cursor: pointer;
-  font-size: 13px; margin-bottom: 6px; transition: all 0.15s; border: 1px solid transparent;
+  font-size: 13px; margin-bottom: 6px; transition: var(--tr-ui); border: 1px solid transparent;
 }
 .selector-item:hover { background: var(--accent-wash); border-color: var(--accent-soft); color: var(--text-main); }
 .selector-item.disabled { cursor: not-allowed; opacity: 0.45; }
 .selector-item.disabled:hover { background: rgba(255,255,255,0.03); border-color: transparent; color: inherit; }
 .selector-item-badge {
-  margin-left: auto; font-size: 9px; font-weight: 800; text-transform: uppercase;
+  margin-left: auto; font-size: var(--fs-micro); font-weight: 800; text-transform: uppercase;
   letter-spacing: 0.5px; padding: 2px 8px; border-radius: 4px;
   background: rgba(255,255,255,0.08); color: var(--text-muted);
 }
@@ -2380,7 +2611,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 }
 .license-row__tag {
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   color: var(--accent-blue);
   background: var(--accent-wash);
@@ -2563,5 +2794,52 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .hd-btn--danger:hover:not(:disabled) {
   background: rgba(217, 115, 123, 0.12);
   border-color: var(--accent-red);
+}
+
+/* ─── 키보드 포커스 링 ───
+   이 앱엔 retro 테마의 점선 outline 하나 말고는 포커스 표시가 **전혀** 없었다.
+   Tab으로 이동하면 지금 어느 버튼에 있는지 화면에 아무 단서가 안 남는다는 뜻이다.
+   입력 필드 4곳은 `outline: none`으로 브라우저 기본 링까지 꺼놓고 border 색만
+   1px 바꿨는데, 그건 표시로 치기엔 너무 약하다.
+
+   `:focus`가 아니라 `:focus-visible`을 쓰는 게 핵심 — 마우스로 클릭했을 땐 안
+   뜨고 키보드로 이동했을 때만 뜬다. 그래서 마우스 사용자 눈엔 아무것도 안 바뀐다
+   (예전에 디자이너들이 `outline: none`을 갈긴 이유가 사라진 것).
+
+   retro 규칙(`[data-theme="retro"] button:focus-visible`)은 특정도가 더 높아
+   순서와 무관하게 그대로 이긴다 — 9x 룩의 점선 링이 유지된다.
+   새 인터랙티브 요소에 `outline: none`을 쓸 거면 반드시 대체 링을 같이 줄 것. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+/* 사이드바는 overflow:hidden이라 바깥으로 그린 링이 좌우로 잘린다 — 안쪽으로 그린다.
+   슬롯 헤더 바(36px)도 마찬가지로 여유가 없어 안쪽에 그려야 잘리지 않는다. */
+.hd-nav-item:focus-visible,
+.hd-sidebar__collapse-btn:focus-visible,
+.control-group button:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ─── 모션 감소(prefers-reduced-motion) ───
+   App.css에만 무한 반복 애니메이션이 여러 개 있다(led-pulse-green/orange/red,
+   dotPulse, static-noise, noise-anim, pulse-blue, hard-glitch). 전정기관 장애가
+   있는 사용자에게 이건 접근성 문제이자 실제 불편이라 OS 설정을 존중해야 한다.
+   duration을 0으로 두지 않고 0.01ms로 두는 게 표준 레시피다 — `forwards`/`both`
+   애니메이션이 최종 상태를 그대로 적용하도록 완료는 시키되 눈에 안 보이게 한다
+   (`animation: none`으로 바꾸면 등장 애니메이션이 시작 상태에 갇혀 사라진다).
+   이 블록을 지우거나 새 무한 애니메이션에 예외를 두지 말 것. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
