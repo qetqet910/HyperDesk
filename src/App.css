@@ -1831,30 +1831,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   border: none;
   border-radius: 0;
 }
-/* Immersive header FLOATS (absolute) so the content area — and therefore the
-   VM — keeps 100% of the screen at native resolution and never moves when the
-   bar appears. The bar is normally COVERED by the Win32 surface; on top-edge
-   hover the Rust cursor poller crops the VM's top band via SetWindowRgn
-   (swallow.rs apply_reveal), letting this bar show through and take clicks. */
-.multiview-container.immersive .slot-header-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  /* Always painted at its final position. The VM surface physically covers it,
-     so it costs nothing while hidden — and when the top-edge crop opens
-     (SetWindowRgn, instant), the header is ALREADY there, appearing in the
-     same frame. The old translateY(-100%) slide-in ran 180ms AFTER the
-     instant crop, so the user saw a black band first and then the header
-     traveling down — that lag was the "not smooth" jank. Do not re-add a
-     transform/opacity transition here: any CSS animation is by definition
-     slower than the native crop it follows. */
-  pointer-events: none;
-}
-.multiview-container.immersive.edge-revealed .slot-header-bar {
-  pointer-events: auto;
-}
+/* 몰입모드에서도 헤더 필은 다른 모드와 똑같이 동작한다 — set_header_cutout이
+   자식 창에 항상 구멍을 뚫으므로 상단 호버 크롭(옛 apply_reveal)이 필요 없다.
+   그 크롭이 열릴 때 보이던 검은 띠가 "마우스 대면 내려오는 검정 배경"이었고,
+   메커니즘째로 제거했다. 여기에 immersive 전용 헤더 규칙을 다시 만들지 말 것. */
 
 /* NOTE: there is deliberately NO separate multiview header. A swallowed Win32
    child renders physically above the WebView2 surface, so the only band where
@@ -2189,33 +2169,68 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 }
 .swallow-slot.active { border: 1px solid rgba(91, 130, 190, 0.5); }
 
-/* Header bar: in-flow 36px strip, always rendered.
-   Win32 window fills slot-content-area below this bar,
-   so these buttons are always above the native window and fully clickable. */
+
+/* Header bar: 36px strip with floating fit-width pill design.
+   Win32 window fills slot-content-area below this 36px band,
+   so floating pill controls are always positioned cleanly over the reserved top zone. */
 .slot-header-bar {
+  /* 콘텐츠 영역 안에 떠 있다. 예전엔 위에 36px 밴드를 예약했는데 그 띠가
+     .swallow-slot의 #000을 드러내 '상단 검정 헤더'로 보였다. 이제 Win32 자식이
+     슬롯 전체를 채우고, 이 필의 사각형만 도려내(setHeaderCutout) 비쳐 보이게 한다.
+     left만 인라인 스타일로 들어온다(가로 드래그). top은 여기서 0으로 고정 —
+     아래로 내려가면 VM 한복판을 가리고, 세로 위치를 저장했더니 한 번 옮긴 값이
+     계속 남아 기본값을 바꿔도 소용이 없었다. */
+  position: absolute;
+  top: 0;
+  z-index: 10;
   height: 36px;
-  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px;
-  background: rgba(10, 11, 16, 0.72);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  gap: 6px;
-  /* Smooth the empty↔active tint change; never animate layout props here —
-     the Win32 child below is positioned off this bar's height. */
-  transition: background-color 0.25s ease, border-color 0.25s ease;
+  width: fit-content;
+  max-width: calc(100% - 16px);
+  padding: 0 14px;
+  cursor: grab;
+  /* 구멍 뒤에 있는 건 VM이 아니라 슬롯 배경(#000)이다 — 그 자리의 VM 픽셀은
+     region으로 잘려 없어졌다. 그래서 알파를 낮출수록 검정이 비칠 뿐 "유리"가
+     되지 않는다. backdrop-filter도 블러할 대상이 검정뿐이라 비용만 든다.
+     불투명한 슬레이트로 칠하고 테두리/그림자로 떠 있는 느낌을 만든다. */
+  background: #1b2130;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  /* Floating pill slide-down & fade animation */
+  animation: pillSlideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
+}
+
+@keyframes pillSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.slot-header-bar:hover {
+  background: rgba(20, 25, 38, 0.92);
+  border-color: rgba(91, 130, 190, 0.35);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 /* Accent tint when a session is live */
 .slot-header-bar--active {
-  background: rgba(8, 12, 20, 0.88);
-  border-bottom-color: rgba(91, 130, 190, 0.22);
+  background: rgba(12, 18, 30, 0.88);
+  border-color: rgba(91, 130, 190, 0.3);
 }
 
 /* Placeholder label shown when slot is empty or loading */
 .slot-header-bar__label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.3px;
@@ -2843,3 +2858,19 @@ textarea:focus-visible,
   }
 }
 
+
+/* 필 드래그 — 잡는 동안은 커서와 전환을 바꿔 "들린" 느낌을 준다. transition을
+   꺼야 포인터를 따라오는 게 지연 없이 붙는다(구멍은 즉시 갱신되는데 필만 늦게
+   따라오면 VM에 구멍이 따로 노는 것처럼 보인다). */
+.slot-header-bar.dragging {
+  cursor: grabbing;
+  transition: none;
+  animation: none;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+/* x가 중앙 정렬(아직 안 옮김) 상태일 때 쓰는 보조 클래스는 두지 않는다 —
+   left:-1 이면 아래 규칙이 가로 중앙으로 보낸다. */
+.slot-header-bar[style*="left: -1px"] {
+  left: 50% !important;
+  transform: translateX(-50%);
+}

@@ -11,7 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, IsWindow, HWND_TOP, GetWindowRect,
     SetForegroundWindow, BringWindowToTop, SetMenu, PostMessageW, WM_CLOSE,
 };
-use windows::Win32::Graphics::Gdi::{ScreenToClient, ClientToScreen, CreateRectRgn, SetWindowRgn, HRGN};
+use windows::Win32::Graphics::Gdi::{ScreenToClient, ClientToScreen, CreateRectRgn, CreateRoundRectRgn, SetWindowRgn, CombineRgn, DeleteObject, RGN_DIFF, HRGN};
 use windows::Win32::Foundation::{RECT, POINT};
 
 use tauri::{AppHandle, Emitter};
@@ -166,6 +166,11 @@ pub struct SwallowInfo {
     /// between stabilization polls (1s when idle), so focus_window re-hides it
     /// immediately using this pid instead of waiting for the next poll.
     pub vmconnect_pid: Option<u32>,
+    /// 떠 있는 헤더 필이 차지하는 사각형(부모-클라이언트 좌표, 물리 픽셀).
+    /// 이 자리는 자식 창에서 도려내져 그 아래 DOM이 비쳐 보인다 — swallow된
+    /// 자식이 WebView2 표면 위에 그려지므로 z-index로는 필을 띄울 수 없다.
+    /// None이면 구멍 없음(필이 슬롯 밖이거나 세션이 없을 때).
+    pub header_cutout: Option<CutoutRect>,
 }
 
 const DEFAULT_OFFSET: i32 = 0; // Styles successfully removed
@@ -184,6 +189,9 @@ const HORIZONTAL_BUFFER: i32 = 0; // Remove buffer for 1:1 fit at 100% DPI
 /// of the swallow) would periodically stomp the reveal crop back to "hidden"
 /// — RDP never showed this bug because its offset is always 0 and nothing
 /// else touches its region after the initial swallow.
+/// 자식 창에서 도려낼 사각형(left, top, right, bottom) — 창 자신의 좌표계.
+type CutoutRect = (i32, i32, i32, i32);
+
 static REVEAL_BAND: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
 /// Pure geometry for the chrome clip region: given the left/top chrome offsets,
@@ -191,7 +199,7 @@ static REVEAL_BAND: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32:
 /// rect (left, top, right, bottom) in the window's own coordinates — or None
 /// when there is nothing to clip (region should be cleared). Split out from the
 /// Win32 call so the geometry that caused the white-border bugs is unit-testable.
-fn chrome_region_rect(offset_x: i32, offset: i32, band: i32, width: i32, height: i32) -> Option<(i32, i32, i32, i32)> {
+fn chrome_region_rect(offset_x: i32, offset: i32, band: i32, width: i32, height: i32) -> Option<CutoutRect> {
     let top = offset + band;
     if top == 0 && offset_x == 0 {
         None
@@ -202,20 +210,76 @@ fn chrome_region_rect(offset_x: i32, offset: i32, band: i32, width: i32, height:
 
 /// Crops rows 0..offset and cols 0..offset_x (the window's own non-removable
 /// chrome, e.g. VMConnect's ribbon) PLUS the current immersive reveal band,
-/// or clears the region entirely when there is nothing to hide.
-fn apply_chrome_region(hwnd: HWND, offset_x: i32, offset: i32, width: i32, height: i32) {
+/// MINUS `cutout` — a hole punched through the window so the floating header
+/// pill underneath shows through.
+///
+/// The hole is the only way a DOM element can appear ON TOP of a swallowed
+/// session: the Win32 child renders physically above the WebView2 surface, so
+/// z-index cannot reach it. Cutting the child instead lets the page show through.
+/// `cutout` is in the child window's OWN coordinates (see `cutout_in_window`).
+fn apply_chrome_region(
+    hwnd: HWND,
+    offset_x: i32,
+    offset: i32,
+    width: i32,
+    height: i32,
+    cutout: Option<CutoutRect>,
+) {
     let band = REVEAL_BAND.load(std::sync::atomic::Ordering::Relaxed);
+    let base = chrome_region_rect(offset_x, offset, band, width, height);
     unsafe {
-        match chrome_region_rect(offset_x, offset, band, width, height) {
-            None => { let _ = SetWindowRgn(hwnd, HRGN::default(), BOOL::from(true)); }
-            Some((l, t, r, b)) => {
-                let rgn = CreateRectRgn(l, t, r, b);
-                if !rgn.is_invalid() {
-                    let _ = SetWindowRgn(hwnd, rgn, BOOL::from(true));
-                }
+        if base.is_none() && cutout.is_none() {
+            let _ = SetWindowRgn(hwnd, HRGN::default(), BOOL::from(true));
+            return;
+        }
+        // 크롬 마스크가 필요 없는 경우(RDP: offset 0, band 0)에도 구멍을 뚫으려면
+        // region 자체는 있어야 하므로 창 전체를 베이스로 삼는다. 이 사각형은
+        // chrome_region_rect가 돌려주는 것과 같은 좌표계다.
+        let (l, t, r, b) = base.unwrap_or((
+            offset_x,
+            offset,
+            offset_x + width + (HORIZONTAL_BUFFER * 2),
+            offset + height,
+        ));
+        let rgn = CreateRectRgn(l, t, r, b);
+        if rgn.is_invalid() {
+            return;
+        }
+        if let Some((cl, ct, cr, cb)) = cutout {
+            // 구멍은 **둥근 사각형**이어야 한다. 사각으로 뚫으면 필의 border-radius
+            // 바깥 네 모서리에서 VM이 사라진 자리가 그대로 드러나는데, 그 자리엔
+            // 슬롯 배경(#000)밖에 없어서 "필 배경이 검다"로 보인다.
+            // 필은 border-radius: 9999px(완전한 알약)이므로 타원 지름 = 높이다.
+            let d = (cb - ct).max(0);
+            let hole = CreateRoundRectRgn(cl, ct, cr, cb, d, d);
+            if !hole.is_invalid() {
+                let _ = CombineRgn(rgn, rgn, hole, RGN_DIFF);
+                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(hole.0));
             }
         }
+        // SetWindowRgn이 성공하면 region 소유권은 시스템으로 넘어가므로
+        // rgn을 DeleteObject 하면 안 된다.
+        let _ = SetWindowRgn(hwnd, rgn, BOOL::from(true));
     }
+}
+
+/// 필 사각형을 **슬롯 콘텐츠 영역 기준 상대 좌표**(물리 픽셀)에서 자식 창 자신의
+/// 좌표계로 옮긴다.
+///
+/// 상대 좌표를 쓰는 이유: framed_rect가 창을 `x - HORIZONTAL_BUFFER - offset_x,
+/// y - offset`에 놓으므로 콘텐츠 원점(슬롯의 x,y)은 창 좌표로 항상
+/// `(HORIZONTAL_BUFFER + offset_x, offset)`이다 — 슬롯이 화면 어디로 움직이든
+/// 이 값은 변하지 않는다. 절대 좌표를 받아 슬롯 위치를 빼는 방식으로 하면
+/// 슬롯이 움직인 뒤 필 좌표가 도착할 때 한 프레임 어긋난 구멍이 뚫린다.
+fn cutout_in_window(
+    offset_x: i32,
+    offset: i32,
+    rel: (i32, i32, i32, i32),
+) -> CutoutRect {
+    let (rx, ry, rw, rh) = rel;
+    let l = rx + HORIZONTAL_BUFFER + offset_x;
+    let t = ry + offset;
+    (l, t, l + rw, t + rh)
 }
 
 /// Window rect (x, y, w, h) that makes the swallowed content's video area exactly
@@ -227,7 +291,7 @@ fn apply_chrome_region(hwnd: HWND, offset_x: i32, offset: i32, width: i32, heigh
 /// border shows inside the region. The region (apply_chrome_region) stays slot-
 /// sized and clips any excess, so erring slightly large here is safe.
 /// For RDP/Horizon offset_x == offset == 0, so this is a no-op (slot rect).
-fn framed_rect(x: i32, y: i32, w: i32, h: i32, offset_x: i32, offset: i32) -> (i32, i32, i32, i32) {
+fn framed_rect(x: i32, y: i32, w: i32, h: i32, offset_x: i32, offset: i32) -> CutoutRect {
     (
         x - HORIZONTAL_BUFFER - offset_x,
         y - offset,
@@ -1044,6 +1108,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
             offset,
             offset_x,
             vmconnect_pid,
+            header_cutout: None,
         });
 
         let (fx, fy, fw, fh) = framed_rect(x, y, width, height, offset_x, offset);
@@ -1055,7 +1120,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
 
         // Clip the non-removable chrome (e.g. VMConnect ribbon + left inset),
         // composed with any currently-active immersive reveal band.
-        apply_chrome_region(child_hwnd, offset_x, offset, width, height);
+        apply_chrome_region(child_hwnd, offset_x, offset, width, height, None);
     }
 
     // NOTE: NO WS_EX_LAYERED fade-in here. A layered child window kept mstsc from
@@ -1108,13 +1173,13 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                 }
             }
 
-            let (target_rect, is_visible, is_active) = {
+            let (target_rect, is_visible, is_active, cutout) = {
                 let state = lock_state();
                 if let Some(info) = state.get(&s_id) {
-                    if info.child_hwnd != h_child_raw { break; } 
-                    ((info.x, info.y, info.width, info.height), info.is_visible, true)
+                    if info.child_hwnd != h_child_raw { break; }
+                    ((info.x, info.y, info.width, info.height), info.is_visible, true, info.header_cutout)
                 } else {
-                    ((0, 0, 0, 0), false, false)
+                    ((0, 0, 0, 0), false, false, None)
                 }
             };
             if !is_active { break; }
@@ -1210,7 +1275,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                     // Re-apply chrome clip region in case the app reset it — composed
                     // with any active immersive reveal band via apply_chrome_region,
                     // so this can never stomp a reveal the top-edge poller just made.
-                    apply_chrome_region(h_child, offset_x_cap, offset_cap, target_rect.2, target_rect.3);
+                    apply_chrome_region(h_child, offset_x_cap, offset_cap, target_rect.2, target_rect.3, cutout);
                     interval_ms = FAST_MS; // app fought back — watch closely again
                 } else {
                     interval_ms = (interval_ms * 2).min(SLOW_MS); // stable — ease off
@@ -1317,6 +1382,31 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// 떠 있는 헤더 필의 자리를 자식 창에서 도려낸다. `pill`은 **슬롯 콘텐츠 영역
+/// 기준 상대 좌표**(물리 픽셀)이고, None이면 구멍을 없앤다.
+///
+/// 필을 드래그할 때마다 프론트엔드가 부른다. region은 자식 창을 실제로 자르므로,
+/// 구멍 위치가 필과 어긋나면 VM 화면에 엉뚱한 사각 구멍이 뚫린 것처럼 보인다 —
+/// 좌표 변환은 cutout_in_window 한 곳에만 두고 여기서 다른 식을 쓰지 말 것.
+pub fn set_header_cutout(slot_id: &str, pill: Option<CutoutRect>) {
+    let mut state = lock_state();
+    let Some(info) = state.get_mut(slot_id) else { return };
+
+    let mapped = pill.map(|p| cutout_in_window(info.offset_x, info.offset, p));
+    if info.header_cutout == mapped {
+        return;
+    }
+    info.header_cutout = mapped;
+
+    if !info.is_visible {
+        return;
+    }
+    let hwnd = HWND(info.child_hwnd as *mut _);
+    if unsafe { IsWindow(hwnd) }.as_bool() {
+        apply_chrome_region(hwnd, info.offset_x, info.offset, info.width, info.height, mapped);
+    }
+}
+
 pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
     let mut state = lock_state();
     if let Some(info) = state.get_mut(slot_id) {
@@ -1386,6 +1476,9 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
                         tx, ty, tw, th,
                         SWP_NOCOPYBITS | SWP_NOACTIVATE | SWP_NOOWNERZORDER
                     );
+
+                    // Re-apply window region clipping to prevent child window from overflowing slot bounds
+                    apply_chrome_region(hwnd, info.offset_x, info.offset, width, height, info.header_cutout);
                 }
             }
         }
@@ -1421,137 +1514,17 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
     });
 }
 
-// ─── Immersive mode: top-edge cursor watcher ─────────────────────────────────
+// ─── 상단 호버 리빌은 제거됨 ────────────────────────────────────────────────
 //
-// In immersive mode the header floats (position:absolute) UNDER the VM surface
-// so the VM owns 100% of the screen at native resolution. Mouse moves over the
-// VM go to the VM's process — the webview never sees them — so the top edge is
-// detected by an OS cursor poll. The reveal itself is a SetWindowRgn crop of
-// the VM's top band: the WebView header underneath shows through and receives
-// clicks, and the VM never moves or resizes (no scaling/relayout churn).
-// ponytail: 80ms polling; swap for a WH_MOUSE_LL hook only if it shows up in
-// profiles.
-
-static IMMERSIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Poll-loop clock base + a "hold reveal until" deadline (ms since base). Set by
-/// flash_immersive_header so a slot switch pops the header for ~1s even with the
-/// cursor nowhere near the top edge.
-static POLL_CLOCK: OnceLock<std::time::Instant> = OnceLock::new();
-static HOLD_UNTIL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-fn poll_now_ms() -> u64 {
-    POLL_CLOCK.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
-}
-
-/// The reveal band at full height (36 CSS px → physical px via the main window DPI).
-fn full_band() -> i32 {
-    use windows::Win32::UI::HiDpi::GetDpiForWindow;
-    let main = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
-    let dpi = if main != 0 { unsafe { GetDpiForWindow(HWND(main as *mut _)) } } else { 96 };
-    (36 * dpi.max(96) as i32) / 96
-}
-
-/// Set the reveal crop band to an exact physical-px height and re-clip every
-/// visible swallowed window. Driving the band directly (not just on/off) lets the
-/// hide path RAMP it down in step with the DOM header's slide-up, so the black
-/// header band shrinks together with the header instead of vanishing a frame late.
-fn set_reveal_band_px(band: i32) {
-    REVEAL_BAND.store(band, std::sync::atomic::Ordering::Relaxed);
-    let entries: Vec<(isize, i32, i32, i32, i32)> = lock_state().values()
-        .filter(|i| i.is_visible)
-        .map(|i| (i.child_hwnd, i.offset_x, i.offset, i.width, i.height))
-        .collect();
-    for (raw, ox, oy, w, h) in entries {
-        let hwnd = HWND(raw as *mut _);
-        if !unsafe { IsWindow(hwnd) }.as_bool() { continue; }
-        apply_chrome_region(hwnd, ox, oy, w, h);
-    }
-}
-
-/// Crop (shown) or restore (hidden) the top 36-CSS-px band of every visible
-/// swallowed window, composing with each window's own chrome mask via the
-/// shared REVEAL_BAND (see its doc comment for why this must be shared).
-fn apply_reveal(shown: bool) {
-    set_reveal_band_px(if shown { full_band() } else { 0 });
-}
-
-/// Force the immersive header to reveal for `ms`, then auto-hide — used on slot
-/// switch so the user sees which slot is now active (the header's 1~4 highlight)
-/// without having to hunt for the top edge.
-pub fn flash_immersive_header(ms: u64) {
-    if !IMMERSIVE.load(std::sync::atomic::Ordering::Relaxed) { return; }
-    HOLD_UNTIL_MS.store(poll_now_ms() + ms, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Notify the frontend of the reveal state so its (always-present, absolutely-
-/// positioned) header can slide in/out. Split from apply_reveal so the poller can
-/// order the emit vs. the native crop differently per direction — see set_immersive.
-fn emit_edge(shown: bool) {
-    if let Some(app) = APP_HANDLE.get() {
-        let _ = app.emit("immersive-edge", shown);
-    }
-}
-
-pub fn set_immersive(on: bool) {
-    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
-    IMMERSIVE.store(on, std::sync::atomic::Ordering::Relaxed);
-    if !on {
-        emit_edge(false);
-        apply_reveal(false); // never leave a crop behind when exiting immersive
-    }
-    static POLLER: OnceLock<()> = OnceLock::new();
-    POLLER.get_or_init(|| {
-        std::thread::spawn(|| {
-            let mut shown = false;
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(80));
-                if !IMMERSIVE.load(std::sync::atomic::Ordering::Relaxed) {
-                    if shown {
-                        shown = false;
-                        emit_edge(false);
-                        apply_reveal(false);
-                    }
-                    continue;
-                }
-                let mut p = POINT::default();
-                if unsafe { GetCursorPos(&mut p) }.is_err() { continue; }
-                // Reveal when the cursor hits the very top edge (kept shown within a
-                // generous 64px band), OR while a slot-switch flash hold is active.
-                let held = poll_now_ms() < HOLD_UNTIL_MS.load(std::sync::atomic::Ordering::Relaxed);
-                let want = held || if shown { p.y <= 64 } else { p.y <= 2 };
-                if want != shown {
-                    shown = want;
-                    if want {
-                        // SHOW: open the crop first, then the DOM header slides down
-                        // into the now-visible band.
-                        apply_reveal(true);
-                        emit_edge(true);
-                    } else {
-                        // HIDE: the header lives UNDER the VM surface, so if we closed
-                        // the crop at once the VM would instantly cover the slide-up.
-                        // Slide the DOM header up FIRST, wait out the ~180ms CSS
-                        // transition, then close the crop with a SINGLE SetWindowRgn.
-                        // (A per-step band ramp re-clipped the fullscreen VM 7× and
-                        // made it stutter — one close keeps it smooth.)
-                        emit_edge(false);
-                        std::thread::sleep(std::time::Duration::from_millis(185));
-                        // Cursor returned to the top, or a flash hold armed → re-reveal.
-                        let mut np = POINT::default();
-                        let back = unsafe { GetCursorPos(&mut np) }.is_ok() && np.y <= 2;
-                        let held2 = poll_now_ms() < HOLD_UNTIL_MS.load(std::sync::atomic::Ordering::Relaxed);
-                        if back || held2 {
-                            shown = true;
-                            apply_reveal(true);
-                            emit_edge(true);
-                        } else {
-                            apply_reveal(false);
-                        }
-                    }
-                }
-            }
-        });
-    });
-}
+// 예전엔 몰입모드에서 헤더가 VM 아래에 깔려 있고, OS 커서 폴러가 화면 최상단을
+// 감지하면 SetWindowRgn으로 VM 상단 띠를 잘라 헤더를 비췄다. 그 크롭이 열릴 때
+// 보이는 검은 띠가 사용자가 지적한 "마우스 대면 내려오는 검정 배경"이었다.
+//
+// 이제 헤더 필은 set_header_cutout이 자기 사각형만큼 자식 창에 **항상** 구멍을
+// 뚫어 띄우므로 띠도, 커서 폴링도 필요 없다. REVEAL_BAND / apply_reveal /
+// set_reveal_band_px / flash_immersive_header를 되살리지 말 것 — 구멍과 띠가
+// 같은 region을 두고 싸운다. 몰입모드의 전체화면 전환은 commands::apply_fullscreen이
+// 그대로 담당한다.
 
 /// Every distinct thread that owns a window in `frame`'s tree. mstsc keeps its
 /// input window on a different thread than the shell frame, so checking only
@@ -1906,5 +1879,37 @@ mod tests {
         assert!(excluded_hwnds().contains(&fake_hwnd), "claimed hwnd must be excluded");
         lock_claimed().remove(&fake_hwnd);
         assert!(!excluded_hwnds().contains(&fake_hwnd), "release must un-exclude it");
+    }
+}
+
+#[cfg(test)]
+mod cutout_tests {
+    use super::{cutout_in_window, framed_rect, HORIZONTAL_BUFFER};
+
+    /// 구멍 좌표가 어긋나면 VM 화면에 엉뚱한 사각 구멍이 뚫린 것처럼 보이는데,
+    /// 눈으로는 몇 px 차이를 잡기 어렵다. framed_rect와 역산이 맞는지 고정한다.
+    #[test]
+    fn cutout_lands_where_the_pill_is() {
+        // RDP: 크롬 오프셋 없음
+        let (l, t, r, b) = cutout_in_window(0, 0, (10, 4, 200, 36));
+        assert_eq!((l, t, r, b), (10 + HORIZONTAL_BUFFER, 4, 210 + HORIZONTAL_BUFFER, 40));
+    }
+
+    #[test]
+    fn cutout_compensates_vmconnect_chrome() {
+        // vmconnect: 좌 인셋 2, 상단 리본 30
+        let (l, t, r, b) = cutout_in_window(2, 30, (10, 4, 200, 36));
+        assert_eq!((l, t, r, b), (12 + HORIZONTAL_BUFFER, 34, 212 + HORIZONTAL_BUFFER, 70));
+    }
+
+    /// 콘텐츠 원점은 슬롯이 화면 어디에 있든 창 좌표로 항상 같은 자리다 —
+    /// 이게 깨지면 슬롯을 옮길 때마다 구멍이 따로 논다.
+    #[test]
+    fn content_origin_is_slot_independent() {
+        for (sx, sy) in [(0, 0), (223, 79), (1600, 400)] {
+            let (wx, wy, _, _) = framed_rect(sx, sy, 800, 600, 2, 30);
+            assert_eq!(sx - wx, HORIZONTAL_BUFFER + 2);
+            assert_eq!(sy - wy, 30);
+        }
     }
 }

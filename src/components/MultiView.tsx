@@ -35,9 +35,6 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   // makes the Rust cursor poller crop the VM's top band (SetWindowRgn), letting
   // the header show through and take clicks — the VM never moves or resizes.
   const [isImmersive, setIsImmersive] = useState(false);
-  // Whether the top-edge reveal is active (Rust cursor poller emits "immersive-edge").
-  // Drives the header's slide-in animation; the native crop itself is instant.
-  const [edgeRevealed, setEdgeRevealed] = useState(false);
   // Briefly freeze bounds sync right after a slot switch or immersive toggle so the
   // swallowed window isn't moved against a half-reflowed container.
   const [isSwitching, setIsSwitching] = useState(false);
@@ -62,6 +59,21 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
     setConnectedSlots(prev => (prev[slotId] === connected ? prev : { ...prev, [slotId]: connected }));
   }, []);
   const liveCount = Object.values(connectedSlots).filter(Boolean).length;
+  /* 떠 있는 헤더 필의 **가로** 위치만 기억한다. 세로는 항상 최상단 고정 —
+     아래로 내려가면 VM 화면 한복판을 가리고, 무엇보다 사용자가 원한 게 "상단에
+     꼭 붙어있는" 바다. 예전엔 y도 저장했는데, 한 번 드래그해두면 그 값이 계속
+     남아 기본값을 0으로 바꿔도 소용이 없었다(저장된 값이 이김).
+     슬롯별이 아니라 하나만 두는 이유: 한 화면에 슬롯 하나만 보이므로 Alt+1~4로
+     넘길 때마다 필이 다른 자리에 있으면 매번 눈으로 다시 찾아야 한다.
+     x < 0 은 "아직 안 옮김"(가로 중앙). */
+  const [pillX, setPillX] = useState<number>(() => {
+    const raw = localStorage.getItem("hd_pill_x");
+    const n = raw === null ? NaN : Number(raw);
+    return Number.isFinite(n) ? n : -1;
+  });
+  useEffect(() => {
+    try { localStorage.setItem("hd_pill_x", String(pillX)); } catch { /* 무시 */ }
+  }, [pillX]);
   // Mirrors `anyConnecting` into Rust (lib.rs's Alt+1~4 handler has no visibility
   // into React state otherwise, so it kept force-focusing a mid-connect slot's
   // native window regardless of this lock). Cleared unconditionally on unmount
@@ -69,11 +81,6 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   useEffect(() => { api.setConnectLock(anyConnecting).catch(console.error); }, [anyConnecting]);
   useEffect(() => {
     return () => { api.setConnectLock(false).catch(console.error); };
-  }, []);
-
-  useEffect(() => {
-    const unlisten = listen<boolean>("immersive-edge", (e) => setEdgeRevealed(e.payload));
-    return () => { unlisten.then(f => f()); };
   }, []);
 
   useEffect(() => {
@@ -88,13 +95,6 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
     };
   }, [activeSlot, isImmersive]);
 
-  // On slot switch while immersive, pop the header for ~1s so the user can see
-  // which slot is now active (the header's 1~4 highlight) — otherwise the switch
-  // is invisible (VM fills the screen, header hidden).
-  useEffect(() => {
-    if (isImmersive) api.flashImmersiveHeader(1000).catch(console.error);
-  }, [activeSlot]);
-
   // Leaving the multiview (unmount) while immersive must restore the OS window —
   // but only then; an F11 fullscreen the user chose themselves is left alone.
   const immersiveRef = useRef(false);
@@ -104,7 +104,6 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   useEffect(() => {
     return () => {
       if (immersiveRef.current) {
-        api.setImmersive(false).catch(console.error);
         api.setFullscreen(false).catch(console.error);
       }
     };
@@ -122,7 +121,6 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
     const next = !immersiveRef.current;
     immersiveRef.current = next;
     setIsImmersive(next);
-    api.setImmersive(next).catch(console.error);
     api.setFullscreen(next).catch(console.error);
   };
 
@@ -235,7 +233,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   //
   // The 1~4 slot switcher only appears while IMMERSIVE — there the right rail is
   // hidden (VM owns the whole screen), so the header's numbers are the only visual
-  // "which slot is active" feedback (see the flashImmersiveHeader effect above). In
+  // "which slot is active" feedback. In
   // normal mode the right rail is the switcher, so the header just carries the
   // fullscreen/immersive toggles and the numbers would be redundant with the rail.
   const headerControls = (
@@ -279,7 +277,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
   );
 
   return (
-    <div className={`multiview-container ${isImmersive ? "immersive" : ""} ${isImmersive && edgeRevealed ? "edge-revealed" : ""}`}>
+    <div className={`multiview-container ${isImmersive ? "immersive" : ""}`}>
       {/* Stage = grid + rail as a flex ROW. The rail is a real SIBLING that shrinks
           the grid (and therefore each slot's .slot-content-area), so the swallowed
           Win32 window re-fits the narrower area via its ResizeObserver — it is NOT
@@ -304,6 +302,8 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
                 headerControls={headerControls}
                 onConnectingChange={handleConnectingChange}
                 onConnectedChange={handleConnectedChange}
+                pillX={pillX}
+                onPillMove={setPillX}
               />
             );
           })}

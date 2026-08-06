@@ -515,25 +515,34 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
 
     let host = rdp_sanitize(&host);
     // Classic mstsc can't renegotiate session resolution mid-session, so connect at the
-    // primary monitor's FULL resolution and let smart sizing:i:1 scale the bitmap down
+    // primary monitor's FULL physical resolution and let smart sizing:i:1 scale the bitmap down
     // into the slot. Growing the slot then never exceeds the connect-time resolution, so
     // the surface stays sharp instead of upscaling a small connect-time bitmap.
     let (screen_w, screen_h) = unsafe {
+        use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, GetDeviceCaps, DESKTOPHORZRES, DESKTOPVERTRES};
         use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-        (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+        let hdc = GetDC(None);
+        let phys_w = GetDeviceCaps(hdc, DESKTOPHORZRES);
+        let phys_h = GetDeviceCaps(hdc, DESKTOPVERTRES);
+        let _ = ReleaseDC(None, hdc);
+        if phys_w > 0 && phys_h > 0 {
+            (phys_w, phys_h)
+        } else {
+            (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+        }
     };
-    let w = if screen_w > 0 { screen_w } else { slot_width.unwrap_or(1280) };
-    let h = if screen_h > 0 { screen_h } else { slot_height.unwrap_or(720) };
+    let w = if screen_w > 0 { screen_w } else { slot_width.unwrap_or(1920) };
+    let h = if screen_h > 0 { screen_h } else { slot_height.unwrap_or(1080) };
     let depth = color_depth.unwrap_or(32);
     #[cfg(debug_assertions)]
-    eprintln!("[rdp] desktop {}x{} (full-screen res; slot was {:?}x{:?})", w, h, slot_width, slot_height);
+    eprintln!("[rdp] desktop {}x{} (full-screen physical res; slot was {:?}x{:?})", w, h, slot_width, slot_height);
 
     // session bpp + perf flags trade visual fidelity for bandwidth on slower links
     // (disable_wallpaper, allow_font_smoothing, disable_themes, disable_drag, disable_menu_anims)
     let (disable_wallpaper, allow_font_smoothing, disable_themes, disable_anims) = match quality.as_deref().unwrap_or("balanced") {
         "low" => (1, 0, 1, 1),
         "high" => (0, 1, 0, 0),
-        _ => (1, 1, 0, 1),
+        _ => (0, 1, 0, 0),
     };
 
     // screen mode id: 1 = windowed, 2 = fullscreen. MUST be 1 — the connection bar
@@ -544,13 +553,7 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
     // session resolution mid-session — that's an ActiveX/MSRDC-only feature. With
     // smart sizing the session stays at its connect-time resolution but the bitmap is
     // SCALED to fill the host window, so the surface follows the slot when it grows or
-    // shrinks (no off-screen overflow). dynamic resolution:i:1 + posting WM_SIZE did
-    // nothing on classic mstsc and only left the surface pinned at connect-time size.
-    //
-    // keyboardhook:i:1 = Windows key combos (Win key, Alt+Tab, ...) go to the REMOTE
-    // session whenever the RDP window has focus, not just in fullscreen (i:2 default).
-    // Trade-off: while a swallowed session has keyboard focus, the global Alt+1~4
-    // hotkeys are also captured by the remote — use the header slot buttons instead.
+    // shrinks (no off-screen overflow).
     let mut rdp_content = format!(
         "full address:s:{}\n\
          screen mode id:i:1\n\
@@ -562,6 +565,10 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
          displayconnectionbar:i:0\n\
          pinned connection bar:i:0\n\
          authentication level:i:2\n\
+         connection type:i:7\n\
+         networkautodetect:i:1\n\
+         bandwidthautodetect:i:1\n\
+         desktop scale factor:i:100\n\
          disable wallpaper:i:{}\n\
          allow font smoothing:i:{}\n\
          disable themes:i:{}\n\
@@ -1538,20 +1545,6 @@ pub async fn set_fullscreen(window: tauri::Window, on: bool) -> Result<(), Strin
     apply_fullscreen(&window, on)
 }
 
-/// Arms/disarms the immersive top-edge cursor watcher (emits "immersive-edge").
-#[tauri::command]
-pub async fn set_immersive(on: bool) -> Result<(), String> {
-    crate::swallow::set_immersive(on);
-    Ok(())
-}
-
-/// Briefly pop the immersive header (slot-switch hint) for `ms` milliseconds.
-#[tauri::command]
-pub async fn flash_immersive_header(ms: Option<u64>) -> Result<(), String> {
-    crate::swallow::flash_immersive_header(ms.unwrap_or(1000));
-    Ok(())
-}
-
 /// Fully quit the app (the window X only prevent_close()es → the frontend's
 /// close-requested modal calls this when the user picks "완전 종료"). Restores
 /// any swallowed children first so they aren't left reparented into a dying
@@ -1570,6 +1563,16 @@ pub async fn unswallow_window(slot_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn sync_slot_bounds(slot_id: String, x: i32, y: i32, width: i32, height: i32) -> Result<(), String> {
     crate::swallow::update_position(&slot_id, x, y, width, height);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_header_cutout(slot_id: String, x: Option<i32>, y: Option<i32>, width: Option<i32>, height: Option<i32>) -> Result<(), String> {
+    let pill = match (x, y, width, height) {
+        (Some(x), Some(y), Some(w), Some(h)) if w > 0 && h > 0 => Some((x, y, w, h)),
+        _ => None,
+    };
+    crate::swallow::set_header_cutout(&slot_id, pill);
     Ok(())
 }
 

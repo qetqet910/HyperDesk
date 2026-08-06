@@ -83,8 +83,6 @@ export const api = {
   focusSlotWindow: (slotId: string) => invoke<void>("focus_slot_window", { slotId }),
   setConnectLock: (locked: boolean) => invoke<void>("set_connect_lock", { locked }),
   setFullscreen: (on: boolean) => invoke<void>("set_fullscreen", { on }),
-  setImmersive: (on: boolean) => invoke<void>("set_immersive", { on }),
-  flashImmersiveHeader: (ms?: number) => invoke<void>("flash_immersive_header", { ms }),
   quitApp: () => invoke<void>("quit_app"),
   connectConsole: (name: string) => invoke<number>("connect_console", { name }),
   setVmMemory: (name: string, memoryGb: number) => invoke<void>("set_vm_memory", { name, memoryGb }),
@@ -111,6 +109,12 @@ export const api = {
   debugSpawnTestWindow: () => invoke<number>("debug_spawn_test_window"),
   syncSlotBounds: (slotId: string, x: number, y: number, width: number, height: number) => 
     invoke<void>("sync_slot_bounds", { slotId, x, y, width, height }),
+  /** 떠 있는 헤더 필의 자리를 swallow된 자식 창에서 도려낸다. 좌표는 슬롯 콘텐츠
+      영역 기준 상대 물리 픽셀. 인자를 생략하면 구멍을 없앤다.
+      Win32 자식은 WebView2 위에 그려지므로 이 구멍이 DOM을 VM 위에 띄우는
+      유일한 방법이다 — z-index로는 절대 안 된다. */
+  setHeaderCutout: (slotId: string, r?: { x: number; y: number; width: number; height: number }) =>
+    invoke<void>("set_header_cutout", { slotId, x: r?.x, y: r?.y, width: r?.width, height: r?.height }),
   connectHorizon: (host: string, username?: string) => invoke<number>("connect_horizon", { host, username }),
   checkHost: (host: string, protocol: string) => invoke<number | null>("check_host", { host, protocol }),
   setWindowVisibility: (id: string, visible: boolean) => 

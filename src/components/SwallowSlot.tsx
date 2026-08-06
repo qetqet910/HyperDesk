@@ -28,9 +28,15 @@ interface SwallowSlotProps {
       it is already validated by the 5s integrity poll below (isWindowValid), so
       a crashed child flips it back to false on its own. */
   onConnectedChange?: (id: string, connected: boolean) => void;
+  /** 떠 있는 헤더 필의 위치(콘텐츠 영역 기준 CSS px). MultiView가 소유해서 네
+      슬롯이 같은 자리를 쓴다 — 슬롯마다 따로 두면 Alt+1~4로 넘길 때마다 필이
+      다른 곳에 있어서 매번 눈으로 찾아야 한다. x < 0 이면 가로 중앙.
+      세로는 항상 최상단 고정이라 저장하지 않는다. */
+  pillX: number;
+  onPillMove: (x: number) => void;
 }
 
-export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange }: SwallowSlotProps) {
+export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange, pillX, onPillMove }: SwallowSlotProps) {
   // contentRef points to slot-content-area (below the fixed 36px header bar).
   // syncBounds and handleConnect both measure this div so the Win32 window
   // is positioned to fill exactly the content area, never under the header.
@@ -190,6 +196,110 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
     }
   }, [id, assignedId, isSwallowed, isSyncLocked, isActuallyHidden]);
 
+  /* 레이아웃이 **실제로 멈춘 뒤에** 동기화한다.
+     기존에는 잠금이 풀릴 때 requestAnimationFrame으로 딱 한 프레임만 재고 끝냈는데,
+     몰입모드 이탈처럼 여러 단계로 리플로우되는 전환(container가 position:fixed에서
+     빠지고 → 우측 레일이 다시 마운트되고 → 그리드가 줄어드는)에서는 그 한 프레임이
+     중간값을 잡는다. 최악의 중간값이 "창 전체 크기"이고, 그게 그대로 커밋되면 이후
+     아무 이벤트도 안 와서 굳는다 — swallow된 창이 우측 세션 레일을 덮어버리는 증상의
+     정체다(로그 실측: in=(1,1 1918x1078)).
+
+     vmconnect는 안정화 루프가 매 폴마다 크롬을 재측정해 스스로 복구하지만 RDP는
+     그 루프를 안 타서(offset이 0이라 초기 스왈로우 이후 아무도 건드리지 않는다)
+     RDP에서만 증상이 남는다.
+
+     두 프레임 연속 같은 rect가 나오면 안정된 것으로 보고 동기화한다. 전환이 길어도
+     따라가고, 30프레임(~0.5s) 상한을 둬서 애니메이션이 끝나지 않는 경우에도 매달리지
+     않는다. */
+  const syncWhenSettled = useCallback((onDone?: () => void) => {
+    let last = "";
+    let frames = 0;
+    const tick = () => {
+      const el = contentRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const key = `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`;
+      if (key === last || ++frames >= 30) {
+        syncBounds();
+        onDone?.();
+        return;
+      }
+      last = key;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, [syncBounds]);
+
+  /* ── 떠 있는 헤더 필 ─────────────────────────────────────────────────────
+     필은 슬롯 콘텐츠 영역 안에 absolute로 놓이고, 그 사각형만큼 Win32 자식을
+     도려내서(setHeaderCutout) VM 위에 떠 보이게 한다. 예전처럼 36px 밴드를
+     예약하면 그 띠가 검게 남는다(그 자리엔 .swallow-slot의 #000밖에 없다).
+     위치는 슬롯별로 localStorage에 남긴다 — 사용자가 옮겨둔 자리를 매번 다시
+     잡게 만들 이유가 없다. */
+  const pillRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+
+  const onPillPointerDown = useCallback((e: React.PointerEvent) => {
+    // 버튼 위에서 시작한 포인터는 드래그가 아니라 클릭이다.
+    if ((e.target as HTMLElement).closest("button")) return;
+    const pill = pillRef.current, content = contentRef.current;
+    if (!pill || !content) return;
+    const p = pill.getBoundingClientRect(), c = content.getBoundingClientRect();
+    dragRef.current = { dx: e.clientX - p.x, dy: 0 };
+    // 중앙 정렬(x:-1) 상태에서 잡으면 현재 보이는 자리를 시작점으로 고정한다.
+    onPillMove(Math.round(p.x - c.x));
+    setDragging(true);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }, []);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: PointerEvent) => {
+      const d = dragRef.current, pill = pillRef.current, content = contentRef.current;
+      if (!d || !pill || !content) return;
+      const c = content.getBoundingClientRect();
+      const w = pill.offsetWidth;
+      // 슬롯 밖으로 나가면 구멍도 슬롯 밖이라 필이 사라진다 — 안쪽으로 가둔다.
+      // 가로만 움직인다 — 필은 상단에 붙어 있어야 한다.
+      const x = Math.min(Math.max(0, e.clientX - d.dx - c.x), Math.max(0, c.width - w));
+      onPillMove(Math.round(x));
+    };
+    const up = () => { setDragging(false); dragRef.current = null; };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [dragging]);
+
+  /** 필의 현재 자리를 네이티브에 알려 그만큼 자식 창을 도려낸다. 세션이 없거나
+      숨겨져 있으면 구멍을 없앤다 — 안 그러면 빈 슬롯에 잘린 사각형이 남는다. */
+  const reportCutout = useCallback(() => {
+    const pill = pillRef.current, content = contentRef.current;
+    if (!pill || !content) return;
+    if (!isSwallowed || isActuallyHidden) {
+      api.setHeaderCutout(id).catch(console.error);
+      return;
+    }
+    const p = pill.getBoundingClientRect(), c = content.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    api.setHeaderCutout(id, {
+      x: Math.round((p.x - c.x) * dpr),
+      y: Math.round((p.y - c.y) * dpr),
+      width: Math.round(p.width * dpr),
+      height: Math.round(p.height * dpr),
+    }).catch(console.error);
+  }, [id, isSwallowed, isActuallyHidden]);
+
+  // 필이 움직이거나, 세션이 붙거나 떨어지거나, 슬롯이 숨겨질 때마다 갱신.
+  // 헤더 내용(슬롯 전환 버튼 유무)에 따라 필 폭도 바뀌므로 headerControls도 본다.
+  useEffect(() => { reportCutout(); }, [reportCutout, pillX, headerControls]);
+
   // Sync bounds on resize or scroll — single ResizeObserver, single set of listeners
   useEffect(() => {
     if (!isSwallowed || isActuallyHidden) return;
@@ -256,15 +366,14 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
       // whatever transient (mid-reflow) bounds this single frame holds, which during a
       // layout transition is a half-reflowed size → the (61,79)↔(1,37) coordinate
       // judder. syncBounds already syncs when the bounds genuinely changed.
-      requestAnimationFrame(() => {
-        syncBounds();
+      syncWhenSettled(() => {
         const effectiveVisibility = isVisible && !showSelector && !isOverlayActive;
         if (effectiveVisibility) {
           api.setWindowVisibility(id, true).catch(console.error);
         }
       });
     }
-  }, [isSyncLocked, isSwallowed, isActuallyHidden, syncBounds, id, isVisible, showSelector, isOverlayActive]);
+  }, [isSyncLocked, isSwallowed, isActuallyHidden, syncWhenSettled, id, isVisible, showSelector, isOverlayActive]);
 
   // Visibility handling with handshake. The Win32 child sits above the WebView2
   // renderer, so we must coordinate React DOM state with Rust ShowWindow calls.
@@ -429,48 +538,44 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
     <div
       className={`swallow-slot ${isSwallowed ? "active" : ""} ${isGlitched ? "glitched" : ""} ${isActuallyHidden ? "slot-hidden" : ""}`}
     >
-      {/* Header bar: always rendered in flow (36px, flex row) so the Win32 window
-          starts below it. Buttons are always accessible regardless of Win32 z-order.
-          This is the ONLY header over the slot — MultiView's controls render here
-          too (headerControls) instead of in a second bar. */}
-      <div className={`slot-header-bar ${isSwallowed ? "slot-header-bar--active" : ""}`}>
-        {isSwallowed ? (
-          <button
-            className="slot-change-btn"
-            onClick={async () => {
-              // Disconnect FIRST, then open the selector. The earlier version of
-              // this button opened the selector while still swallowed, which hid
-              // the Win32 child (setWindowVisibility(false)) and left the slot
-              // black — tearing the embed down before showing the picker avoids
-              // that broken intermediate state entirely, in the same one click.
-              await api.unswallowWindow(id).catch(console.error);
-              setIsSwallowed(false);
-              setShowSelector(true);
-            }}
-            title="다른 연결로 변경"
-          >
-            <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
-            <ChevronDown size={11} />
-          </button>
-        ) : (
-          <span className="slot-header-bar__label">
-            {assignedId ? (selectedConnection?.name ?? assignedId) : "비어있음"}
-          </span>
-        )}
-        <div className="slot-header-right">
-          {headerControls}
-          {/* Always rendered (disabled when no session) so the header controls
-              never shift position when paging between swallowed/empty slots. */}
-          <button className="slot-action-btn close" onClick={handleDisconnect} disabled={!isSwallowed} title="연결 해제">
-            <X size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* Content area: Win32 window fills this region exactly.
-          contentRef measures this div — NOT the outer slot — so syncBounds
-          correctly excludes the 36px header bar from the native window position. */}
+      {/* Content area: Win32 window fills this region exactly — including the top,
+          where the floating pill used to be given a reserved 36px band. That band
+          was the black strip behind the pill (it showed .swallow-slot's #000), so
+          the pill now lives INSIDE this area and its rectangle is cut out of the
+          native child (api.setHeaderCutout) to show through. Dragging the pill
+          moves the hole with it. */}
       <div ref={contentRef} className="slot-content-area">
+        <div
+          ref={pillRef}
+          className={`slot-header-bar ${isSwallowed ? "slot-header-bar--active" : ""} ${dragging ? "dragging" : ""} ${pillX < 0 ? "centered" : ""}`}
+          style={{ left: pillX }}
+          onPointerDown={onPillPointerDown}
+        >
+          {isSwallowed ? (
+            <button
+              className="slot-change-btn"
+              onClick={async () => {
+                await api.unswallowWindow(id).catch(console.error);
+                setIsSwallowed(false);
+                setShowSelector(true);
+              }}
+              title="다른 연결로 변경"
+            >
+              <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
+              <ChevronDown size={11} />
+            </button>
+          ) : (
+            <span className="slot-header-bar__label">
+              {assignedId ? (selectedConnection?.name ?? assignedId) : "비어있음"}
+            </span>
+          )}
+          <div className="slot-header-right">
+            {headerControls}
+            <button className="slot-action-btn close" onClick={handleDisconnect} disabled={!isSwallowed} title="연결 해제">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
         {isGlitched && !isSwallowed && <div className="glitch-overlay-noise" />}
 
         {!assignedId && (
