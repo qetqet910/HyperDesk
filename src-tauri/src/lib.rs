@@ -8,7 +8,7 @@ use commands::{
     pause_vm, connect_vm, connect_console, get_dashboard, get_system_stats, create_vm,
     add_remote_host, remove_remote_host, update_remote_host,
     set_vm_memory, set_vm_processors, get_horizon_path, connect_horizon, check_host,
-    set_window_visibility, is_window_valid, swallow_window,
+    set_window_visibility, is_window_valid, swallow_window, set_hotkey_modifier,
     unswallow_window, sync_slot_bounds, set_header_cutout, toggle_fullscreen, set_fullscreen, quit_app, focus_slot_window,
     set_connect_lock,
     list_snapshots, create_snapshot, restore_snapshot, delete_snapshot,
@@ -28,6 +28,32 @@ use tauri::{
     Manager, Emitter,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Modifiers, Code};
+
+/// 슬롯 전환 단축키(수정자+1~4)를 현재 설정값으로 (재)등록한다.
+///
+/// 설정에서 수정자를 바꿀 때도 이 함수를 다시 부른다 — 등록 로직이 두 곳에 있으면
+/// 한쪽만 고쳐져 "설정은 바뀌었는데 옛 키가 계속 먹는" 상태가 된다.
+pub(crate) fn register_slot_hotkeys(app: &tauri::AppHandle) {
+    let shortcuts = app.global_shortcut();
+    // 이전 등록을 먼저 지운다 — 안 지우면 옛 수정자가 계속 살아 있고,
+    // 재등록도 "already registered"로 실패한다.
+    let _ = shortcuts.unregister_all();
+    let m = commands::hotkey_mod().lock().map(|g| g.clone()).unwrap_or_else(|e| e.into_inner().clone());
+    let mods = match m.as_str() {
+        "ctrl" => Modifiers::CONTROL,
+        "shift" => Modifiers::SHIFT,
+        "super" => Modifiers::SUPER,
+        _ => Modifiers::ALT,
+    };
+    for (n, code) in [(1, Code::Digit1), (2, Code::Digit2), (3, Code::Digit3), (4, Code::Digit4)] {
+        match shortcuts.register(Shortcut::new(Some(mods), code)) {
+            Ok(()) => crate::swallow::dlog(&format!("[hotkey] registered {m}+{n}")),
+            // 다른 앱이 이미 잡고 있으면 여기서 실패한다 — 조용히 안 먹는 것보다
+            // 로그로 드러나는 게 낫다(사용자가 다른 수정자로 바꾸면 된다).
+            Err(e) => crate::swallow::dlog(&format!("[hotkey] FAILED {m}+{n}: {e}")),
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -90,18 +116,8 @@ pub fn run() {
             // Clear any stale registrations (e.g. a previous dev instance / zombie
             // process that didn't release the OS-level hotkey) before registering,
             // so register() doesn't fail with "already registered".
-            let _ = shortcuts.unregister_all();
-            for (name, code) in [
-                ("Alt+1", Code::Digit1), ("Alt+2", Code::Digit2),
-                ("Alt+3", Code::Digit3), ("Alt+4", Code::Digit4),
-            ] {
-                match shortcuts.register(Shortcut::new(Some(Modifiers::ALT), code)) {
-                    Ok(()) => eprintln!("[hotkey] registered {name}"),
-                    // A global shortcut that's already owned by another app fails HERE —
-                    // silently before. If you see this for Alt+1..4, another program holds it.
-                    Err(e) => eprintln!("[hotkey] FAILED to register {name}: {e}"),
-                }
-            }
+            let _ = shortcuts;
+            register_slot_hotkeys(app.handle());
 
             // System tray setup
             let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
@@ -158,6 +174,7 @@ pub fn run() {
                     {
                         // Unparent swallowed children before exit — exit(0) kills the
                         // process immediately and Destroyed's unswallow_all() may not run.
+                        commands::set_taskbar_autohide(false);
                         swallow::unswallow_all();
                         window.app_handle().exit(0);
                     }
@@ -175,6 +192,8 @@ pub fn run() {
                 // window has focus). Re-registering on every Focused event only threw
                 // "already registered" and left them broken — removed.
                 tauri::WindowEvent::Destroyed => {
+                    // 전체화면 상태로 종료돼도 사용자 작업표시줄 설정을 되돌린다.
+                    commands::set_taskbar_autohide(false);
                     swallow::unswallow_all();
                 }
                 // Native maximize()/restore on this decorations:false window needs the
@@ -183,6 +202,12 @@ pub fn run() {
                 // see commands::sync_fullscreen_mark_for_maximize.
                 tauri::WindowEvent::Resized(_) => {
                     commands::sync_fullscreen_mark_for_maximize(window);
+                    // 최소화 → 복원. 그 사이 자식의 스타일/부모는 하나도 안 바뀌므로
+                    // 안정화 루프가 아무것도 안 하고(needs_refresh=false), 결과적으로
+                    // swallow된 세션에 "다시 그려라"라고 말하는 주체가 없어 검은 화면으로
+                    // 남는다. 동시에 최소화/복원은 셸의 전체화면 재평가 트리거라 F11
+                    // 중이었다면 작업표시줄도 다시 올라온다. 둘 다 여기서 복구한다.
+                    commands::sync_restore_from_minimize(window);
                 }
                 _ => {}
             }
@@ -219,6 +244,7 @@ pub fn run() {
             quit_app,
             focus_slot_window,
             set_connect_lock,
+            set_hotkey_modifier,
             list_snapshots,
             create_snapshot,
             restore_snapshot,

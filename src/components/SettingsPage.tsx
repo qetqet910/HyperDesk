@@ -87,6 +87,12 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
   }, []);
 
   const handleCheckUpdate = async () => {
+    // 폐쇄망 배포 대비 — 이 앱에서 인터넷을 타는 건 업데이트 확인뿐이라,
+    // 이 스위치 하나로 외부 통신을 완전히 끊는다.
+    if (!settings.updateCheckEnabled) {
+      setUpdateState("idle");
+      return;
+    }
     setUpdateState("checking");
     try {
       const res = await fetch("https://api.github.com/repos/qetqet910/HyperDesk/releases/latest");
@@ -159,12 +165,49 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
               ))}
             </div>
           </div>
+
+          {/* 슬롯 전환 단축키 — 전역 등록이라 다른 앱과 충돌할 수 있어 바꿀 수 있게 뒀다.
+              백엔드에 즉시 반영해야 한다: 전역 단축키 재등록 + LL 키보드 훅이 볼 값까지
+              한 번에 바꾸는 커맨드를 부른다(둘이 어긋나면 옛 조합만 계속 먹는다). */}
+          <div className="settings-row">
+            <div>
+              <div className="settings-row-label">{t("set.hotkey")}</div>
+              <div className="settings-row-desc">{t("set.hotkeyDesc")}</div>
+            </div>
+            <div className="settings-theme-strip">
+              {(["alt", "ctrl", "shift", "super"] as const).map((m) => (
+                <button
+                  key={m}
+                  className={`settings-theme-btn ${settings.hotkeyModifier === m ? "active" : ""}`}
+                  onClick={async () => {
+                    updateSettings({ hotkeyModifier: m });
+                    await api.setHotkeyModifier(m).catch(console.error);
+                  }}
+                >
+                  {m === "super" ? "Win" : m.toUpperCase()}+1~4
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* ── 모니터링 & 자동화 ── */}
         <div className="settings-group">
           <div className="settings-group__head"><Bell size={15} /><h3>{t("set.monitoring")}</h3></div>
           <div className="settings-fields">
+            {/* 외부 통신 차단 스위치. 이 앱에서 인터넷을 타는 곳은 업데이트 확인
+                (GitHub 릴리스 조회)뿐이라, 이걸 끄면 완전한 온프레미스로 동작한다.
+                폐쇄망 고객 대비. */}
+            <div className="settings-row col">
+              <div className="settings-row-label">{t("set.updateCheck")}</div>
+              <div className="settings-row-desc">{t("set.updateCheckDesc")}</div>
+              <div
+                className={`toggle-switch ${settings.updateCheckEnabled ? "active" : ""}`}
+                onClick={() => updateSettings({ updateCheckEnabled: !settings.updateCheckEnabled })}
+              >
+                <div className="toggle-knob" />
+              </div>
+            </div>
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.liveSync")}</div>
               <div className="settings-row-desc">{t("set.liveSyncDesc")}</div>

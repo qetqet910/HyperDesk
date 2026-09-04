@@ -175,6 +175,15 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
     const nextW = Math.floor(rect.width * dpr);
     const nextH = Math.floor(rect.height * dpr);
 
+    // 창을 최소화하면 WebView2 클라이언트가 0×0으로 접히고 이 rect도 0이 된다.
+    // 그 값을 그대로 밀면 (a) 살아있는 mstsc 세션에 0×0 WM_SIZE가 들어가
+    // smart-sizing 스케일이 깨지고(swallow-resize-is-rdp-limit — 클래식 mstsc는
+    // 세션 해상도를 mid-session 재협상 못 한다), (b) apply_chrome_region이 넓이
+    // 0짜리 region을 걸어 창을 통째로 잘라낸다. 둘이 합쳐져 "최소화했다 복원하면
+    // 검은 화면"이 된다. 복원되면 실제 크기로 다시 동기화되므로 여기서는 그냥
+    // 버리면 된다 — 접힌 크기를 네이티브로 전파할 이유가 없다.
+    if (nextW < 2 || nextH < 2) return;
+
     const prev = lastBoundsRef.current;
 
     // SYNC_THRESHOLD: Ignore changes smaller than 2px to prevent infinite "creeping" loops
@@ -238,44 +247,47 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
      잡게 만들 이유가 없다. */
   const pillRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
-  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
 
+  /* pointermove/up 리스너를 **pointerdown 안에서 즉시** 붙인다.
+     예전엔 setDragging(true) → 리렌더 → useEffect에서 붙였는데, 그러면 리스너가
+     한 렌더 늦게 달리고 그 사이 움직임을 놓친다. 짧게 끊어 잡으면 아예 한 번도
+     안 움직이는 것처럼 보인다. 상태·이펙트 타이밍을 드래그 경로에서 완전히 뺀다.
+     (dragging state는 커서/전환용 클래스에만 쓴다.) */
   const onPillPointerDown = useCallback((e: React.PointerEvent) => {
-    // 버튼 위에서 시작한 포인터는 드래그가 아니라 클릭이다.
+    // 버튼 위에서 시작한 포인터는 드래그가 아니라 클릭이다(그립은 버튼이 아니다).
     if ((e.target as HTMLElement).closest("button")) return;
     const pill = pillRef.current, content = contentRef.current;
     if (!pill || !content) return;
     const p = pill.getBoundingClientRect(), c = content.getBoundingClientRect();
-    dragRef.current = { dx: e.clientX - p.x, dy: 0 };
-    // 중앙 정렬(x:-1) 상태에서 잡으면 현재 보이는 자리를 시작점으로 고정한다.
+    const dx = e.clientX - p.x;
+    // 중앙 정렬(x < 0) 상태에서 잡으면 현재 보이는 자리를 시작점으로 고정한다.
     onPillMove(Math.round(p.x - c.x));
     setDragging(true);
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    e.preventDefault();
-  }, []);
 
-  useEffect(() => {
-    if (!dragging) return;
-    const move = (e: PointerEvent) => {
-      const d = dragRef.current, pill = pillRef.current, content = contentRef.current;
-      if (!d || !pill || !content) return;
-      const c = content.getBoundingClientRect();
-      const w = pill.offsetWidth;
+    const move = (ev: PointerEvent) => {
+      const pl = pillRef.current, ct = contentRef.current;
+      if (!pl || !ct) return;
+      const cr = ct.getBoundingClientRect();
+      const w = pl.offsetWidth;
       // 슬롯 밖으로 나가면 구멍도 슬롯 밖이라 필이 사라진다 — 안쪽으로 가둔다.
-      // 가로만 움직인다 — 필은 상단에 붙어 있어야 한다.
-      const x = Math.min(Math.max(0, e.clientX - d.dx - c.x), Math.max(0, c.width - w));
+      // 가로만 움직인다(필은 상단 고정).
+      const x = Math.min(Math.max(0, ev.clientX - dx - cr.x), Math.max(0, cr.width - w));
       onPillMove(Math.round(x));
     };
-    const up = () => { setDragging(false); dragRef.current = null; };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-    return () => {
+    const up = () => {
+      setDragging(false);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
     };
-  }, [dragging]);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    e.preventDefault();
+  }, [onPillMove]);
+
+  /* (제거됨) dragging state를 보고 리스너를 붙이던 useEffect — 리스너가 한 렌더
+     늦게 달려 드래그 시작을 놓치는 원인이었다. 이제 pointerdown이 직접 붙인다. */
 
   /** 필의 현재 자리를 네이티브에 알려 그만큼 자식 창을 도려낸다. 세션이 없거나
       숨겨져 있으면 구멍을 없앤다 — 안 그러면 빈 슬롯에 잘린 사각형이 남는다. */
@@ -288,17 +300,60 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
     }
     const p = pill.getBoundingClientRect(), c = content.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+    // 필은 평소 위로 숨어 있어(transform) 사각형 대부분이 슬롯 **위쪽 바깥**에 있다.
+    // 그대로 넘기면 음수 y로 구멍이 뚫려 엉뚱한 곳이 잘린다. 슬롯과 교차시켜
+    // 화면에 실제로 보이는 부분만 도려낸다.
+    const left = Math.max(p.left, c.left), top = Math.max(p.top, c.top);
+    const right = Math.min(p.right, c.right), bottom = Math.min(p.bottom, c.bottom);
+    if (right - left < 1 || bottom - top < 1) {
+      api.setHeaderCutout(id).catch(console.error);   // 보이는 부분이 없으면 구멍도 없음
+      return;
+    }
     api.setHeaderCutout(id, {
-      x: Math.round((p.x - c.x) * dpr),
-      y: Math.round((p.y - c.y) * dpr),
-      width: Math.round(p.width * dpr),
-      height: Math.round(p.height * dpr),
+      x: Math.round((left - c.left) * dpr),
+      y: Math.round((top - c.top) * dpr),
+      width: Math.round((right - left) * dpr),
+      height: Math.round((bottom - top) * dpr),
     }).catch(console.error);
   }, [id, isSwallowed, isActuallyHidden]);
+
+  /* 슬롯이 좁아지면(전체화면 → 창모드) 저장해둔 x가 새 폭을 넘어 필이 멀티뷰
+     바깥으로 삐져나간다. 레이아웃이 바뀔 때마다 현재 폭에 맞춰 다시 가둔다.
+     x < 0(중앙 정렬)은 건드리지 않는다 — 그 상태는 폭과 무관하다. */
+  useEffect(() => {
+    const clamp = () => {
+      const pill = pillRef.current, content = contentRef.current;
+      if (!pill || !content || pillX < 0) return;
+      // 드래그 중에는 절대 끼어들지 않는다 — 사용자가 옮기는 값을 매 프레임
+      // 덮어쓰면 필이 제자리에 붙박인 것처럼 보인다.
+      if (dragging) return;
+      // **숨은 슬롯이 공유 pillX를 0으로 되돌리는 것**이 이 가드의 이유다.
+      // pillX는 MultiView에 하나뿐인 공유 상태인데, 슬롯 4개는 전부 마운트된 채
+      // 보이지 않는 것들이 display:none이다. 그 슬롯의 폭은 0이라 maxX도 0이 되고,
+      // pillX가 조금이라도 양수면 곧바로 0으로 덮어쓴다 — 보이는 슬롯에서 드래그한
+      // 값을 숨은 슬롯이 매번 지우는 셈이다.
+      // 실측(2026-09-03 [cutout] 로그): 드래그로 x가 20→29→…→416까지 정상적으로
+      // 올라가는데 그때마다 0이 끼어들어 번갈아 찍혔다.
+      // 폭이 0이면(=숨은 슬롯) 판단할 근거가 없으므로 아무것도 하지 않는다.
+      const cw = content.getBoundingClientRect().width;
+      const pw = pill.getBoundingClientRect().width;
+      if (cw <= 0 || pw <= 0) return;   // 아직 레이아웃 전이면 건드리지 않는다
+      const maxX = Math.max(0, Math.round(cw - pw));
+      if (pillX > maxX) onPillMove(maxX);
+    };
+    clamp();
+    const ro = new ResizeObserver(clamp);
+    if (contentRef.current) ro.observe(contentRef.current);
+    return () => ro.disconnect();
+  }, [pillX, onPillMove, headerControls, dragging]);
 
   // 필이 움직이거나, 세션이 붙거나 떨어지거나, 슬롯이 숨겨질 때마다 갱신.
   // 헤더 내용(슬롯 전환 버튼 유무)에 따라 필 폭도 바뀌므로 headerControls도 본다.
   useEffect(() => { reportCutout(); }, [reportCutout, pillX, headerControls]);
+
+  /* (제거됨) 호버 드러남 전환 중 구멍을 따라가게 하던 추적기 — 자동 숨김 자체를
+     폐기해서 필요 없어졌다. swallow된 VM 위에서는 DOM이 마우스를 못 받아
+     pointerenter/leave가 애초에 안 온다는 것도 같이 확인됐다. */
 
   // Sync bounds on resize or scroll — single ResizeObserver, single set of listeners
   useEffect(() => {
@@ -551,6 +606,11 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
           style={{ left: pillX }}
           onPointerDown={onPillPointerDown}
         >
+          {/* 전용 드래그 그립. 필 내부가 버튼(제목·슬롯전환·X)으로 꽉 차 있고
+              onPillPointerDown은 버튼 위에서는 드래그를 시작하지 않으므로, 그립이
+              없으면 잡을 수 있는 곳이 양끝 패딩 몇 px뿐이라 사실상 못 옮긴다
+              (필을 26px로 얇게 만들면서 실제로 그렇게 됐다). */}
+          <span className="slot-pill-grip" aria-hidden="true" title="드래그해서 이동" />
           {isSwallowed ? (
             <button
               className="slot-change-btn"
@@ -670,18 +730,21 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                     <Terminal size={14} /> {vm.name}
                   </div>
                 ))}
-                {/* Omnissa/Horizon: grid embed DISABLED. The desktop window itself
-                    swallows fine (window chain login→desktop works), but its MKS
-                    display children stay pinned at absolute monitor coordinates
-                    (log: MKSEmbedded rect=(1920,0 1920x1080)) and never follow the
-                    reparented frame — the slot shows black. -desktopLayout
-                    windowLarge didn't change it; a real fix needs Horizon SDK-level
-                    embedding. Standalone connect from the Remote Assets page (no
-                    swallow) is unaffected. */}
+                {/* Omnissa/Horizon: 그리드 임베드 활성화(2026-09-02). 오랫동안
+                    비활성화였던 이유는 프레임만 SetParent하면 표시 스택
+                    (RemoteWindow→MainMKSClass→WswcRdpClass→MKSScreenWindow→MKSEmbedded)이
+                    모니터 절대좌표에 고정돼 안 따라와서 슬롯이 검게 나왔기 때문이다.
+                    라이브 프로브로 "그 서피스를 SetWindowPos로 밀어넣으면 Horizon이
+                    되돌리지 않는다"를 확인했고(10초/100틱 위치 유지), swallow.rs의
+                    sync_horizon_surface가 안정화 루프에서 매 폴 붙여준다. */}
                 {vdiHosts.map(host => (
-                  <div key={host.id} className="selector-item disabled" title="멀티뷰 그리드 미지원 (원격 자산 페이지에서 일반 연결은 가능)">
+                  <div key={host.id} className="selector-item" onClick={async () => {
+                    if (isSwallowed) { await api.unswallowWindow(id); setIsSwallowed(false); }
+                    onAssign(host.id);
+                    setShowSelector(false);
+                    handleConnect(host);
+                  }}>
                     <Monitor size={14} /> {host.name}
-                    <span className="selector-item-badge">미지원</span>
                   </div>
                 ))}
               </div>

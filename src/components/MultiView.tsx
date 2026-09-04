@@ -59,7 +59,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
     setConnectedSlots(prev => (prev[slotId] === connected ? prev : { ...prev, [slotId]: connected }));
   }, []);
   const liveCount = Object.values(connectedSlots).filter(Boolean).length;
-  /* 떠 있는 헤더 필의 **가로** 위치만 기억한다. 세로는 항상 최상단 고정 —
+  /* 떠 있는 헤더 필의 **가로** 위치(왼쪽 기준)만 기억한다. 세로는 항상 최상단 고정 —
      아래로 내려가면 VM 화면 한복판을 가리고, 무엇보다 사용자가 원한 게 "상단에
      꼭 붙어있는" 바다. 예전엔 y도 저장했는데, 한 번 드래그해두면 그 값이 계속
      남아 기본값을 0으로 바꿔도 소용이 없었다(저장된 값이 이김).

@@ -488,6 +488,8 @@
 
 /* ─── Liquid Glass / Calm UI tokens (theme-independent) ─── */
 :root {
+  --pill-radius: 4px;   /* swallow.rs PILL_RADIUS와 동일해야 함 */
+  --pill-peek: 4px;     /* 숨었을 때 남겨둘 높이 */
   --radius-glass: 18px;
   --glass-blur: 22px;
   --duration-calm: 280ms;
@@ -2183,26 +2185,47 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   position: absolute;
   top: 0;
   z-index: 10;
-  height: 36px;
+  height: 26px;   /* 얇게 — VM 화면에 걸리는 면적을 줄인다 */
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: fit-content;
   max-width: calc(100% - 16px);
-  padding: 0 14px;
+  padding: 0 10px;
   cursor: grab;
+  /* 포인터 드래그의 표준 요구사항. touch-action이 기본값이면 브라우저가
+     팬/스크롤 제스처로 가로채 pointermove가 끊길 수 있고, 텍스트 선택이 걸리면
+     드래그 대신 라벨이 선택된다. 드래그되는 요소엔 둘 다 꺼두는 게 맞다. */
+  touch-action: none;
+  user-select: none;
   /* 구멍 뒤에 있는 건 VM이 아니라 슬롯 배경(#000)이다 — 그 자리의 VM 픽셀은
      region으로 잘려 없어졌다. 그래서 알파를 낮출수록 검정이 비칠 뿐 "유리"가
      되지 않는다. backdrop-filter도 블러할 대상이 검정뿐이라 비용만 든다.
      불투명한 슬레이트로 칠하고 테두리/그림자로 떠 있는 느낌을 만든다. */
   background: #1b2130;
+  /* 위 테두리는 없앤다 — 필이 top:0으로 슬롯 최상단에 붙어 있어서, 위쪽 1px 선은
+     슬롯 경계선과 겹쳐 두 줄로 보인다. 좌/우/아래만 그어 "상단에 물려 있는 세그먼트"로
+     읽히게 한다. */
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 9999px;
+  /* 반경은 var(--pill-radius). swallow.rs의 PILL_RADIUS와 **같은 값**이라야 한다 —
+     region 구멍을 같은 반경으로 뚫기 때문이다. SetWindowRgn은 안티앨리어싱이 없어
+     CSS 곡선과 완벽히는 못 맞지만, 4px처럼 작은 반경이면 곡선 구간이 모서리뿐이라
+     차이가 눈에 안 띈다. 예전 9999px(완전한 알약)에서 경계가 지저분했던 건 반경이
+     컸기 때문이다 — 크게 올리지 말 것. */
+
+  border-radius: var(--pill-radius);
   gap: 10px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  /* Floating pill slide-down & fade animation */
-  animation: pillSlideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
+  /* 아래로만 떨어지는 그림자 — 직각이라 형태로는 떠 있는 느낌이 안 나므로 그림자가
+     그 역할을 한다. inset 하이라이트는 위 테두리를 없앤 자리를 대신한다. */
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  /* **자동 숨김을 쓰지 않는다.** 숨겼다 호버로 내리는 방식을 시도했다가 되돌렸다 —
+     swallow된 Win32 자식이 슬롯을 덮고 있어서 그 위에서는 DOM이 마우스 이벤트를
+     아예 못 받는다(cutout이 존재하는 이유가 바로 그거다). 그래서
+     `.slot-content-area:hover`는 영원히 안 걸리고, 남는 건 4px짜리 띠 호버뿐이라
+     조준도 드래그도 불가능해진다. 대신 **얇게(26px) 상시 표시**로 간다. */
+  /* pillSlideDown 애니메이션은 뺐다 — 숨김/드러남에 transform을 쓰는데
+     애니메이션이 같은 속성을 덮어써서 필이 숨은 자리에서 튀어나왔다. */
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.18s ease;
 }
 
 @keyframes pillSlideDown {
@@ -2216,19 +2239,42 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   }
 }
 
+/* hover/active도 반드시 **불투명**이어야 한다. 위 base가 #1b2130으로 불투명해진
+   건 필 뒤에 있는 게 VM이 아니라 도려낸 자리의 슬롯 배경(#000)이기 때문인데,
+   이 두 규칙만 예전 반투명 rgba로 남아 base를 덮고 있었다. 알파 0.88~0.92를
+   검정 위에 얹으면 rgb(11,16,26)/rgb(18,23,35) — 슬롯 배경과 구분이 안 가서
+   헤더 필이 통째로 사라진(삭제된) 것처럼 보인다. 새 상태 배경을 추가할 때도
+   rgba로 알파를 주지 말 것. */
 .slot-header-bar:hover {
-  background: rgba(20, 25, 38, 0.92);
+  background: #222a3b;
   border-color: rgba(91, 130, 190, 0.35);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 /* Accent tint when a session is live */
 .slot-header-bar--active {
-  background: rgba(12, 18, 30, 0.88);
+  background: #16202f;
   border-color: rgba(91, 130, 190, 0.3);
 }
 
 /* Placeholder label shown when slot is empty or loading */
+/* 드래그 그립 — 점 두 줄. 버튼이 아니어야 onPillPointerDown이 드래그로 인식한다.
+   폭을 넉넉히(10px) 줘서 26px 필에서도 조준이 된다. */
+.slot-pill-grip {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 14px;
+  cursor: grab;
+  border-radius: 2px;
+  background-image: radial-gradient(currentColor 1px, transparent 1.2px);
+  background-size: 4px 4px;
+  background-position: 1px 1px;
+  color: rgba(255, 255, 255, 0.35);
+  transition: color 0.15s ease;
+}
+.slot-header-bar:hover .slot-pill-grip { color: rgba(255, 255, 255, 0.6); }
+.slot-header-bar.dragging .slot-pill-grip { cursor: grabbing; color: #fff; }
+
 .slot-header-bar__label {
   font-size: 11px;
   font-weight: 600;
@@ -2237,6 +2283,12 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: center;   /* 고정폭 유지 + 가운데 정렬 — 폭을 글자 수에 맞추면 숫자 칸이 밀린다 */
+  /* 연결 전(비어있음/이름 표시) 상태도 같은 고정 폭 — 안 그러면 연결되는 순간
+     필 폭이 변해 숫자 칸이 튄다. 버튼형(.slot-change-btn)의 실측 폭과 맞춘 값:
+     .slot-title 132 + gap 5 + ChevronDown 11 + padding 6+6 = 160. 실측으로
+     연결형 360px / 비어있음 360px 동일 확인. 한쪽만 고치지 말 것. */
+  width: 160px;
 }
 
 /* Content area: fills remaining height below the header bar.
@@ -2264,7 +2316,25 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .slot-empty:hover { color: var(--text-main); }
 .slot-empty span { font-size: 13px; font-weight: 500; }
 
-.slot-title { font-size: 11px; font-weight: 600; color: #fff; }
+/* 폭을 **고정**한다. 이게 없으면 연결 이름 길이(짧은 호스트명 ↔ 긴
+   "211.104.114.133:45001")에 따라 필 전체 폭이 변하고, 필이 가로 중앙 정렬인
+   기본 상태에서는 양쪽 가장자리가 같이 움직여서 **오른쪽의 슬롯 숫자 칸(1~4)이
+   통째로 밀린다**(실측 82px). 사용자가 슬롯을 바꿀 때 실제로 조준하는 게 그
+   숫자 칸이라 이게 제일 거슬린다. 폭이 상수면 중앙 정렬이든 우측 고정이든
+   숫자 칸의 화면 좌표가 변하지 않는다. **이 width를 max-width로 바꾸지 말 것**
+   — max-width는 짧은 이름일 때 다시 줄어들어서 같은 증상이 돌아온다. */
+.slot-title {
+  font-size: 11px; font-weight: 600; color: #fff;
+  width: 132px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* 오른쪽 정렬 — 폭은 132px 고정이라 숫자 칸은 안 움직이고(그게 고정폭의 목적),
+     짧은 이름일 때 남는 여백이 라벨 **왼쪽**으로 가서 이름이 숫자 칸 바로 옆에
+     붙는다. 왼쪽 정렬이면 그 여백이 이름과 숫자 칸 **사이**에 생겨 필이 끊어져
+     보였다. */
+  text-align: center;   /* 위와 같은 이유로 폭은 고정, 정렬만 가운데 */
+}
 
 /* Clickable title area — disconnects then opens the selector in one click. */
 .slot-change-btn {
@@ -2454,6 +2524,23 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 /* Sized to stay inside the 36px .slot-header-bar protected band (2px+28px+2px=32px,
    leaving ~2px breathing room top/bottom). Do not grow past this or the controls'
    bottom edge slips below 36px and a swallowed VM window covers them. */
+/* 필이 26px로 얇아졌으므로 버튼도 같이 줄인다 — 28px 버튼 그대로 두면 위아래로
+   튀어나온다(실측 증상: "아이콘이 높이를 튀어나감"). 20px + 패딩 2px = 24px로
+   26px 안에 들어온다. 필 높이를 바꾸면 이 값도 같이 봐야 한다. */
+.control-group button,
+.slot-action-btn {
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px;
+  padding: 0 !important;
+}
+.control-group button svg,
+.slot-action-btn svg,
+.slot-change-btn svg {
+  width: 11px;
+  height: 11px;
+}
+
 .control-group {
   display: flex;
   background: rgba(255,255,255,0.03);
@@ -2868,9 +2955,22 @@ textarea:focus-visible,
   animation: none;
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
-/* x가 중앙 정렬(아직 안 옮김) 상태일 때 쓰는 보조 클래스는 두지 않는다 —
-   left:-1 이면 아래 규칙이 가로 중앙으로 보낸다. */
-.slot-header-bar[style*="left: -1px"] {
-  left: 50% !important;
+/* 아직 안 옮긴 상태(x < 0)는 가로 중앙. SwallowSlot이 붙여주는 .centered 클래스로
+   잡는다(예전엔 인라인 style 문자열을 매칭하는 [style*="left: -1px"] 셀렉터였는데,
+   그건 값이 정확히 -1일 때만 걸려서 깨지기 쉬웠다).
+   NOTE: 필의 가로 위치 기준은 left다. 한때 "이름 길이가 바뀌면 숫자 칸이 밀린다"를
+   고치려고 right 기준으로 뒤집었는데, 진짜 원인은 기준점이 아니라 **필 폭이 변한다는
+   것**이었다(.slot-title/.slot-header-bar__label의 고정 폭 참조). 폭이 상수면 중앙
+   정렬에서도 숫자 칸이 안 움직이므로 기준을 뒤집을 이유가 없다 — 되돌리지 말 것. */
+/* 중앙 정렬 — transform은 가로 이동에만 쓴다(숨김 이동은 폐기, 위 주석 참고). */
+.slot-header-bar.centered {
   transform: translateX(-50%);
+}
+
+.slot-header-bar.centered {
+  /* !important 필수 — 인라인 style의 left(중앙 상태에선 -1px)를 이겨야 한다.
+     빼면 필이 슬롯 좌측 끝에 처박힌다(실측: BTN1.x가 450 -> 7).
+     transform은 여기서 주지 않는다 — 위쪽 규칙이 가로 중앙 이동과 숨김 이동을
+     한 transform으로 합성해 두었는데, 여기서 다시 쓰면 그걸 덮어써서 필이 안 숨는다. */
+  left: 50% !important;
 }

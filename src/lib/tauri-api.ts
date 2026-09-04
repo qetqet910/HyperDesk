@@ -83,6 +83,9 @@ export const api = {
   focusSlotWindow: (slotId: string) => invoke<void>("focus_slot_window", { slotId }),
   setConnectLock: (locked: boolean) => invoke<void>("set_connect_lock", { locked }),
   setFullscreen: (on: boolean) => invoke<void>("set_fullscreen", { on }),
+  /** 슬롯 전환 단축키 수정자. 전역 단축키 재등록 + LL 훅이 볼 값을 한 번에 바꾼다. */
+  setHotkeyModifier: (modifier: "alt" | "ctrl" | "shift" | "super") =>
+    invoke<void>("set_hotkey_modifier", { modifier }),
   quitApp: () => invoke<void>("quit_app"),
   connectConsole: (name: string) => invoke<number>("connect_console", { name }),
   setVmMemory: (name: string, memoryGb: number) => invoke<void>("set_vm_memory", { name, memoryGb }),

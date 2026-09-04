@@ -23,6 +23,11 @@ export interface Settings {
   /** UI 언어. 저장된 설정이 없으면 OS 로케일에서 추론하고, 한국어가 아니면
       영어로 떨어진다 — 해외 사용자가 처음 켰을 때 영어가 보여야 하기 때문. */
   lang: Lang;
+  /** 슬롯 전환 단축키의 수정자. 전역 단축키라 다른 앱과 충돌할 수 있어 바꿀 수 있게 뒀다. */
+  hotkeyModifier: "alt" | "ctrl" | "shift" | "super";
+  /** 시작 시/설정에서 GitHub 릴리스를 조회할지. 폐쇄망 배포에서는 꺼야 한다 —
+      이 앱에서 인터넷을 타는 곳은 업데이트 확인 둘뿐이고, 이 값이 그 둘을 모두 막는다. */
+  updateCheckEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -37,6 +42,8 @@ const DEFAULT_SETTINGS: Settings = {
   remoteAssetColumns: 1,
   vmColumns: 1,
   lang: navigator.language?.toLowerCase().startsWith("ko") ? "ko" : "en",
+  hotkeyModifier: "alt",
+  updateCheckEnabled: true,
 };
 
 const STORAGE_KEY = "hyperdesk_settings";

@@ -841,13 +841,27 @@ pub async fn get_dashboard(app: AppHandle) -> Result<DashboardData, String> {
     let vdi_hosts = scan_horizon_servers();
     for vdi in vdi_hosts {
         if let Some(existing) = remote_hosts.iter_mut().find(|h| h.host == vdi.host) {
-            // Only relabel auto-detected entries (must check BEFORE setting is_detected).
-            // A user who manually saved this host with protocol=RDP chose that on
-            // purpose — don't override their choice.
+            // Only relabel auto-detected entries. A user who manually saved this
+            // host with protocol=RDP chose that on purpose — don't override
+            // their choice.
             if existing.protocol.is_empty() || existing.is_detected {
                 existing.protocol = "HORIZON".to_string();
             }
-            existing.is_detected = true;
+            // Deliberately NOT setting existing.is_detected = true here. This
+            // used to run unconditionally regardless of the existing value,
+            // which meant a manually-added/edited host (is_detected: false)
+            // whose address also happens to still be sitting in the OS's own
+            // Horizon/RDP connection history — true for nearly every real
+            // host, since that history is exactly how it got "detected" in
+            // the first place — got silently flipped back to is_detected:
+            // true on every 5s dashboard poll. The AUTO badge would then
+            // reappear right after a user edited it away, and it re-opened
+            // this very protocol guard on the NEXT poll. Nothing downstream
+            // reads is_detected after this point except that guard (already
+            // read above, before this line) and the AUTO-badge UI, so leaving
+            // an already-true value alone and never promoting a false one is
+            // enough — freshly-detected entries already set is_detected: true
+            // in their own literal below.
         } else {
             remote_hosts.push(vdi);
         }
@@ -858,7 +872,9 @@ pub async fn get_dashboard(app: AppHandle) -> Result<DashboardData, String> {
         let rdp_detected: Vec<String> = rdp_out.split('\n').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         for host in rdp_detected {
             if let Some(existing) = remote_hosts.iter_mut().find(|h| h.host == host) {
-                existing.is_detected = true;
+                // Same reasoning as the VDI loop above — leaving this out of a
+                // manual entry's re-detection is what keeps its is_detected:
+                // false from being clobbered every poll.
                 if existing.protocol.is_empty() { existing.protocol = "RDP".to_string(); }
             } else {
                 remote_hosts.push(RemoteHost {
@@ -996,19 +1012,59 @@ pub async fn update_remote_host(app: AppHandle, id: String, name: String, host: 
         h.username = username;
         if let Some(t) = tags { h.tags = Some(t); }
     } else if id.starts_with("detected-") || id.starts_with("vdi-") {
+        // Promoting an auto-detected host to a real manual entry (first edit).
+        // is_detected MUST be false here — get_dashboard's merge logic only
+        // protects a host's user-chosen protocol from being silently
+        // relabeled by a later Horizon/RDP registry scan when is_detected is
+        // false (see the "don't override their choice" comment there). Leaving
+        // this true defeated that protection for every host that started out
+        // auto-detected, which is the common case. tags must also come from
+        // the caller, not be dropped — this branch previously discarded
+        // whatever tags the user had just typed in the edit form.
+        // If the user also changed the ADDRESS (not just name/tags/protocol),
+        // the OLD address is still sitting in the Windows RDP/Horizon
+        // registry — the next get_dashboard() poll re-scans it and, finding
+        // no persisted entry whose `host` matches that old address anymore
+        // (this promoted entry now has the NEW one), spawns a fresh
+        // "detected-{old_host}"/"vdi-{old_host}" placeholder right back into
+        // the list. That's why an address edit looked like it "didn't take"
+        // — the old address just kept zombie-reappearing next to the new
+        // one. remove_remote_host already has the fix for a bare detected
+        // host (persist a hidden placeholder at that address so the merge
+        // matches it by host and skips recreating it); apply the same fix
+        // here whenever the address actually changed.
+        let old_host = id.strip_prefix("detected-").or_else(|| id.strip_prefix("vdi-")).unwrap_or("").to_string();
+        if !old_host.is_empty() && old_host != host {
+            let old_protocol = if id.starts_with("vdi-") { "HORIZON".to_string() } else { "RDP".to_string() };
+            hosts.push(RemoteHost {
+                id,
+                name: old_host.clone(),
+                host: old_host,
+                username: None,
+                protocol: old_protocol,
+                is_detected: true,
+                status: None,
+                latency: None,
+                load: None,
+                is_hidden: true,
+                memo: None,
+                tags: None,
+            });
+        }
+
         let new_host = RemoteHost {
             id: format!("manual-{}", Uuid::new_v4()),
             name,
             host,
             username,
             protocol,
-            is_detected: true,
+            is_detected: false,
             status: Some("Active".to_string()),
             latency: None,
             load: None,
             is_hidden: false,
             memo: None,
-            tags: None,
+            tags,
         };
         hosts.push(new_host);
     } else {
@@ -1407,6 +1463,31 @@ fn mark_fullscreen_native(window: &tauri::Window, on: bool) {
     crate::swallow::set_fullscreen_active(on);
 }
 
+/// 슬롯 전환 단축키의 **수정자 키**. 사용자가 설정에서 고른다.
+///
+/// 전역 단축키라 다른 앱과 충돌할 수 있어서(Alt+1~4는 흔하다) 바꿀 수 있어야 한다.
+/// LL 키보드 훅도 같은 값을 봐야 하므로 여기 한 곳에 두고 양쪽이 참조한다 —
+/// 두 군데에 하드코딩하면 훅만 옛 키를 가로채는 상태가 된다.
+static HOTKEY_MOD: OnceLock<Mutex<String>> = OnceLock::new();
+
+pub(crate) fn hotkey_mod() -> &'static Mutex<String> {
+    HOTKEY_MOD.get_or_init(|| Mutex::new("alt".to_string()))
+}
+
+/// 슬롯 전환 단축키의 수정자를 바꾸고 즉시 다시 등록한다.
+/// `modifier`: "alt" | "ctrl" | "shift" | "super"(Win키)
+#[tauri::command]
+pub async fn set_hotkey_modifier(app: AppHandle, modifier: String) -> Result<(), String> {
+    let m = modifier.to_lowercase();
+    if !["alt", "ctrl", "shift", "super"].contains(&m.as_str()) {
+        return Err(format!("지원하지 않는 수정자: {modifier}"));
+    }
+    *lock_or_recover(hotkey_mod()) = m.clone();
+    crate::swallow::set_hotkey_modifier(&m);
+    crate::register_slot_hotkeys(&app);
+    Ok(())
+}
+
 static LAST_NATIVE_MAXIMIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn mark_fullscreen_from_thread(hwnd: crate::swallow::SendHWND, on: bool) {
@@ -1425,6 +1506,15 @@ fn mark_fullscreen_from_thread(hwnd: crate::swallow::SendHWND, on: bool) {
 /// active (apply_fullscreen unmaximizes first), so this only acts when it's not.
 pub(crate) fn sync_fullscreen_mark_for_maximize(window: &tauri::Window) {
     if lock_or_recover(fs_saved()).is_some() { return; }
+    // REVERTED (2026-08-28): a `covers_monitor` gate briefly lived here, skipping the
+    // mark whenever inner_size() didn't reach the full monitor rect. That gate was based
+    // on dlog NUMBERS alone (inner_size=(1920,1032) vs monitor=(1920,1080)) without ever
+    // visually confirming the fix — and on THIS machine maximize apparently never covers
+    // the full monitor, so the gate made `now_max` permanently false and this whole
+    // function a no-op (confirmed live: zero [maximize-sync] lines across a 12-minute
+    // session that included clicking maximize). The user then reproduced the EXACT bar
+    // this mechanism exists to prevent, with the gate silently disabling it. Back to
+    // the original, field-validated behavior: mark on `is_maximized()` alone.
     let now_max = window.is_maximized().unwrap_or(false);
     if LAST_NATIVE_MAXIMIZED.swap(now_max, std::sync::atomic::Ordering::Relaxed) != now_max {
         #[cfg(debug_assertions)]
@@ -1460,6 +1550,81 @@ pub(crate) fn sync_fullscreen_mark_for_maximize(window: &tauri::Window) {
         // the unsafe impl Send on the wrapper and failing to compile.
         std::thread::spawn(move || mark_fullscreen_from_thread(hwnd, now_max));
     }
+}
+
+static LAST_MINIMIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Called on every WindowEvent::Resized (lib.rs). Minimizing does not change any
+/// swallowed child's style or parent, so swallow.rs's stabilization loop stays in
+/// its no-op branch for the whole round trip and nothing ever tells mstsc/vmconnect
+/// to paint again — the slot comes back black. The same round trip also makes the
+/// shell re-evaluate fullscreen (exactly like Alt+Tab and Alt+1~4 slot switching),
+/// so a taskbar that was suppressed pops back over the VM. Both are repaired in
+/// swallow::refresh_after_restore, on the restore edge only.
+pub(crate) fn sync_restore_from_minimize(window: &tauri::Window) {
+    let now_min = window.is_minimized().unwrap_or(false);
+    if LAST_MINIMIZED.swap(now_min, std::sync::atomic::Ordering::Relaxed) == now_min { return; }
+    if now_min { return; } // only act on minimized -> restored
+    // Same rule as sync_fullscreen_mark_for_maximize: this runs INSIDE Windows'
+    // WM_SIZE dispatch, and refresh_after_restore ends in an ITaskbarList2 call
+    // (cross-process COM into explorer.exe). Never from this call stack.
+    std::thread::spawn(|| {
+        // The webview container has not finished laying out on the restore edge;
+        // repainting before it settles just paints the stale rect again.
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        crate::swallow::refresh_after_restore();
+    });
+}
+
+/// 전체화면 동안 작업표시줄을 자동 숨김으로 두고, 나갈 때 원래 상태로 되돌린다.
+///
+/// **이게 없으면 RDP는 전체화면에서 하단이 안 채워진다.** mstsc는 자기 클라이언트를
+/// 로컬 모니터의 **작업영역**에 클램프한다 — 실측(2026-09-03): 작업영역이
+/// 1920x1032일 때 슬롯을 1918x1078로 잡아도 mstsc 창은 1920x1040에서 더 이상
+/// 안 커진다(1040 = 클라이언트 1032 그리고 보이지 않는 테두리 8). 바깥에서 SetWindowPos로 아무리
+/// 밀어도 튕겨낸다(실측 400회+). 그래서 화면 하단 46px이 안 덮이고 그 자리에 로컬
+/// 작업표시줄이 원격 작업표시줄 바로 아래 겹쳐 보인다. vmconnect는 이 클램프를
+/// 안 해서 목표대로 커지므로 Hyper-V만 멀쩡했다.
+///
+/// 창 크기로는 못 이기지만 **작업영역 자체를 바꾸면** mstsc가 스스로 커진다.
+/// 자동 숨김 상태의 작업표시줄은 작업영역을 거의 예약하지 않는다.
+///
+/// 사용자 설정을 건드리므로 **반드시 원복**한다 — 진입 시 이전 상태를 저장하고
+/// 이탈 시 그대로 되돌린다.
+pub(crate) fn set_taskbar_autohide(on: bool) {
+    use windows::Win32::UI::Shell::{SHAppBarMessage, APPBARDATA, ABM_GETSTATE, ABM_SETSTATE};
+    const ABS_AUTOHIDE: u32 = 0x1;
+    const ABS_ALWAYSONTOP: u32 = 0x2;
+    unsafe {
+        let mut abd = APPBARDATA {
+            cbSize: std::mem::size_of::<APPBARDATA>() as u32,
+            ..Default::default()
+        };
+        if on {
+            // 이전 상태를 한 번만 저장한다(중첩 진입 시 덮어쓰지 않도록).
+            let cur = SHAppBarMessage(ABM_GETSTATE, &mut abd) as u32;
+            let mut saved = lock_or_recover(taskbar_saved());
+            if saved.is_none() {
+                *saved = Some(cur);
+            }
+            abd.lParam = windows::Win32::Foundation::LPARAM(ABS_AUTOHIDE as isize);
+            SHAppBarMessage(ABM_SETSTATE, &mut abd);
+        } else {
+            let prev = { lock_or_recover(taskbar_saved()).take() };
+            if let Some(prev) = prev {
+                abd.lParam = windows::Win32::Foundation::LPARAM(prev as isize);
+                SHAppBarMessage(ABM_SETSTATE, &mut abd);
+            } else {
+                abd.lParam = windows::Win32::Foundation::LPARAM(ABS_ALWAYSONTOP as isize);
+                SHAppBarMessage(ABM_SETSTATE, &mut abd);
+            }
+        }
+    }
+}
+
+static TASKBAR_SAVED: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
+fn taskbar_saved() -> &'static Mutex<Option<u32>> {
+    TASKBAR_SAVED.get_or_init(|| Mutex::new(None))
 }
 
 fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
@@ -1507,6 +1672,13 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
         // INNER size to the monitor size exactly. The outer rect then overhangs
         // the screen edges by the border width — invisible by definition, and
         // still covering the monitor, which geometric fullscreen detection needs.
+        // **크기를 잡기 전에** 작업영역을 넓힌다. 뒤에 걸면 작업영역 변경이
+        // 레이아웃 재계산을 유발해 슬롯이 한 번 더 커진다 — 실측(2026-09-03):
+        // 전체화면 직후 슬롯이 1918x1078 → 1918x1085로 7px 늘어 모니터(1080)를
+        // 넘겼고, 그만큼 아래가 화면 밖으로 밀렸다. 순서만 바꾸면 최종 작업영역
+        // 기준으로 한 번에 계산된다.
+        set_taskbar_autohide(true);
+
         let inset_l = inner_pos.x - pos.x;
         let inset_t = inner_pos.y - pos.y;
         let mon_pos = *monitor.position();
@@ -1521,6 +1693,7 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
         };
         if let Some(s) = taken {
             mark_fullscreen_native(window, false);
+            set_taskbar_autohide(false);
             if s.maximized {
                 let _ = window.maximize();
             } else {
@@ -1551,6 +1724,8 @@ pub async fn set_fullscreen(window: tauri::Window, on: bool) -> Result<(), Strin
 /// process.
 #[tauri::command]
 pub async fn quit_app(app: AppHandle) {
+    // 전체화면 중 종료해도 작업표시줄이 숨겨진 채 남지 않게 원복한다.
+    set_taskbar_autohide(false);
     crate::swallow::unswallow_all();
     app.exit(0);
 }

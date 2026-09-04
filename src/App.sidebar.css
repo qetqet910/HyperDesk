@@ -839,9 +839,12 @@ body::before {
 }
 
 /* 프로토콜 태그 */
+/* 태그는 **flex 흐름**에 맡긴다. 예전엔 position:absolute + 하드코딩된 right
+   (10 / 46 / 78px)로 배치했는데, 그 값들은 "RDP"(3글자) 폭을 전제로 계산된 거라
+   "HORIZON"(7글자)에서는 자리가 안 맞았다. 태그 개수(프로토콜만 / +AUTO)에 따라
+   달라지는 것도 고정값으로는 감당이 안 된다. 부모가 이미 display:flex + gap:8px라
+   흐름에 두면 글자 수·개수와 무관하게 알아서 정렬된다. */
 .mst-proto-tag {
-  position: absolute;
-  right: 10px;
   font-size: var(--fs-micro);
   padding: 2px 5px;
   border-radius: 2px;
@@ -859,15 +862,19 @@ body::before {
 .mst-proto-tag.horizon {
   background: rgba(143, 171, 212, 0.08);
   color: var(--accent-faint);
-  right: 78px !important;
   border: 1px solid rgba(143, 171, 212, 0.20);
 }
 
 .mst-proto-tag.auto {
   background: rgba(95, 176, 138, 0.10);
   color: var(--accent-green);
-  right: 46px !important;
   border: 1px solid rgba(95, 176, 138, 0.25);
+}
+
+/* 호스트명 바로 뒤 첫 태그가 남는 공간을 흡수해 태그 묶음을 오른쪽에 붙인다.
+   (absolute 시절의 right 고정값을 대신하는 부분 — 이건 폭에 반응한다.) */
+.mst-rack-hostname + .mst-proto-tag {
+  margin-left: auto;
 }
 
 /* Light theme: the rack row/ear panels and column washes above were all
