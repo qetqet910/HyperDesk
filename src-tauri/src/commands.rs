@@ -1594,7 +1594,6 @@ pub(crate) fn sync_restore_from_minimize(window: &tauri::Window) {
 pub(crate) fn set_taskbar_autohide(on: bool) {
     use windows::Win32::UI::Shell::{SHAppBarMessage, APPBARDATA, ABM_GETSTATE, ABM_SETSTATE};
     const ABS_AUTOHIDE: u32 = 0x1;
-    const ABS_ALWAYSONTOP: u32 = 0x2;
     unsafe {
         let mut abd = APPBARDATA {
             cbSize: std::mem::size_of::<APPBARDATA>() as u32,
@@ -1614,10 +1613,10 @@ pub(crate) fn set_taskbar_autohide(on: bool) {
             if let Some(prev) = prev {
                 abd.lParam = windows::Win32::Foundation::LPARAM(prev as isize);
                 SHAppBarMessage(ABM_SETSTATE, &mut abd);
-            } else {
-                abd.lParam = windows::Win32::Foundation::LPARAM(ABS_ALWAYSONTOP as isize);
-                SHAppBarMessage(ABM_SETSTATE, &mut abd);
             }
+            // else: on(true)이 호출된 적이 없다(예: RDP 슬롯 없어 any_rdp_slot_active()
+            // 가 false였던 전체화면) — 되돌릴 게 없다. 예전엔 이 분기가 ABS_ALWAYSONTOP을
+            // 강제 설정했는데, 그건 우리가 건드린 적도 없는 설정을 끄는 셈이었다.
         }
     }
 }
@@ -1677,7 +1676,15 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
         // 전체화면 직후 슬롯이 1918x1078 → 1918x1085로 7px 늘어 모니터(1080)를
         // 넘겼고, 그만큼 아래가 화면 밖으로 밀렸다. 순서만 바꾸면 최종 작업영역
         // 기준으로 한 번에 계산된다.
-        set_taskbar_autohide(true);
+        //
+        // RDP(mstsc) 슬롯이 있을 때만 켠다. 자동숨김은 taskbar_saved() 하나로
+        // 관리되는 전역 시스템 설정이라 모니터를 못 가린다 — Hyper-V/Horizon만
+        // 떠 있는 전체화면에서도 다른 모니터의 최대화된 창들이 같이 리사이즈/
+        // 깜빡이는 부작용이 났다(2026-09-10 사용자 확인). vmconnect/Horizon은 애초에
+        // 이 토글이 고치는 문제(mstsc의 작업영역 클램프)가 없으므로 켤 필요가 없다.
+        if crate::swallow::any_rdp_slot_active() {
+            set_taskbar_autohide(true);
+        }
 
         let inset_l = inner_pos.x - pos.x;
         let inset_t = inner_pos.y - pos.y;
