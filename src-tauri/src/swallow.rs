@@ -2225,6 +2225,13 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
             Err(_) => return,
         };
         dlog!("[keyhook] installed {:?}", hook.0);
+        dlog!("[keydiag] enabled={} oneshot={} log={}",
+            crate::keydiag::enabled(), crate::keydiag::hook_oneshot(),
+            std::env::temp_dir().join("hyperdesk-keydiag.log").display());
+        crate::keydiag::note_hook_installed(
+            hook.0 as isize,
+            windows::Win32::System::Threading::GetCurrentThreadId(),
+        );
         // 주기적 재설치. 두 가지를 동시에 막는다:
         //  (a) LL 훅 체인은 **가장 최근에 설치한 쪽이 먼저** 호출된다. 우리보다
         //      늦게 훅을 건 앱(원격 클라이언트는 키를 세션에 넘기려고 반드시 건다)이
@@ -2238,6 +2245,16 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             if msg.message == WM_TIMER {
+                // 타이머 틱 자체가 **이 스레드의 메시지 펌프가 살아 있다**는 신호다.
+                // "훅이 제거됐다"와 "스레드가 멈췄다"는 증상이 같아 로그로 구분되지
+                // 않으므로 따로 센다. 재설치를 끈 모드에서도 이 틱은 계속 돈다.
+                crate::keydiag::note_hook_pump_tick();
+                // 진단 모드: 훅을 한 번만 설치하고 재설치하지 않는다. "재설치 자체가
+                // 원인일 가능성"을 실험으로 배제하기 위한 조건이며, 기본값에서는
+                // 이 분기를 타지 않는다.
+                if crate::keydiag::hook_oneshot() {
+                    continue;
+                }
                 // **새 훅을 먼저 걸고 나서 옛 훅을 뗀다. 순서를 뒤집지 말 것.**
                 // unhook → install 순서면 그 사이엔 훅이 **하나도 없어서** 그때 도착한
                 // 키가 그대로 로컬 셸로 간다. 3초마다 도니 3초마다 유출구가 생긴다 —
@@ -2247,7 +2264,14 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
                 // 잠깐 둘 다 걸린 구간은 안전하다 — 새 훅이 체인 앞이라 먼저 불리고,
                 // 먹으면(LRESULT(1)) 옛 훅은 호출되지 않는다.
                 match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0) {
-                    Ok(h) => { let _ = UnhookWindowsHookEx(hook); hook = h; }
+                    Ok(h) => {
+                        let _ = UnhookWindowsHookEx(hook);
+                        hook = h;
+                        crate::keydiag::note_hook_installed(
+                            hook.0 as isize,
+                            windows::Win32::System::Threading::GetCurrentThreadId(),
+                        );
+                    }
                     // 새로 못 걸었으면 **옛 훅을 유지**한다(떼면 아무것도 안 남는다).
                     Err(e) => { dlog!("[keyhook] REINSTALL FAILED (keeping old hook): {e}"); }
                 }
@@ -2435,6 +2459,13 @@ unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: windows::Win32::Fo
 
     if code == HC_ACTION as i32 {
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+        // **판정 이전** 지점의 계측. 우리가 먹든 통과시키든, 콜백이 호출되기만 하면
+        // 무조건 남는다 — "훅에 오지도 않은 키"와 "왔는데 판정에서 걸러진 키"를
+        // 가르는 유일한 방법이다. 진단 모드가 꺼져 있으면 즉시 반환한다.
+        crate::keydiag::trace_ll(
+            code, wparam.0, kb.vkCode, kb.scanCode, kb.flags.0, kb.dwExtraInfo,
+            crate::keydiag::hook_install_seq(),
+        );
         let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
         let alt_down = kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
         let up = kb.flags.0 & LLKHF_UP.0 != 0;

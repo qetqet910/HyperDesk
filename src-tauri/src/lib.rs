@@ -1,6 +1,7 @@
 pub mod models;
 pub mod commands;
 pub mod hosts;
+mod keydiag;
 pub mod swallow;
 
 use commands::{
@@ -157,6 +158,9 @@ pub fn run() {
             if let Some(win) = app.get_webview_window("main") {
                 if let Ok(h) = win.hwnd() {
                     crate::swallow::install_keyboard_hook(app.handle().clone(), h.0 as isize);
+                    // 진단 계측(Raw Input / 포그라운드 WinEvent / async 키 상태).
+                    // HYPERDESK_KEYDIAG 환경변수가 있을 때만 스레드가 뜬다.
+                    crate::keydiag::start(h.0 as isize);
                 }
             }
 
