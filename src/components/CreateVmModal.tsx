@@ -52,24 +52,24 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
   };
 
   const labelStyle: React.CSSProperties = { fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' };
-  const inputStyle: React.CSSProperties = { width: '100%', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: '10px', padding: '11px 14px', color: 'var(--text-main)', fontSize: '14px', fontWeight: 600, outline: 'none' };
-  const cardStyle: React.CSSProperties = { background: 'rgba(0,0,0,0.2)', padding: '16px 18px', borderRadius: '14px', border: '1px solid var(--glass-border)' };
+  const inputStyle: React.CSSProperties = { width: '100%', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: '10px', padding: '8px 12px', color: 'var(--text-main)', fontSize: '14px', fontWeight: 600, outline: 'none' };
+  const cardStyle: React.CSSProperties = { background: 'rgba(0,0,0,0.2)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--glass-border)' };
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ backdropFilter: 'blur(12px)', background: 'rgba(0,0,0,0.7)', zIndex: 400 }}>
-      <div className="modal-content glass-modal" onClick={(e) => e.stopPropagation()} style={{ width: '460px', maxHeight: '90vh', overflowY: 'auto', padding: 0, border: 'none' }}>
+      <div className="modal-content glass-modal" onClick={(e) => e.stopPropagation()} style={{ width: '420px', maxHeight: '90vh', overflowY: 'auto', padding: 0, border: 'none' }}>
         <div style={{ height: '2px', width: '100%', background: 'linear-gradient(90deg, transparent, var(--neon-blue), transparent)' }} />
-        <div className="modal-header" style={{ padding: '26px 24px 18px' }}>
+        <div className="modal-header" style={{ padding: '18px 20px 14px' }}>
           <div className="header-title">
             <div className="neon-text-blue" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <Server size={20} />
-              <h3 style={{ fontSize: '18px', fontWeight: 900, letterSpacing: '-0.5px' }}>새 가상 머신 생성</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.5px' }}>새 가상 머신 생성</h3>
             </div>
           </div>
           <button className="btn-icon" onClick={onClose} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}><X size={18} /></button>
         </div>
 
-        <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ padding: '0 20px 18px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* Name */}
           <div style={cardStyle}>
             <div style={labelStyle}><Server size={12} /> 이름</div>
@@ -133,10 +133,10 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
           </div>
         </div>
 
-        <div className="modal-actions" style={{ padding: '20px 24px', background: 'rgba(0,0,0,0.2)', display: 'flex', gap: '12px' }}>
-          <button onClick={onClose} style={{ flex: 1, height: '46px', borderRadius: '12px', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-secondary)', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}>취소</button>
+        <div className="modal-actions" style={{ padding: '14px 20px', background: 'rgba(0,0,0,0.2)', display: 'flex', gap: '12px' }}>
+          <button onClick={onClose} style={{ flex: 1, height: '38px', borderRadius: '12px', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-secondary)', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}>취소</button>
           <button onClick={submit} disabled={!canSubmit} style={{
-            flex: 2, height: '46px', borderRadius: '12px', border: 'none', color: '#fff', fontWeight: 800, fontSize: '14px',
+            flex: 2, height: '38px', borderRadius: '12px', border: 'none', color: '#fff', fontWeight: 800, fontSize: '14px',
             background: canSubmit ? 'linear-gradient(135deg, var(--neon-blue), #4f8ef7)' : 'rgba(255,255,255,0.05)',
             cursor: canSubmit ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
           }}>

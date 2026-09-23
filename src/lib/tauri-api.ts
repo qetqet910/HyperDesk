@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { DashboardData, SystemStats, VmSnapshot, VmCheckpoint, VmSwitch, VmNetworkAdapter, VmDiskEntry, HyperVEvent } from "@/types";
+import { DashboardData, SystemStats, VmSnapshot, VmCheckpoint, VmSwitch, VmNetworkAdapter, VmDiskEntry, HyperVEvent, RdpLink } from "@/types";
 
 // Helper to provide mock data in non-Tauri environments (like the browser subagent)
 const getMockDashboardData = (): DashboardData => ({
@@ -51,6 +51,8 @@ async function invoke<T>(command: string, args: any = {}): Promise<T> {
       } as any;
     }
     if (command === "is_window_valid") return true as any;
+    // 기본값 `[]`는 truthy라 "링크가 왔다"로 오인된다 — 명시적으로 null.
+    if (command === "take_rdp_link") return null as any;
     
     return [] as any; 
   }
@@ -67,7 +69,9 @@ export const api = {
   getDashboard: () => invoke<DashboardData>("get_dashboard"),
   getSystemStats: () => invoke<SystemStats>("get_system_stats"),
   addRemoteHost: (name: string, host: string, protocol: string, username?: string, tags?: string[]) =>
-    invoke<void>("add_remote_host", { name, host, protocol, username, tags }),
+    invoke<string>("add_remote_host", { name, host, protocol, username, tags }),
+  /** `rdp:` 링크로 실행/호출됐으면 그 대상을 한 번 꺼내 간다(없으면 null). */
+  takeRdpLink: () => invoke<RdpLink | null>("take_rdp_link"),
   removeRemoteHost: (id: string) => invoke<void>("remove_remote_host", { id }),
   updateRemoteHost: (id: string, name: string, host: string, protocol: string, username?: string, tags?: string[]) =>
     invoke<void>("update_remote_host", { id, name, host, protocol, username, tags }),
@@ -84,8 +88,6 @@ export const api = {
   setConnectLock: (locked: boolean) => invoke<void>("set_connect_lock", { locked }),
   setFullscreen: (on: boolean) => invoke<void>("set_fullscreen", { on }),
   /** 슬롯 전환 단축키 수정자. 전역 단축키 재등록 + LL 훅이 볼 값을 한 번에 바꾼다. */
-  setHotkeyModifier: (modifier: "alt" | "ctrl" | "shift" | "super") =>
-    invoke<void>("set_hotkey_modifier", { modifier }),
   quitApp: () => invoke<void>("quit_app"),
   connectConsole: (name: string) => invoke<number>("connect_console", { name }),
   setVmMemory: (name: string, memoryGb: number) => invoke<void>("set_vm_memory", { name, memoryGb }),

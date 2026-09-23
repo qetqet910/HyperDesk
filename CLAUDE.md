@@ -252,13 +252,16 @@ The core Win32 engine. Flow:
   6. **다른 앱의 전역 훅** — mstsc 잔재·Horizon 클라이언트 스택·사내 메신저(HiworksMessenger)를 **전부 종료하고도** 동일. 찾을 수 있는 유저모드 후보는 소거됨.
   7. **vmconnect 키보드 설정** — Hyper-V 관리자 → Hyper-V 설정 → 키보드는 이미 "가상 컴퓨터에서 사용"이었다(관련: [[vmconnect-settings-are-xml-not-registry]]).
 - **남은 가설(미검증):** 키보드 필터 드라이버/펌웨어 레벨(보안 프로그램, 제조사 키보드 SW)이 Win키를 유저모드 훅보다 먼저 처리. 판별법 — **화상 키보드(osk.exe)로 Win을 눌러본다.** osk는 `SendInput`이라 훅에 `injected`로 잡히므로, 물리 키는 트레이스에 안 남고 osk는 남으면 드라이버/펌웨어 레벨이 확정된다.
-- **Fix(실제로 반영된 것, 지우지 말 것):**
-  - **down/up 대칭**: keydown 때 내린 판정을 vk별 `DOWN_ACTION`/`DOWN_TARGET`에 남기고 keyup은 **재분류 없이** 그대로 따른다. 재분류하면 그 사이 바뀐 포커스/수정자 때문에 답이 갈리고, 특히 Alt+1에서 Alt를 먼저 떼면 '1'의 keyup이 `is_slot_key=false`가 되어 그냥 샌다. 통과시키는 keydown은 낡은 항목을 지운다(안 지우면 로컬에서 누른 Win의 keyup이 그 항목을 소비해 **한 번 씹힌다**).
-  - **`app_is_foreground()` 확장**: `IsChild`는 WS_CHILD 부모 체인만 따라가는데 vmconnect의 WinForms 프레임은 SetParent 후에도 **자기 자신이 포그라운드**가 될 수 있다. swallow된 자식 자신/그 트리도 함께 검사한다.
-  - **위임 대상 폴백**: `vm_key_target()`(스레드별 포커스 추적)은 클라이언트 토폴로지에 따라 수시로 실패한다. 실패하면 보이는 슬롯 프레임(`visible_slot_frame`)으로 보낸다. 세션이 없으면 둘 다 None이라 Win은 평소대로 로컬에서 동작.
-  - **훅 재설치는 `install → unhook` 순서**. 뒤집으면 그 사이 훅이 하나도 없어 키가 그대로 샌다.
-  - `key_message()`가 down/up의 lParam/메시지를 한 곳에서 만든다(유닛 테스트 `key_message_down_up_pairs`로 고정 — up의 previous-state/transition 비트가 빠지면 원격에 키가 눌린 채 남는다).
+- **코드 상태(2026-09-21): 키 훅 관련 수정은 전부 v1.3.0으로 되돌렸다** — 사용자 판단으로 v1.3.0의 증상은 "무시하고 쓸 정도"라, 원인 미확정인 채 코드만 늘리지 않기로 했다. 조사 중 찾은 실제 버그와 그 수정(참고용 — 다시 살릴 때만):
+  - **down/up 비대칭**: keyup을 재분류하면 Alt+1에서 Alt를 먼저 뗄 때 '1'의 keyup이 새고, Win keyup도 갈린다. 수정은 keydown 판정을 vk별로 저장해 keyup이 따르게 하는 것.
+  - **`app_is_foreground()`**: `IsChild`는 WS_CHILD 체인만 따라가서 vmconnect WinForms 프레임이 스스로 포그라운드가 되면 false.
+  - **재설치 구멍**: v1.3.0의 3초 재설치는 `unhook → install` 순서라 그 사이 훅이 없다. 되살린다면 `install → unhook`.
+  - 전체 작업은 브랜치 `fix/keyhook-symmetry-and-taskbar-gate`의 `5e7cf8c`(수정)·`88c9f12`(keydiag 진단 모듈) 커밋에 남아 있다.
 - **진단 원칙(이번에 값비싸게 배운 것):**
   - **콜백 안에서 `dlog!`(파일 I/O)·락·창 열거 금지.** 공식 문서: `LowLevelHooksTimeout`(기본 300ms)을 넘기면 훅이 "silently removed without being called" 된다. 진단이 필요하면 콜백은 원자 저장만 하고 별도 스레드가 파일로 흘린다.
   - **연번은 "빠진 이벤트"를 증명하지 못한다.** 번호를 우리 콜백이 매기므로 우리를 안 거친 이벤트는 구멍을 남기지 않는다. "번호가 연속이니 전부 거쳤다"고 판단했다가 틀렸다. 빠짐을 보려면 **포그라운드 전환 같은 외부 사건과 대조**해야 한다.
   - **"안 먹은 것"만 찍으면 "훅에 오지도 않은 것"이 안 보인다.** 판정 이전 지점에서 전부 기록할 것.
+- **Issue:** RDP 슬롯이 있는 상태로 전체화면(F11/몰입)에 들어가면 작업표시줄이 자동숨김으로 바뀌며 **화면이 번쩍이고**, 다른 모니터의 최대화 창까지 **리사이즈**되는 현상 (2026-09-10, 09-21 사용자 보고).
+- **Fix: 작업표시줄을 숨기지 말고 작업영역 값만 바꾼다** (`commands.rs` `expand_work_area`/`restore_work_area`). 전체화면에서 작업영역을 건드리는 이유는 **mstsc가 자기 창을 모니터 작업영역에 클램프**하기 때문(작업표시줄 높이만큼 하단이 안 채워짐, 실측 2026-09-03)이다. 예전엔 `SHAppBarMessage(ABS_AUTOHIDE)`로 작업표시줄을 자동숨김으로 바꿔 작업영역을 넓혔는데, 그건 전역 설정 토글이라 작업표시줄 슬라이드(번쩍임)와 설정 변경 브로드캐스트(다른 창 리플로우)가 따라온다. `SystemParametersInfo(SPI_SETWORKAREA, …, 0)`은 **`SPIF_SENDCHANGE` 없이** 값만 바꿔서 둘 다 없다 — 실측(2026-09-21 프로브 `work_area_changes_without_broadcast`, `--ignored`): 알림 없이 `(0,0,1920,1032)`→`(0,0,1920,1080)`이 `GetMonitorInfo`에 즉시 반영되고 원복도 정확했다.
+- **하지 말 것:** (1) `ABS_AUTOHIDE` 방식으로 되돌리지 말 것. (2) `SPIF_SENDCHANGE`/`SPIF_UPDATEINIFILE`을 넣지 말 것 — 넣는 순간 브로드캐스트/영구 저장이 돼 리플로우가 되살아난다. (3) "RDP가 있을 때만" 같은 게이트를 다시 넣지 말 것 — autohide 시절엔 토글이 번쩍여서 필요했지만, 게이트는 "Hyper-V 슬롯에서 전체화면 → RDP로 전환하면 하단 안 채워짐"을 낳았다. 알림 없는 변경은 부작용이 안 보이므로 전체화면 진입 시 항상 넓힌다. (4) 원래 값은 `GetMonitorInfo`로 **그 모니터의** `rcWork`를 저장할 것(`SPI_GETWORKAREA`는 주 모니터만 준다). 종료 경로(X·트레이 종료·Destroyed)에서도 `restore_work_area()`를 부른다.
+- **미검증:** mstsc가 넓힌 작업영역을 실제로 받아들여 하단까지 채우는지는 화면으로 확인해야 한다(프로브는 OS 값 반영까지만 증명). 또 전체화면 도중 Explorer가 작업영역을 스스로 재계산(작업표시줄 크기 변경·디스플레이 변경 등)하면 원래 값으로 돌아갈 수 있다.

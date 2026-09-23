@@ -29,13 +29,7 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Gdi",
     "Win32_UI_Shell",
     "Win32_System_Com",
-    "Win32_UI_HiDpi",
-    # ↓ keydiag(진단 전용, HYPERDESK_KEYDIAG=1 일 때만 동작) 에서만 쓴다.
-    "Win32_UI_Input",                    # Raw Input (RegisterRawInputDevices / WM_INPUT)
-    "Win32_UI_Accessibility",            # SetWinEventHook (EVENT_SYSTEM_FOREGROUND)
-    "Win32_System_StationsAndDesktops",  # window station / desktop 이름
-    "Win32_System_RemoteDesktop",        # ProcessIdToSessionId
-    "Win32_System_LibraryLoader"         # GetModuleHandleW (진단 창 클래스 등록)
+    "Win32_UI_HiDpi"
 ] }
 sysinfo = "0.38.4"
 futures = "0.3.32"

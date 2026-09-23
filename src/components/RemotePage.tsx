@@ -12,6 +12,56 @@ interface RemotePageProps {
   onAdd: () => void;
 }
 
+/** 랙 한 줄. 원격 자산 탭(RDP)과 가상 머신 탭의 Omnissa 목록이 같은 줄을 쓴다 —
+ *  두 탭에서 같은 동작(연결·메모·편집·삭제)을 제공하므로 마크업을 복제하지 않는다. */
+export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
+  host: RemoteHost;
+  onConnect: (host: string, protocol: string, username?: string) => void;
+  onEdit: (host: RemoteHost) => void;
+  onMemo: (host: RemoteHost) => void;
+  onDelete: (id: string) => void;
+}) {
+  const isOffline = host.status === "TIMEOUT" || host.status === "Offline";
+  const proto = host.protocol === "HORIZON" ? "horizon" : "rdp";
+  return (
+    <div className={`mst-rack-row ${isOffline ? "dead" : ""}`}>
+      <div className="mst-rack-ear"><div className="mst-rack-stripe" /></div>
+      <div className="mst-rack-status">
+        <span className={`mst-rack-led ${isOffline ? "offline" : "online"}`} />
+        <span className={`mst-rack-latency ${isOffline ? "offline" : "online"}`}>
+          {isOffline ? "---" : `${host.latency}MS`}
+        </span>
+      </div>
+      <div className="mst-rack-name">
+        <span className="mst-rack-hostname">{host.name}</span>
+        <span className={`mst-proto-tag ${proto}`}>{host.protocol}</span>
+        {host.is_detected && <span className="mst-proto-tag auto">AUTO</span>}
+      </div>
+      {/* 자동 감지 항목은 이름이 곧 주소다 — 같은 값을 두 칸에 찍지 않는다. */}
+      <div className={`mst-rack-addr${host.host === host.name ? " is-same" : ""}`}>
+        {host.host === host.name ? "" : host.host}
+      </div>
+      <div className="mst-rack-actions">
+        <button
+          className={`mst-rack-connect ${isOffline ? "disabled" : ""}`}
+          disabled={isOffline}
+          title={isOffline ? "오프라인" : "연결"}
+          onClick={() => !isOffline && onConnect(host.host, host.protocol, host.username)}
+        >
+          <Play size={13} />
+        </button>
+        {/* Edit is allowed even for auto-detected hosts (rename / tag);
+            the backend promotes a detected id to a manual entry on save.
+            Delete stays for all — detected hosts are hidden, not purged,
+            so they don't zombie-regenerate from the registry. */}
+        <button className="mst-rack-icon-btn" title="메모장 (접속정보/메모)" onClick={() => onMemo(host)}><Notebook size={14} /></button>
+        <button className="mst-rack-icon-btn" title="편집" onClick={() => onEdit(host)}><Pencil size={14} /></button>
+        <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? "숨기기" : "삭제"} onClick={() => onDelete(host.id)}><X size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
 export function RemotePage({ remoteHosts, onConnect, onEdit, onMemo, onDelete, onAdd }: RemotePageProps) {
   const { settings, updateSettings } = useSettings();
   return (
@@ -38,47 +88,14 @@ export function RemotePage({ remoteHosts, onConnect, onEdit, onMemo, onDelete, o
         // memo+CONNECT), else it collapses to 1 column instead of clipping.
         ? { gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(650px, 1fr))", gap: "4px" }
         : { gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "4px" }}>
-        {remoteHosts.length > 0 ? remoteHosts.map((host) => {
-          const isOffline = host.status === "TIMEOUT" || host.status === "Offline";
-          const proto = host.protocol === "HORIZON" ? "horizon" : "rdp";
-          return (
-            <div key={host.id} className={`mst-rack-row ${isOffline ? "dead" : ""}`}>
-              <div className="mst-rack-ear"><div className="mst-rack-stripe" /></div>
-              <div className="mst-rack-status">
-                <span className={`mst-rack-led ${isOffline ? "offline" : "online"}`} />
-                <span className={`mst-rack-latency ${isOffline ? "offline" : "online"}`}>
-                  {isOffline ? "---" : `${host.latency}MS`}
-                </span>
-              </div>
-              <div className="mst-rack-name">
-                <span className="mst-rack-hostname">{host.name}</span>
-                <span className={`mst-proto-tag ${proto}`}>{host.protocol}</span>
-                {host.is_detected && <span className="mst-proto-tag auto">AUTO</span>}
-              </div>
-              <div className="mst-rack-addr">{host.host}</div>
-              <div className="mst-rack-actions">
-                <button
-                  className={`mst-rack-connect ${isOffline ? "disabled" : ""}`}
-                  disabled={isOffline}
-                  onClick={() => !isOffline && onConnect(host.host, host.protocol, host.username)}
-                >
-                <Play/>
-                </button>
-                {/* Edit is allowed even for auto-detected hosts (rename / tag);
-                    the backend promotes a detected id to a manual entry on save.
-                    Delete stays for all — detected hosts are hidden, not purged,
-                    so they don't zombie-regenerate from the registry. */}
-                <button className="mst-rack-icon-btn" title="메모장 (접속정보/메모)" onClick={() => onMemo(host)}><Notebook/></button>
-                <button className="mst-rack-icon-btn" title="편집" onClick={() => onEdit(host)}><Pencil/></button>
-                <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? "숨기기" : "삭제"} onClick={() => onDelete(host.id)}><X/></button>
-              </div>
-            </div>
-          );
-        }) : (
+        {remoteHosts.length > 0 ? remoteHosts.map((host) => (
+          <RemoteAssetRow key={host.id} host={host} onConnect={onConnect} onEdit={onEdit} onMemo={onMemo} onDelete={onDelete} />
+        )) : (
           <div style={{ padding: "60px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
             <Globe size={32} style={{ marginBottom: "12px" }} />
             <div style={{ fontSize: "13px", fontWeight: 700 }}>원격 자산 없음</div>
-            <div style={{ fontSize: "11px", marginTop: "6px" }}>"원격 자산 등록" 버튼으로 RDP / Horizon 호스트를 추가하세요.</div>
+            {/* Omnissa(VDI)는 가상 머신 탭에서 관리한다 — 여기엔 RDP만 남는다. */}
+            <div style={{ fontSize: "11px", marginTop: "6px" }}>"원격 자산 등록" 버튼으로 RDP 호스트를 추가하세요.</div>
           </div>
         )}
       </div>

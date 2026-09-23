@@ -65,18 +65,6 @@ pub fn lock_state() -> std::sync::MutexGuard<'static, HashMap<String, SwallowInf
     swallow_state().lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// True if any visible swallowed slot is an RDP session (mstsc's frame class).
-/// commands::apply_fullscreen only needs to fight the monitor work-area (via
-/// set_taskbar_autohide) for mstsc, which clamps its client rect to it — Hyper-V
-/// (vmconnect) and Horizon don't. Gating on this skips that toggle when nothing
-/// in the grid needs it, since it's a genuinely global system setting (no way to
-/// scope SHAppBarMessage's autohide flag to one monitor) and its side effect —
-/// other monitors' maximized windows reflowing — showed up even on fullscreens
-/// with no RDP slot at all.
-pub fn any_rdp_slot_active() -> bool {
-    lock_state().values().any(|i| i.is_visible && i.class_name.contains("TscShellContainerClass"))
-}
-
 /// hwnds a hunt loop has picked as ITS candidate but not yet committed to
 /// SWALLOW_STATE (perform_swallow hasn't returned yet). SWALLOW_STATE alone
 /// only excludes windows another slot has FINISHED swallowing — two slots
@@ -2225,13 +2213,6 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
             Err(_) => return,
         };
         dlog!("[keyhook] installed {:?}", hook.0);
-        dlog!("[keydiag] enabled={} oneshot={} log={}",
-            crate::keydiag::enabled(), crate::keydiag::hook_oneshot(),
-            std::env::temp_dir().join("hyperdesk-keydiag.log").display());
-        crate::keydiag::note_hook_installed(
-            hook.0 as isize,
-            windows::Win32::System::Threading::GetCurrentThreadId(),
-        );
         // 주기적 재설치. 두 가지를 동시에 막는다:
         //  (a) LL 훅 체인은 **가장 최근에 설치한 쪽이 먼저** 호출된다. 우리보다
         //      늦게 훅을 건 앱(원격 클라이언트는 키를 세션에 넘기려고 반드시 건다)이
@@ -2245,35 +2226,12 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             if msg.message == WM_TIMER {
-                // 타이머 틱 자체가 **이 스레드의 메시지 펌프가 살아 있다**는 신호다.
-                // "훅이 제거됐다"와 "스레드가 멈췄다"는 증상이 같아 로그로 구분되지
-                // 않으므로 따로 센다. 재설치를 끈 모드에서도 이 틱은 계속 돈다.
-                crate::keydiag::note_hook_pump_tick();
-                // 진단 모드: 훅을 한 번만 설치하고 재설치하지 않는다. "재설치 자체가
-                // 원인일 가능성"을 실험으로 배제하기 위한 조건이며, 기본값에서는
-                // 이 분기를 타지 않는다.
-                if crate::keydiag::hook_oneshot() {
-                    continue;
-                }
-                // **새 훅을 먼저 걸고 나서 옛 훅을 뗀다. 순서를 뒤집지 말 것.**
-                // unhook → install 순서면 그 사이엔 훅이 **하나도 없어서** 그때 도착한
-                // 키가 그대로 로컬 셸로 간다. 3초마다 도니 3초마다 유출구가 생긴다 —
-                // 이 타이머는 v1.3.0(633575d)에서 좀비/타임아웃 복구용으로 들어왔는데,
-                // 정작 자기가 막으려던 증상(Win이 로컬에서 열림)을 만들고 있었다.
-                // 실측: 로컬 시작 메뉴가 열린 시점이 매번 재설치 직후였다.
-                // 잠깐 둘 다 걸린 구간은 안전하다 — 새 훅이 체인 앞이라 먼저 불리고,
-                // 먹으면(LRESULT(1)) 옛 훅은 호출되지 않는다.
+                let _ = UnhookWindowsHookEx(hook);
                 match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0) {
-                    Ok(h) => {
-                        let _ = UnhookWindowsHookEx(hook);
-                        hook = h;
-                        crate::keydiag::note_hook_installed(
-                            hook.0 as isize,
-                            windows::Win32::System::Threading::GetCurrentThreadId(),
-                        );
-                    }
-                    // 새로 못 걸었으면 **옛 훅을 유지**한다(떼면 아무것도 안 남는다).
-                    Err(e) => { dlog!("[keyhook] REINSTALL FAILED (keeping old hook): {e}"); }
+                    Ok(h) => hook = h,
+                    // 재설치 실패는 되돌릴 방법이 없다 — 훅 없이 도는 것보다 로그를 남긴다.
+                    // `_e`: 릴리즈에선 dlog!가 no-op이라 `e`가 미사용 경고를 낸다.
+                    Err(_e) => { dlog!("[keyhook] REINSTALL FAILED: {_e}"); return; }
                 }
             }
         }
@@ -2317,34 +2275,6 @@ fn tree_thread_ids(frame: HWND) -> Vec<u32> {
 /// HyperDesk 본체가 포그라운드인가. 슬롯 전환 키를 가로챌지 판단하는 기준이다 —
 /// 포커스가 swallow된 자식 어디에 있든(또는 자식 트리 밖의 별도 스레드에 있든)
 /// 창 자체가 앞에 있으면 Alt+1~4는 우리 것이다.
-/// LL 훅이 볼 슬롯 전환 수정자. 0=Alt, 1=Ctrl, 2=Shift, 3=Win.
-/// 전역 단축키 등록(lib.rs)과 **같은 값**이어야 한다 — 어긋나면 훅이 옛 조합을
-/// 가로채서 새 조합은 원격으로 새고 옛 조합은 먹히는 이상한 상태가 된다.
-static HOTKEY_MOD_CODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
-pub fn set_hotkey_modifier(m: &str) {
-    let v = match m {
-        "ctrl" => 1u8,
-        "shift" => 2,
-        "super" => 3,
-        _ => 0,
-    };
-    HOTKEY_MOD_CODE.store(v, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// 지금 눌려 있는 키들이 설정된 수정자와 맞는가.
-fn hotkey_mod_down(alt_down: bool) -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT, VK_LWIN, VK_RWIN};
-    let down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
-    match HOTKEY_MOD_CODE.load(std::sync::atomic::Ordering::Relaxed) {
-        1 => down(VK_CONTROL.0 as i32),
-        2 => down(VK_SHIFT.0 as i32),
-        3 => down(VK_LWIN.0 as i32) || down(VK_RWIN.0 as i32),
-        // Alt는 훅이 주는 플래그가 가장 정확하다(GetAsyncKeyState는 놓칠 수 있다).
-        _ => alt_down,
-    }
-}
-
 fn app_is_foreground() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsChild};
     let main = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
@@ -2352,17 +2282,8 @@ fn app_is_foreground() -> bool {
     let main_h = HWND(main as *mut _);
     unsafe {
         let fg = GetForegroundWindow();
-        // 포그라운드가 본체이거나, 본체 안에 들어앉은 창이면 참.
-        if fg.0 as isize == main || IsChild(main_h, fg).as_bool() { return true; }
-        // `IsChild`는 **WS_CHILD 부모 체인**만 따라간다. SetParent는 했지만 스타일이
-        // 온전히 안 내려간 창(vmconnect의 WinForms 프레임)은 **자기 자신이
-        // 포그라운드**가 될 수 있고, 그러면 위 검사가 false로 떨어진다 — 실측:
-        // RDP 슬롯에선 true인데 Hyper-V 슬롯으로 가면 같은 Win키가 false였다.
-        // 그 false가 곧 "안 먹고 통과" → 로컬 시작 메뉴다.
-        lock_state().values().filter(|i| i.is_visible).any(|i| {
-            fg.0 as isize == i.child_hwnd
-                || IsChild(HWND(i.child_hwnd as *mut _), fg).as_bool()
-        })
+        // 포그라운드가 본체이거나, 본체 안에 들어앉은 창(swallow된 자식 포함)이면 참.
+        fg.0 as isize == main || IsChild(main_h, fg).as_bool()
     }
 }
 
@@ -2391,116 +2312,39 @@ fn vm_key_target() -> Option<HWND> {
                 // thread isn't the active one, so an unguarded match could
                 // route keys to a stale window.
                 if gui.hwndFocus.0 == child.0 || IsChild(child, gui.hwndFocus).as_bool() {
-                    #[cfg(debug_assertions)]
-                    dlog!("[keyhook] target hwnd={:?} (tid {}) in child {:?}", gui.hwndFocus.0, tid, child.0);
                     return Some(gui.hwndFocus);
                 }
             }
         }
-        #[cfg(debug_assertions)]
-        dlog!("[keyhook] foreground OK but no swallowed tree holds focus");
     }
     None
-}
-
-/// 지금 보이는 슬롯의 프레임 창. 포커스 추적이 실패했을 때의 위임 대상이다.
-fn visible_slot_frame() -> Option<HWND> {
-    let raw = lock_state().values().find(|i| i.is_visible).map(|i| i.child_hwnd)?;
-    let h = HWND(raw as *mut _);
-    if unsafe { IsWindow(h) }.as_bool() { Some(h) } else { None }
-}
-
-/// keydown 때 내린 판정을 vk별로 남긴다. keyup이 **같은 결정을 따르게** 하려는 것.
-/// 0=건드리지 않음, 1=슬롯 전환(먹기만), 2=세션에 위임(WM_KEY*), 3=세션에 위임(WM_SYSKEY*).
-///
-/// **없으면 down/up이 갈린다.** 판정을 이벤트마다 독립으로 하면, 첫 탭이 원격에
-/// 전달되며 포커스 상태가 바뀌는 바람에 바로 다음 이벤트가 다른 답을 받는다 —
-/// 실측(2026-09-11): 첫 탭은 `target hwnd=` 줄이 down/up 두 번 찍혀 정상이었는데,
-/// 두 번째 탭은 한 번만 찍혔다(= 한쪽만 대상을 찾았고 나머지는 셸로 샜다).
-/// Windows는 Win키의 "단독 탭"을 **keyup에서** 판정하므로, 새어나간 up 하나로
-/// 로컬 시작 메뉴가 열린다. 사용자 증상 "처음만 인식되고 나머진 로컬"이 이것이다.
-/// 위임도 짝이 맞아야 원격 쪽에 눌린 채 남는 키가 없다.
-static DOWN_ACTION: [std::sync::atomic::AtomicU8; 256] =
-    [const { std::sync::atomic::AtomicU8::new(0) }; 256];
-static DOWN_TARGET: [std::sync::atomic::AtomicIsize; 256] =
-    [const { std::sync::atomic::AtomicIsize::new(0) }; 256];
-
-/// 재구성한 WM_KEY*를 세션 창에 넣는다. down/up이 같은 식을 쓰도록 한 곳에 둔다.
-unsafe fn post_vm_key(target: HWND, kb: &windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT, up: bool, sys: bool) {
-    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, LLKHF_EXTENDED};
-    let extended = kb.flags.0 & LLKHF_EXTENDED.0 != 0;
-    let (msg, l) = key_message(kb.scanCode, extended, up, sys);
-    let _ = PostMessageW(target, msg,
-        windows::Win32::Foundation::WPARAM(kb.vkCode as usize), LPARAM(l));
-}
-
-/// WM_KEY* 메시지 번호와 lParam을 만든다. down/up이 **같은 식**을 써야 원격 쪽에
-/// 눌린 채 남는 키가 안 생기므로 한 곳에 두고 테스트로 고정한다.
-fn key_message(scan_code: u32, extended: bool, up: bool, sys: bool) -> (u32, isize) {
-    use windows::Win32::UI::WindowsAndMessaging::{WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
-    // repeat=1, scancode, extended, 그리고 keyup이면 previous-state + transition 비트.
-    let mut l: isize = 1 | (((scan_code & 0xFF) as isize) << 16);
-    if extended { l |= 1 << 24; }
-    if up { l |= (1 << 30) | (1 << 31); }
-    let msg = if sys {
-        l |= 1 << 29; // context bit: Alt가 눌린 상태
-        if up { WM_SYSKEYUP } else { WM_SYSKEYDOWN }
-    } else if up { WM_KEYUP } else { WM_KEYDOWN };
-    (msg, l)
 }
 
 unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: windows::Win32::Foundation::WPARAM, lparam: LPARAM) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, KBDLLHOOKSTRUCT, HC_ACTION, LLKHF_INJECTED, LLKHF_UP, LLKHF_ALTDOWN,
+        CallNextHookEx, PostMessageW, KBDLLHOOKSTRUCT, HC_ACTION,
+        LLKHF_INJECTED, LLKHF_UP, LLKHF_EXTENDED, LLKHF_ALTDOWN,
+        WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LWIN, VK_RWIN, VK_TAB};
-    use std::sync::atomic::Ordering::Relaxed;
 
     if code == HC_ACTION as i32 {
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
-        // **판정 이전** 지점의 계측. 우리가 먹든 통과시키든, 콜백이 호출되기만 하면
-        // 무조건 남는다 — "훅에 오지도 않은 키"와 "왔는데 판정에서 걸러진 키"를
-        // 가르는 유일한 방법이다. 진단 모드가 꺼져 있으면 즉시 반환한다.
-        crate::keydiag::trace_ll(
-            code, wparam.0, kb.vkCode, kb.scanCode, kb.flags.0, kb.dwExtraInfo,
-            crate::keydiag::hook_install_seq(),
-        );
         let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
         let alt_down = kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
-        let up = kb.flags.0 & LLKHF_UP.0 != 0;
-        let vki = (kb.vkCode & 0xFF) as usize;
-
-        // ── keyup: 그 키의 keydown이 내린 판정을 그대로 따른다 ──────────────
-        // 여기서 **분류(is_win/is_slot_key)를 다시 하지 않는 것**이 핵심이다.
-        // 다시 하면 그 사이 바뀐 포커스/수정자 상태 때문에 답이 갈린다. 특히 Alt+1은
-        // 사용자가 Alt를 먼저 떼면 '1'의 keyup이 `is_slot_key=false`가 되어 그냥 샌다.
-        if up && !injected {
-            match DOWN_ACTION[vki].swap(0, Relaxed) {
-                0 => {}                       // 우리가 안 먹은 키 — 손대지 않는다
-                1 => return LRESULT(1),       // 슬롯 키: 먹기만 하면 된다
-                a => {
-                    // a==3 은 Alt+Tab(WM_SYSKEY*), a==2 는 Win. 위 실험에 맞춰
-                    // Win의 keyup도 위임하지 않는다 — down/up 짝이 맞아야 한다.
-                    let t = DOWN_TARGET[vki].load(Relaxed);
-                    if t != 0 { post_vm_key(HWND(t as *mut _), kb, true, a == 3); }
-                    return LRESULT(1);
-                }
-            }
-        }
-
         let is_win = kb.vkCode == VK_LWIN.0 as u32 || kb.vkCode == VK_RWIN.0 as u32;
         let is_alt_tab = kb.vkCode == VK_TAB.0 as u32 && alt_down;
         // Alt+1..4 (slot switching) must keep working while a VM holds focus —
         // with keyboardhook:i:1 the remote would otherwise swallow them.
-        let is_slot_key = hotkey_mod_down(alt_down) && (0x31..=0x34).contains(&kb.vkCode);
+        let is_slot_key = alt_down && (0x31..=0x34).contains(&kb.vkCode);
 
-        if !injected && !up && is_slot_key {
-            // 슬롯 키를 **우리 훅이 보기는 하는지** 남긴다. 안 찍히면 다른 앱(Horizon)이
-            // 훅 체인에서 우리보다 먼저 가로채 소비한 것이고, 찍히는데 fg=false면
-            // 포그라운드 판정이 문제다 — 둘은 고치는 방법이 완전히 다르다.
-            dlog!("[keyhook] slot key vk={} seen, app_foreground={}",
-                kb.vkCode - 0x30, app_is_foreground());
+        if !injected && is_slot_key {
+            let up = kb.flags.0 & LLKHF_UP.0 != 0;
+            // 여기(와 이 콜백이 부르는 vm_key_target)에 dlog!를 두지 말 것. dlog는 debug
+            // 빌드에서만 파일에 쓰는데, 훅 콜백 안의 파일 I/O는 LowLevelHooksTimeout을 넘겨
+            // 훅이 조용히 빠지게 만들 수 있다 — 그러면 `tauri dev`에서만 Win키가 release
+            // 설치본보다 나쁘게 동작해 비교가 무의미해진다(2026-09-21).
             // **포그라운드가 우리면 슬롯 키는 우리 것이다.** 예전엔 vm_key_target()이
             // Some일 때만(= 포커스가 swallow된 자식 트리 안일 때만) 가로챘는데,
             // Omnissa/Horizon은 포커스 토폴로지가 달라 그 검사를 통과하지 못해
@@ -2508,58 +2352,37 @@ unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: windows::Win32::Fo
             // target 줄이 아예 안 찍힘). 어떤 앱이 어떤 식으로 포커스를 잡든
             // "HyperDesk가 포그라운드"면 슬롯 전환은 우리가 처리하는 게 맞다.
             if app_is_foreground() {
-                let idx = kb.vkCode - 0x31;
-                // Off-thread: app.emit serializes into the webview; the hook
-                // callback must return fast (system LL-hook timeout).
-                std::thread::spawn(move || {
-                    if let Some(app) = APP_HANDLE.get() {
-                        let slot = format!("slot-{}", idx);
-                        let _ = app.emit("hotkey-focus", slot.clone());
-                        focus_window(&slot);
-                    }
-                });
-                DOWN_ACTION[vki].store(1, Relaxed); // keyup도 같이 먹는다
+                if !up {
+                    let idx = kb.vkCode - 0x31;
+                    // Off-thread: app.emit serializes into the webview; the hook
+                    // callback must return fast (system LL-hook timeout).
+                    std::thread::spawn(move || {
+                        if let Some(app) = APP_HANDLE.get() {
+                            let slot = format!("slot-{}", idx);
+                            let _ = app.emit("hotkey-focus", slot.clone());
+                            focus_window(&slot);
+                        }
+                    });
+                }
                 return LRESULT(1); // keep it away from both the remote and RegisterHotKey
             }
         }
 
-        // **포그라운드가 우리면 이 키는 세션 것이다** — 슬롯 키와 같은 규칙.
-        // 예전엔 `vm_key_target()`(스레드별 포커스 추적)이 Some일 때만 가로챘는데,
-        // 그 추적은 클라이언트마다 포커스 토폴로지가 달라 수시로 실패한다
-        // (Horizon은 아예, vmconnect는 원격 메뉴가 열려 포커스가 바뀐 뒤부터).
-        // 실패할 때마다 그 키가 로컬로 새서 시작 메뉴가 열렸다. 그래서 정확한
-        // 포커스 창을 **우선** 쓰되, 못 찾으면 보이는 슬롯의 프레임으로 보낸다.
-        // 세션이 하나도 안 붙어 있으면(대시보드만 보는 중) 둘 다 None이라
-        // Win키는 평소대로 로컬에서 동작한다.
-        if !injected && !up && (is_win || is_alt_tab) {
-            let fg = app_is_foreground();
-            let target = if fg { vm_key_target().or_else(visible_slot_frame) } else { None };
-            match target {
-                Some(target) => {
-                    // **실험(2026-09-11): Win키는 위임하지 않는다.**
-                    // 트레이스로 확정된 사실 — Win 이벤트는 #0~#42가 한 번도 건너뛰지
-                    // 않고 전부 우리 훅을 거쳤고(훅 제거·체인 탈취 아님), 그중 연속
-                    // 8개를 `ToSession`으로 먹었는데도 그 직후 포그라운드가 시작
-                    // 메뉴(CoreWindow)로 넘어가 있었다. 훅에서 끊었는데 셸이 반응했다면
-                    // 로컬 셸이 그 키를 알 경로는 **우리가 클라이언트 창에 직접 넣어준
-                    // posted 메시지**뿐이다. 클라이언트는 SetParent 때문에 자기 포그라운드
-                    // 판정이 깨져 있어서 그 키를 "로컬에 적용"해버린다.
-                    // 사용자 관찰과도 맞는다: "원격 앱이 클릭된 채로 로컬 Win이 올라온다"
-                    // (= 원격엔 안 가고 로컬만 열림).
-                    //
-                    DOWN_ACTION[vki].store(if is_alt_tab { 3 } else { 2 }, Relaxed);
-                    DOWN_TARGET[vki].store(target.0 as isize, Relaxed);
-                    post_vm_key(target, kb, false, is_alt_tab);
-                    return LRESULT(1); // eaten locally — host shell never reacts
-                }
-                None => {
-                    // **낡은 항목을 지운다.** 먹은 keydown의 keyup이 우리 훅에 안 오면
-                    // (훅 재설치 순간, 포커스 이동 등) 항목이 남는데, 그 상태로 로컬에서
-                    // Win을 누르면 그 keyup이 낡은 항목을 소비해 먹혀버린다 — 사용자
-                    // 증상 "원격→로컬로 넘어가자마자 Win 한 번 씹힘"이 이것이다.
-                    // 통과시키는 keydown마다 지우면 짝이 어긋난 채로 남지 않는다.
-                    DOWN_ACTION[vki].store(0, Relaxed);
-                }
+        if !injected && (is_win || is_alt_tab) {
+            if let Some(target) = vm_key_target() {
+                let up = kb.flags.0 & LLKHF_UP.0 != 0;
+                // Rebuild the WM_KEY* lparam: repeat=1, scancode, extended,
+                // and for keyup the previous-state + transition bits.
+                let mut l: isize = 1 | (((kb.scanCode & 0xFF) as isize) << 16);
+                if kb.flags.0 & LLKHF_EXTENDED.0 != 0 { l |= 1 << 24; }
+                if up { l |= (1 << 30) | (1 << 31); }
+                let msg = if is_alt_tab {
+                    l |= 1 << 29; // context bit: Alt is held
+                    if up { WM_SYSKEYUP } else { WM_SYSKEYDOWN }
+                } else if up { WM_KEYUP } else { WM_KEYDOWN };
+                let _ = PostMessageW(target, msg,
+                    windows::Win32::Foundation::WPARAM(kb.vkCode as usize), LPARAM(l));
+                return LRESULT(1); // eaten locally — host shell never reacts
             }
         }
     }
@@ -3211,71 +3034,6 @@ mod tests {
         assert!(excluded_hwnds().contains(&fake_hwnd), "claimed hwnd must be excluded");
         lock_claimed().remove(&fake_hwnd);
         assert!(!excluded_hwnds().contains(&fake_hwnd), "release must un-exclude it");
-    }
-
-    /// keydown/keyup이 같은 식을 쓰는지 고정한다. up에서 previous-state/transition
-    /// 비트가 빠지면 원격 쪽에 키가 **눌린 채로 남고**(Win이 물린 상태), Alt+Tab을
-    /// WM_KEY*로 보내면 원격이 조합으로 인식하지 못한다 — 둘 다 화면만 봐선 원인을
-    /// 추적하기 어려운 부류다.
-    #[test]
-    fn key_message_down_up_pairs() {
-        use super::key_message;
-        use windows::Win32::UI::WindowsAndMessaging::{WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
-
-        // 일반 키 down: repeat=1 + scancode, transition 비트 없음
-        let (msg, l) = key_message(0x5B, false, false, false);
-        assert_eq!(msg, WM_KEYDOWN);
-        assert_eq!(l, 1 | (0x5B << 16));
-
-        // 같은 키 up: previous-state(30) + transition(31)이 켜져야 한다
-        let (msg, l_up) = key_message(0x5B, false, true, false);
-        assert_eq!(msg, WM_KEYUP);
-        assert_eq!(l_up, l | (1 << 30) | (1 << 31));
-
-        // extended 키는 24번 비트
-        let (_, l_ext) = key_message(0x5B, true, false, false);
-        assert_eq!(l_ext, l | (1 << 24));
-
-        // Alt 조합은 WM_SYSKEY* + context 비트(29)
-        let (msg, l_sys) = key_message(0x0F, false, false, true);
-        assert_eq!(msg, WM_SYSKEYDOWN);
-        assert_eq!(l_sys, 1 | (0x0F << 16) | (1 << 29));
-        let (msg, _) = key_message(0x0F, false, true, true);
-        assert_eq!(msg, WM_SYSKEYUP);
-    }
-
-    /// commands::apply_fullscreen only pays set_taskbar_autohide's global side
-    /// effect (other monitors' maximized windows reflow) for mstsc, the one
-    /// client that clamps to the work area — Hyper-V/Horizon slots must not
-    /// trip it.
-    #[test]
-    fn any_rdp_slot_active_only_true_for_a_visible_mstsc_frame() {
-        use super::{lock_state, any_rdp_slot_active, SwallowInfo};
-        fn stub(is_visible: bool, class_name: &str) -> SwallowInfo {
-            SwallowInfo {
-                child_hwnd: 0, original_style: 0, original_ex_style: 0, original_parent: 0,
-                x: 0, y: 0, width: 0, height: 0, parent_hwnd: 0,
-                is_visible, class_name: class_name.to_string(),
-                offset: 0, offset_x: 0, vmconnect_pid: None, header_cutout: None,
-            }
-        }
-        let rdp_slot = format!("test-slot-rdp-{}", std::process::id());
-        let hyperv_slot = format!("test-slot-hyperv-{}", std::process::id());
-
-        // Hyper-V only (vmconnect's WindowsForms10.* class) — no RDP present.
-        lock_state().insert(hyperv_slot.clone(), stub(true, "WindowsForms10.Window.8.app.0"));
-        assert!(!any_rdp_slot_active(), "vmconnect alone must not count as RDP");
-
-        // A hidden RDP slot doesn't count either — only visible ones should.
-        lock_state().insert(rdp_slot.clone(), stub(false, "TscShellContainerClass"));
-        assert!(!any_rdp_slot_active(), "a hidden RDP slot must not count");
-
-        // Now make it visible.
-        lock_state().get_mut(&rdp_slot).unwrap().is_visible = true;
-        assert!(any_rdp_slot_active(), "a visible RDP slot must be detected");
-
-        lock_state().remove(&rdp_slot);
-        lock_state().remove(&hyperv_slot);
     }
 }
 

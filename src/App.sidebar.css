@@ -628,7 +628,10 @@ body::before {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.mst-rack-row:hover {
+/* 키보드로 행 안의 버튼에 들어와도 지금 어느 행에 있는지 보이게 — 포커스 링은
+   버튼에만 뜨므로 행 강조가 없으면 21개 목록에서 위치를 잃는다. */
+.mst-rack-row:hover,
+.mst-rack-row:focus-within {
   border-color: var(--accent-blue);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 12px rgba(91, 130, 190, 0.18);
 }
@@ -747,6 +750,9 @@ body::before {
 
 /* Inline memo chip — truncates so a long note never breaks the row layout */
 /* 주소 컬럼 */
+/* 주소는 "읽는 문장"이 아니라 **대조하는 값**이다(자리수·점 위치로 훑는다).
+   그래서 고정폭 숫자 + 살짝 넓은 자간 + muted보다 한 단계 밝은 색으로 둔다 —
+   muted는 본문 최하위 단계라 목록에서 주소를 찾는 데 쓰기엔 너무 죽는다. */
 .mst-rack-addr {
   flex: 1;
   min-width: 0;
@@ -754,12 +760,20 @@ body::before {
   border-right: 1px solid rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
-  color: var(--text-muted);
-  font-family: var(--font);
+  color: var(--text-secondary);
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
+  letter-spacing: 0.3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 자동 감지 항목은 이름이 곧 주소라 같은 값이 두 칸에 겹쳐 찍힌다 — 그 경우
+   TSX가 주소 칸을 비우고 이 클래스를 붙여 흐릿한 대시만 남긴다. */
+.mst-rack-addr.is-same::before {
+  content: "—";
+  opacity: 0.35;
 }
 
 /* 부하 게이지 */
@@ -805,13 +819,13 @@ body::before {
 }
 
 .mst-rack-connect {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-muted);
   font-size: 12px;
@@ -821,10 +835,8 @@ body::before {
   flex-shrink: 0;
 }
 
-.mst-rack-connect svg {
-  transform: scale(.6);
-  color: var(--accent-blue)
-}
+.mst-rack-connect svg { color: var(--accent-blue); }
+.mst-rack-connect.disabled svg { color: currentColor; }
 
 .mst-rack-connect:hover {
   background: var(--accent-wash);
@@ -1047,14 +1059,16 @@ body::before {
 }
 
 /* ─── 원격 자산 페이지 — 편집/삭제 아이콘 버튼 ─────────────── */
+/* 28px·radius 6px — 앱의 다른 아이콘 버튼(.vm-row-icon 32px, .hd-segment-btn
+   radius 6px)과 같은 계열. 26px·radius 4px는 여기서만 쓰던 예외였다. */
 .mst-rack-icon-btn {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-muted);
   font-size: 12px;
@@ -1076,9 +1090,8 @@ body::before {
   color: var(--accent-red);
 }
 
-.mst-rack-icon-btn svg {
-  transform: scale(.6);
-}
+/* 아이콘 크기는 TSX에서 `size={14}`로 준다 — 24px 아이콘을 transform으로 줄이면
+   획 두께까지 같이 줄어 흐릿해지고, 버튼마다 실제 크기가 제각각이 된다. */
 
 /* ─── Command Hub 하단 통계 바 ─────────────────────────────── */
 .hub-stat-bar {

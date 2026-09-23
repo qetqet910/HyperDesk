@@ -34,9 +34,11 @@ interface SwallowSlotProps {
       세로는 항상 최상단 고정이라 저장하지 않는다. */
   pillX: number;
   onPillMove: (x: number) => void;
+  /** 바깥(`rdp:` 링크)에서 이 슬롯에 연결하라는 요청. nonce당 한 번, 슬롯이 보일 때 처리한다. */
+  connectRequest?: { nonce: number; conn: RemoteHost } | null;
 }
 
-export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange, pillX, onPillMove }: SwallowSlotProps) {
+export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange, pillX, onPillMove, connectRequest }: SwallowSlotProps) {
   // contentRef points to slot-content-area (below the fixed 36px header bar).
   // syncBounds and handleConnect both measure this div so the Win32 window
   // is positioned to fill exactly the content area, never under the header.
@@ -552,6 +554,21 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
       onError(String(e));
     }
   };
+
+  // 바깥 요청으로 연결. 슬롯이 방금 보이게 된 경우 레이아웃이 끝나야 contentRef 크기가
+  // 잡히므로 한 틱 미룬다(0 크기로 재면 mstsc가 0×0으로 뜬다). 처리 표시는 실제로 연결을
+  // 시작할 때 남긴다 — 그 전에 isVisible이 흔들려 타이머가 취소되면 다음 렌더에서 다시 잡는다.
+  const handledRequestRef = useRef(0);
+  useEffect(() => {
+    if (!connectRequest || !isVisible || handledRequestRef.current === connectRequest.nonce) return;
+    const req = connectRequest;
+    const timer = setTimeout(() => {
+      handledRequestRef.current = req.nonce;
+      handleConnect(req.conn);
+    }, 50);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectRequest?.nonce, isVisible]);
 
   // DEV-ONLY: swallow a throwaway Character Map window so SwallowGrid behavior
   // (header overlap, focus, theater, drag, z-index) can be tested with no VM/RDP.

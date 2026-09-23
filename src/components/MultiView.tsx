@@ -1,6 +1,6 @@
 import { useSettings } from "@/contexts/SettingsContext";
 import { SwallowSlot } from "@/components/SwallowSlot";
-import { VmInfo, RemoteHost } from "@/types";
+import { VmInfo, RemoteHost, SlotConnectRequest } from "@/types";
 import { Expand, Shrink, Maximize, Server, Monitor, Globe, RefreshCw, Plus } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
@@ -17,18 +17,22 @@ interface MultiViewProps {
   data: { vms: VmInfo[]; remoteHosts: RemoteHost[] };
   isOverlayActive: boolean;
   onError: (msg: string) => void;
+  /** 바깥(`rdp:` 링크 처리)에서 들어온 연결 요청. nonce가 바뀔 때마다 한 번 처리한다. */
+  connectRequest?: SlotConnectRequest | null;
 }
 
 // Single-slot view: all 4 slots stay mounted so their swallowed sessions persist,
 // but only the active one is visible. Alt+1~4 pages between them (handled in Rust,
 // arrives as the "hotkey-focus" event). There is no grid / theater / focus mode.
-export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
+export function MultiView({ data, isOverlayActive, onError, connectRequest }: MultiViewProps) {
   const { settings, updateSettings } = useSettings();
   const t = useT();
   // 대시보드와 같은 쿼리 키를 쓰므로 React Query가 캐시를 공유한다 — 멀티뷰에
   // 들어왔다고 폴링이 하나 더 붙지 않는다.
   const { data: stats } = useSystemStats();
   const [activeSlot, setActiveSlot] = useState(0);
+  const activeSlotRef = useRef(0);
+  useEffect(() => { activeSlotRef.current = activeSlot; }, [activeSlot]);
   // Immersive: VM view fills the ENTIRE screen (OS fullscreen + container overlays
   // the app chrome; the slot header floats absolute UNDER the VM surface → the
   // remote gets the native resolution). Pushing the cursor to the top screen edge
@@ -159,6 +163,26 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
     });
     return () => { unlisten.then(f => f()); };
   }, []);
+
+  // 바깥에서 온 연결 요청(`rdp:` 링크): 대상 슬롯을 보이게 하고, 배정한 뒤, 그 슬롯에
+  // 연결을 맡긴다. 실제 연결(크기 측정 → mstsc → swallow)은 SwallowSlot의 기존
+  // handleConnect가 한다 — 슬롯이 보이고 레이아웃이 잡혀야 크기를 잴 수 있기 때문이다.
+  const [slotConnect, setSlotConnect] = useState<{ nonce: number; idx: number; host: RemoteHost } | null>(null);
+  useEffect(() => {
+    if (!connectRequest) return;
+    const { nonce, slot, host } = connectRequest;
+    // connect-lock과 같은 이유: swallow 도중 슬롯을 바꾸면 임베드가 깨진다.
+    // 자산은 이미 추가돼 있으니 연결만 건너뛴다.
+    if (anyConnectingRef.current) {
+      onError(t("toast.linkBusy", { name: host.name }));
+      return;
+    }
+    const idx = slot === "current" ? activeSlotRef.current : slot;
+    setActiveSlot(idx);
+    handleUpdateSlot(idx, host.id);
+    setSlotConnect({ nonce, idx, host });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectRequest?.nonce]);
 
   const handleToggleOSFullscreen = async () => {
     // While immersive, the window is already fullscreen and the overlay owns the
@@ -304,6 +328,7 @@ export function MultiView({ data, isOverlayActive, onError }: MultiViewProps) {
                 onConnectedChange={handleConnectedChange}
                 pillX={pillX}
                 onPillMove={setPillX}
+                connectRequest={slotConnect && slotConnect.idx === i ? { nonce: slotConnect.nonce, conn: slotConnect.host } : null}
               />
             );
           })}

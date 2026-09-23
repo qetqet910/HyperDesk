@@ -70,7 +70,7 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
 
   return (
     <div className="settings-card" style={{
-      background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '14px',
+      background: 'rgba(0,0,0,0.2)', padding: '14px', borderRadius: '10px',
       border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '14px'
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -78,7 +78,7 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
           <HardDrive size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
           <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>디스크 사용량</label>
         </div>
-        {disks && <div style={{ fontSize: '15px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>{fmtGB(total)}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '3px' }}>GB</span></div>}
+        {disks && <div style={{ fontSize: '13px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>{fmtGB(total)}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '3px' }}>GB</span></div>}
       </div>
 
       {loadErr && <div style={{ fontSize: '11px', color: 'var(--accent-orange)' }}>디스크 정보를 불러오지 못했습니다.</div>}
@@ -255,15 +255,15 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
   return (
     <>
     <div className="modal-overlay" onClick={onClose} style={{ backdropFilter: 'blur(12px)', background: 'rgba(0,0,0,0.7)', zIndex: 400 }}>
-      <div className="modal-content glass-modal vm-settings-modal" onClick={(e) => e.stopPropagation()} style={{ width: '440px', padding: 0, overflow: 'hidden', border: 'none' }}>
+      <div className="modal-content glass-modal vm-settings-modal" onClick={(e) => e.stopPropagation()} style={{ width: '420px', padding: 0, overflow: 'hidden', border: 'none' }}>
         {/* Decorative Neon Header Line */}
         <div style={{ height: '2px', width: '100%', background: 'linear-gradient(90deg, transparent, var(--neon-blue), transparent)' }} />
         
-        <div className="modal-header" style={{ padding: '28px 24px 20px', marginBottom: 0 }}>
+        <div className="modal-header" style={{ padding: '18px 20px 14px', marginBottom: 0 }}>
           <div className="header-title">
             <div className="neon-text-blue" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <Cpu size={20} />
-              <h3 style={{ fontSize: '19px', fontWeight: 900, letterSpacing: '-0.5px' }}>{vm.name === 'DefaultVM' ? '리소스 임계치 조정' : `${vm.name} 자원 고도화`}</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.5px' }}>{vm.name === 'DefaultVM' ? '리소스 임계치 조정' : `${vm.name} 자원 고도화`}</h3>
             </div>
           </div>
           <button className="btn-icon" onClick={onClose} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
@@ -271,13 +271,13 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
           </button>
         </div>
 
-        <div className="settings-body" style={{ padding: '0 24px 24px' }}>
+        <div className="settings-body" style={{ padding: '0 20px 18px' }}>
           {isRunning && (
             <div style={{ 
               background: 'rgba(251, 191, 36, 0.05)', 
               border: '1px solid rgba(251, 191, 36, 0.2)', 
               borderRadius: '12px', 
-              padding: '16px', 
+              padding: '12px', 
               marginBottom: '24px',
               display: 'flex',
               gap: '14px'
@@ -315,7 +315,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div className="settings-card" style={{ 
-              background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '14px',
+              background: 'rgba(0,0,0,0.2)', padding: '14px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '16px'
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -323,7 +323,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
                   <Cpu size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
                   <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>vCPU Cores</label>
                 </div>
-                <div className="neon-text-blue" style={{ fontSize: '19px', fontWeight: 900 }}>{newProcessors}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: '#fff' }}>VCPU</span></div>
+                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newProcessors}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: '#fff' }}>VCPU</span></div>
               </div>
               <input 
                 type="range" 
@@ -337,7 +337,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
             </div>
 
             <div className="settings-card" style={{ 
-              background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '14px',
+              background: 'rgba(0,0,0,0.2)', padding: '14px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '16px'
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -345,7 +345,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
                   <MemoryStick size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
                   <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Startup Ram</label>
                 </div>
-                <div className="neon-text-blue" style={{ fontSize: '19px', fontWeight: 900 }}>{newMemory}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: '#fff' }}>GB</span></div>
+                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newMemory}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: '#fff' }}>GB</span></div>
               </div>
               <div style={{ position: 'relative' }}>
                 <input 
@@ -362,7 +362,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
                     borderRadius: '10px', 
                     padding: '12px 16px',
                     color: '#fff',
-                    fontSize: '15px',
+                    fontSize: '13px',
                     fontWeight: 700,
                     outline: 'none',
                     transition: 'all 0.2s',
@@ -379,26 +379,26 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
           </div>
 
           {/* Tags */}
-          <div style={{ marginTop: '20px', background: 'rgba(0,0,0,0.2)', padding: '18px 20px', borderRadius: '14px', border: '1px solid var(--glass-border)' }}>
+          <div style={{ marginTop: '12px', background: 'rgba(0,0,0,0.2)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--glass-border)' }}>
             <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '10px' }}>태그</div>
             <TagEditor tags={tags} onChange={setTags} />
           </div>
         </div>
 
-        <div className="modal-actions" style={{ padding: '24px', background: 'rgba(0,0,0,0.2)', display: 'flex', gap: '12px' }}>
+        <div className="modal-actions" style={{ padding: '16px 20px', background: 'rgba(0,0,0,0.2)', display: 'flex', gap: '12px' }}>
           <button 
             className="cancel-btn" 
             onClick={onClose} 
             style={{ 
               flex: 1, 
-              height: '48px', 
+              height: '38px', 
               borderRadius: '12px', 
               background: 'transparent', 
               border: '1px solid var(--glass-border)', 
               color: 'var(--text-secondary)', 
               fontWeight: 700, 
               cursor: 'pointer',
-              fontSize: '15px',
+              fontSize: '13px',
               transition: 'all 0.2s'
             }}
           >
@@ -410,7 +410,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
             disabled={isRunning || isBusy}
             style={{ 
               flex: 2, 
-              height: '48px', 
+              height: '38px', 
               borderRadius: '12px', 
               background: isRunning ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, var(--neon-blue), #4f8ef7)', 
               color: '#fff', 
@@ -421,7 +421,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
               justifyContent: 'center',
               gap: '10px',
               fontWeight: 800,
-              fontSize: '15px',
+              fontSize: '13px',
               boxShadow: isRunning ? 'none' : '0 6px 20px rgba(0, 210, 255, 0.3)',
               transition: 'all 0.2s'
             }}

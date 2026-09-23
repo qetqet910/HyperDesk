@@ -166,29 +166,6 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
             </div>
           </div>
 
-          {/* 슬롯 전환 단축키 — 전역 등록이라 다른 앱과 충돌할 수 있어 바꿀 수 있게 뒀다.
-              백엔드에 즉시 반영해야 한다: 전역 단축키 재등록 + LL 키보드 훅이 볼 값까지
-              한 번에 바꾸는 커맨드를 부른다(둘이 어긋나면 옛 조합만 계속 먹는다). */}
-          <div className="settings-row">
-            <div>
-              <div className="settings-row-label">{t("set.hotkey")}</div>
-              <div className="settings-row-desc">{t("set.hotkeyDesc")}</div>
-            </div>
-            <div className="settings-theme-strip">
-              {(["alt", "ctrl", "shift", "super"] as const).map((m) => (
-                <button
-                  key={m}
-                  className={`settings-theme-btn ${settings.hotkeyModifier === m ? "active" : ""}`}
-                  onClick={async () => {
-                    updateSettings({ hotkeyModifier: m });
-                    await api.setHotkeyModifier(m).catch(console.error);
-                  }}
-                >
-                  {m === "super" ? "Win" : m.toUpperCase()}+1~4
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* ── 모니터링 & 자동화 ── */}
@@ -201,22 +178,30 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.updateCheck")}</div>
               <div className="settings-row-desc">{t("set.updateCheckDesc")}</div>
-              <div
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.updateCheckEnabled}
+                aria-label={t("set.updateCheck")}
                 className={`toggle-switch ${settings.updateCheckEnabled ? "active" : ""}`}
                 onClick={() => updateSettings({ updateCheckEnabled: !settings.updateCheckEnabled })}
               >
                 <div className="toggle-knob" />
-              </div>
+              </button>
             </div>
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.liveSync")}</div>
               <div className="settings-row-desc">{t("set.liveSyncDesc")}</div>
-              <div
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.autoRefresh}
+                aria-label={t("set.liveSync")}
                 className={`toggle-switch ${settings.autoRefresh ? "active" : ""}`}
                 onClick={() => updateSettings({ autoRefresh: !settings.autoRefresh })}
               >
                 <div className="toggle-knob" />
-              </div>
+              </button>
             </div>
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.interval")}</div>
@@ -241,6 +226,9 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
           <div className="settings-fields">
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.defaultAccount")}</div>
+              {/* 설명이 입력칸보다 먼저 온다 — 다른 칸과 순서가 같아야
+                  (라벨 → 설명 → 컨트롤) 컨트롤 줄이 가로로 정렬된다. */}
+              <div className="settings-row-desc">{t("set.defaultAccountDesc")}</div>
               <div className="settings-text-input">
                 <input
                   type="text"
@@ -250,7 +238,6 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
                 />
                 <User size={15} className="input-icon" />
               </div>
-              <div className="settings-row-desc">{t("set.defaultAccountDesc")}</div>
             </div>
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.colorDepth")}</div>
@@ -297,7 +284,8 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
           <div className="settings-fields">
             {HOTKEYS.map((h) => (
               <div className="settings-row col" key={h.keys}>
-                <div className="settings-row-desc">{t(h.descKey)}</div>
+                {/* 다른 그룹과 같은 굵기의 라벨 — 여긴 설명이 곧 항목 이름이다. */}
+                <div className="settings-row-label">{t(h.descKey)}</div>
                 <kbd className="settings-kbd" style={{ alignSelf: "flex-start" }}>{h.keys}</kbd>
               </div>
             ))}
