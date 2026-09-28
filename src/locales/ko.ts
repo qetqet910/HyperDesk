@@ -9,7 +9,6 @@ export const ko: Record<keyof typeof en, string> = {
   "nav.vms": "가상 머신",
   "nav.remote": "원격 자산",
   "nav.snapshots": "스냅샷",
-  "nav.network": "네트워크",
   "nav.events": "이벤트 로그",
   "nav.settings": "설정",
 
@@ -18,7 +17,6 @@ export const ko: Record<keyof typeof en, string> = {
   "page.vms.sub": "Hyper-V Units · Gen 1 + Gen 2",
   "page.remote.sub": "RDP · Horizon · MST",
   "page.snapshots.sub": "복원 지점 및 체크포인트 관리",
-  "page.network.sub": "가상 스위치 · 어댑터 · 트래픽",
   "page.events.sub": "실시간 시스템 스트림",
   "page.settings.sub": "테마 · 동기화 · 업데이트",
 

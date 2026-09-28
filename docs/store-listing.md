@@ -45,7 +45,7 @@ PC에 남아 있는 원격 데스크톱 접속 기록과 Horizon 서버를 자�
 - 키 입력이 한동안 멈추거나 키보드가 먹지 않던 문제를 고쳤습니다.
 - F11 전체화면에서 VM 전체화면을 켰다 끄면 창 크기가 바뀌던 문제를 고쳤습니다.
 - rdp:// 링크를 HyperDesk로 열 수 있습니다. 설정에서 해제할 수도 있습니다.
-- 네트워크 화면(가상 스위치·트래픽)을 메뉴에 추가했습니다.
+- 가상 머신 화면에서 가상 스위치 구성과 네트워크 트래픽을 볼 수 있습니다.
 ```
 
 ### 제품 기능 (항목당 최대 200자, 최대 20개)
@@ -122,7 +122,7 @@ Free and open source under the MIT license.
 - Fixed key input occasionally stalling or the keyboard stopping working.
 - Fixed the window size changing after leaving VM full screen that was entered from F11 full screen.
 - HyperDesk can now open rdp:// links. You can turn this off in Settings.
-- Added a Network page (virtual switches and traffic) to the menu.
+- The Virtual Machines page now shows virtual switches and network traffic.
 ```
 
 ### Product features (up to 200 characters each, up to 20)

@@ -8,7 +8,6 @@ export const en = {
   "nav.vms": "Virtual Machines",
   "nav.remote": "Remote Assets",
   "nav.snapshots": "Snapshots",
-  "nav.network": "Network",
   "nav.events": "Event Log",
   "nav.settings": "Settings",
 
@@ -17,7 +16,6 @@ export const en = {
   "page.vms.sub": "Hyper-V Units · Gen 1 + Gen 2",
   "page.remote.sub": "RDP · Horizon · MST",
   "page.snapshots.sub": "Restore points and checkpoints",
-  "page.network.sub": "Virtual switches · adapters · traffic",
   "page.events.sub": "Live system stream",
   "page.settings.sub": "Theme · Sync · Updates",
 

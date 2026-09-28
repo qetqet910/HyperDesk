@@ -19,12 +19,15 @@ interface MultiViewProps {
   onError: (msg: string) => void;
   /** 바깥(`rdp:` 링크 처리)에서 들어온 연결 요청. nonce가 바뀔 때마다 한 번 처리한다. */
   connectRequest?: SlotConnectRequest | null;
+  /** 요청을 처리(또는 거절)했으면 호출 — App이 요청을 비운다. 안 비우면 멀티뷰에 다시
+      들어올 때(재마운트) 같은 요청을 새것으로 보고 끊은 세션을 또 연결한다. */
+  onConnectRequestHandled?: () => void;
 }
 
 // Single-slot view: all 4 slots stay mounted so their swallowed sessions persist,
 // but only the active one is visible. Alt+1~4 pages between them (handled in Rust,
 // arrives as the "hotkey-focus" event). There is no grid / theater / focus mode.
-export function MultiView({ data, isOverlayActive, onError, connectRequest }: MultiViewProps) {
+export function MultiView({ data, isOverlayActive, onError, connectRequest, onConnectRequestHandled }: MultiViewProps) {
   const { settings, updateSettings } = useSettings();
   const t = useT();
   // 대시보드와 같은 쿼리 키를 쓰므로 React Query가 캐시를 공유한다 — 멀티뷰에
@@ -176,6 +179,8 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest }: Mu
   useEffect(() => {
     if (!connectRequest) return;
     const { nonce, slot, host } = connectRequest;
+    // 한 번만 쓰는 요청이다 — 처리하든 거절하든 바로 비운다(재마운트 시 재연결 방지).
+    onConnectRequestHandled?.();
     // connect-lock과 같은 이유: swallow 도중 슬롯을 바꾸면 임베드가 깨진다.
     // 자산은 이미 추가돼 있으니 연결만 건너뛴다.
     if (anyConnectingRef.current) {
