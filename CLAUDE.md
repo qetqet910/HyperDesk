@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Is
 
-HyperDesk is a Windows-only enterprise desktop app that unifies Hyper-V VM management and remote desktop sessions (RDP, VMware Horizon) into a 2×2 grid interface. Its core innovation is **SwallowGrid™** — a Win32 technique that embeds external application windows (mstsc.exe, vmconnect.exe, Horizon client) directly into React grid slots using `SetParent`/`SetWindowPos`.
+HyperDesk is a Windows-only enterprise desktop app that unifies Hyper-V VM management and remote desktop sessions (RDP, VMware Horizon) into one app: four sessions stay alive and one is shown at a time, switched with Alt+1~4 (single view, **not** a split/2×2 grid — switching is the product's pitch; don't describe it as a split screen in README/Store copy). Its core innovation is **SwallowGrid™** — a Win32 technique that embeds external application windows (mstsc.exe, vmconnect.exe, Horizon client) directly into React grid slots using `SetParent`/`SetWindowPos`.
 
 Tech stack: React 19 + TypeScript + Vite (frontend), Tauri v2 + Rust (backend), Win32 API (window swallowing), PowerShell (Hyper-V automation).
 
@@ -57,7 +57,7 @@ The core Win32 engine. Flow:
 
 **Focus forwarding**: `swallow::focus_window(slot_id)` calls `SetForegroundWindow` + `BringWindowToTop`. Called directly from Alt+1–4 hotkey handlers in `lib.rs` and via `focus_slot_window` Tauri command (triggered by `MultiView.tsx` on hotkey events).
 
-**Keyboard routing**: a `WH_KEYBOARD_LL` hook (`swallow::install_keyboard_hook`, installed in `lib.rs` setup) is active only while HyperDesk is foreground AND keyboard focus lives inside a swallowed child's window tree (`vm_key_target` checks every thread in the tree — mstsc keeps its input window on a different thread than its frame). It (a) eats Win-key/Alt+Tab locally and posts them to the focused child — a reparented mstsc forwards those keys to the remote but fails its own foreground check, so without the hook the HOST shell reacted too; (b) intercepts Alt+1~4 and re-emits `hotkey-focus` so slot switching keeps working even when the remote would otherwise swallow it (`keyboardhook:i:1`).
+**Keyboard routing** (v1.3.1): two `WH_KEYBOARD_LL` hooks installed by `swallow::install_keyboard_hook` (`lib.rs` setup). (a) **Head** `ll_keyboard_proc`, re-installed every 500ms (install-then-unhook) so it stays first in the chain: intercepts Alt+1~4 and re-emits `hotkey-focus` so slot switching works even when the remote (or Horizon's own hook) would swallow it. (b) **Tail** `ll_tail_proc`, installed once so remote clients' own hooks sit in front of it: eats Alt+Tab that a client passed down while focus is in a swallowed session (`vm_key_target` checks every thread in the tree — mstsc keeps its input window on a different thread than its frame). **The Win key is not intercepted** — the remote clients forward it themselves, and they also open the LOCAL Start menu on their own (not via the key stream), so no hook-level fix works; see the Troubleshooting entry "실기기 결과: 여전히 안 됨". Known limitation (Ctrl+Esc as a remote-Start alternative is untested).
 
 **Immersive mode**: `set_immersive` arms a Rust cursor poller (`swallow::set_immersive`). In immersive the header floats `position:absolute` UNDER the VM surface so the VM keeps 100% of the screen at native resolution; top-edge hover makes the poller crop the VM's top 36-CSS-px band via `SetWindowRgn` (`apply_reveal`), letting the header show through and take clicks — the VM never moves or resizes on reveal (moving it caused visible up/down judder).
 
@@ -146,10 +146,13 @@ The core Win32 engine. Flow:
    개인키/비밀번호는 GitHub Actions secrets(`TAURI_SIGNING_PRIVATE_KEY`,
    `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`)로만 보관한다. `tauri.conf.json`의
    `plugins.updater.pubkey`는 공개키이므로 커밋해도 안전하다.
-9. **법적 문서**: `LICENSE`(EULA), `THIRD-PARTY-NOTICES.md`,
-   `PRIVACY.md`는 초안이며 실제 유료 출시 전 법률 검토가 필요하다는 점을
-   사용자에게 다시 알릴 것 — 이 프로젝트의 코드만으로 완전한 법적 효력을
-   보장할 수 없다.
+9. **법적 문서(2026-09-28 결정: 유료 판매 안 함 → MIT)**: `LICENSE`는 MIT 표준
+   원문이다(옛 PolyForm NC "요약본"은 공식 원문과 달라 폐기 — 비상업 조항이 회사
+   업무 사용까지 막을 여지도 있었다). `PRIVACY.md`는 **코드 동작 기준 사실 문서**라
+   데이터 저장 위치·네트워크 통신·레지스트리 쓰기를 바꾸면 같이 고칠 것.
+   `THIRD-PARTY-NOTICES.md`와 앱 내 `LicenseModal.tsx`는 **같은 목록을 두 곳에** 들고
+   있으니 직접 의존성을 추가·삭제하면 둘 다 고칠 것(라이선스는 추측하지 말고
+   `cargo metadata`/`node_modules/*/package.json`에서 읽을 것).
 
 ## Troubleshooting Memory (기억해야 할 에러들)
 
@@ -241,3 +244,33 @@ The core Win32 engine. Flow:
 - **Fix(재발 방지):** `install_keyboard_hook`이 `SetTimer(NULL, 1, 3000, None)` + 펌프의 `WM_TIMER`로 **3초마다 unhook → 재설치**한다. LL 훅 체인은 **가장 최근에 설치한 쪽이 먼저** 호출되므로 재설치는 우리를 항상 앞자리로 되돌린다. 이건 (a) 좀비/타 앱이 앞에 서는 경우와 (b) 프로시저가 `LowLevelHooksTimeout`(기본 300ms)을 넘겨 Windows가 훅을 **말없이 제거**하는 경우를 동시에 덮는다. **이 타이머를 지우지 말 것** — 둘 다 증상이 "아무 로그도 없이 조용히 안 먹음"이라 사후 진단이 극히 어렵다.
 - **교훈:** "우리 훅에 키가 오기는 하는가"와 "와도 조건 판정에서 걸러지는가"는 완전히 다른 문제인데, 조건이 참일 때만 찍는 로그로는 구분이 안 된다. 진단은 **판정 이전 지점**에 넣을 것(`is_slot_key` 계산 전에 vkCode만 보고 찍기). 그리고 `[keyhook]`/`[hotkey]` 로그는 `eprintln`이 아니라 `dlog`로 남길 것 — 릴리즈 빌드엔 콘솔이 없어 `eprintln`은 아무 데도 안 남는다.
 - **디버깅 체크리스트:** 단축키/훅이 "이유 없이" 안 먹으면 코드를 보기 전에 `Get-Process hyperdesk`부터 확인. 좀비가 있으면 전역 단축키(RegisterHotKey)와 LL 훅 **양쪽**을 다 훔친 상태다. dev 서버 포트 충돌(`Port 1420 is already in use`)이 같이 나면 좀비가 있다는 강한 신호다.
+- **Issue:** VM 슬롯에 포커스가 있을 때 Win키를 누르면 **로컬 시작 메뉴가 열린다**(원격으로 안 가거나, 원격과 동시에 열린다). 2026-09-10~11 이틀에 걸쳐 추적했고 **미해결로 종료**했다. 아래는 그 과정에서 실측으로 확정된 것들 — **같은 길을 다시 가지 말 것.**
+- **최종 관측(이게 핵심):** 로컬 시작 메뉴를 여는 그 Win 누름은 **우리 LL 훅에 도착하지 않는다.** 훅 프로시저가 호출조차 되지 않는다. 근거: 모든 Win/Tab 이벤트를 연번 링버퍼로 기록(콜백은 원자 저장만, 별도 스레드가 파일로)하고 포그라운드 전환을 200ms마다 같이 찍어 대조했더니, 앱이 포그라운드인 구간에서 `[fg] → Windows.UI.Core.CoreWindow`(SearchHost/StartMenuExperienceHost)로 넘어가는데 그 직전 구간에 **트레이스가 0줄**이었다. 단발 테스트(3초 정적 → Win 한 번 → 3초 정적)로도 동일. 재설치를 500ms로 줄여 메뉴 열리기 200ms 전에 갓 체인 맨 앞에 설치한 경우에도 동일.
+- **소거된 원인(전부 실측으로 반증, 다시 시도 금지):**
+  1. **down/up 비대칭** — 고쳤다(아래 Fix). 고쳐도 증상 남음.
+  2. **`PostMessageW` 위임이 로컬 메뉴를 연다** — 위임을 완전히 끄고도 열렸다. 2회 확인(1차는 계측 부족으로 무효, `[fg]` 폴러 붙인 2차에서 확정). 끄면 원격만 죽는다.
+  3. **`WM_SYSCOMMAND`/`SC_TASKLIST` 경로** — 메인 창을 `SetWindowSubclass`로 가로채 모든 WM_SYSCOMMAND를 찍었는데 `0xf130`은 **한 번도 안 왔다**(`0xf010`(SC_MOVE)만 옴). 서브클래스 자체는 정상 동작 확인.
+  4. **훅 재설치 구멍** — `unhook → install` 순서라 3초마다 무방비 구간이 생겼던 건 사실이고 고쳤다(v1.3.0 회귀). 고쳐도 증상 남음.
+  5. **주입(SendInput) 복사본이 새는 것** — 주입 이벤트까지 트레이스에 포함시켰으나 단 한 건도 없었다.
+  6. **다른 앱의 전역 훅** — mstsc 잔재·Horizon 클라이언트 스택·사내 메신저(HiworksMessenger)를 **전부 종료하고도** 동일. 찾을 수 있는 유저모드 후보는 소거됨.
+  7. **vmconnect 키보드 설정** — Hyper-V 관리자 → Hyper-V 설정 → 키보드는 이미 "가상 컴퓨터에서 사용"이었다(관련: [[vmconnect-settings-are-xml-not-registry]]).
+- **남은 가설(미검증):** 키보드 필터 드라이버/펌웨어 레벨(보안 프로그램, 제조사 키보드 SW)이 Win키를 유저모드 훅보다 먼저 처리. 판별법 — **화상 키보드(osk.exe)로 Win을 눌러본다.** osk는 `SendInput`이라 훅에 `injected`로 잡히므로, 물리 키는 트레이스에 안 남고 osk는 남으면 드라이버/펌웨어 레벨이 확정된다.
+- **코드 상태(2026-09-21): 키 훅 관련 수정은 전부 v1.3.0으로 되돌렸다** — 사용자 판단으로 v1.3.0의 증상은 "무시하고 쓸 정도"라, 원인 미확정인 채 코드만 늘리지 않기로 했다. 조사 중 찾은 실제 버그와 그 수정(참고용 — 다시 살릴 때만):
+  - **down/up 비대칭**: keyup을 재분류하면 Alt+1에서 Alt를 먼저 뗄 때 '1'의 keyup이 새고, Win keyup도 갈린다. 수정은 keydown 판정을 vk별로 저장해 keyup이 따르게 하는 것.
+  - **`app_is_foreground()`**: `IsChild`는 WS_CHILD 체인만 따라가서 vmconnect WinForms 프레임이 스스로 포그라운드가 되면 false.
+  - **재설치 구멍**: v1.3.0의 3초 재설치는 `unhook → install` 순서라 그 사이 훅이 없다. 되살린다면 `install → unhook`.
+  - 전체 작업은 브랜치 `fix/keyhook-symmetry-and-taskbar-gate`의 `5e7cf8c`(수정)·`88c9f12`(keydiag 진단 모듈) 커밋에 남아 있다.
+- **재적용(2026-09-28, 사용자 재요청 "Win키 잘 안 먹음 + 가끔 키보드 전체가 안 먹음 + Omnissa Alt+1~4 간헐"):** 로컬 시작 메뉴 건과 별개로 **증상이 확인된 버그만** 다시 넣었다. (1) down/up 대칭(`DOWN_ACTION`, 뒤쪽 훅은 `TAIL_EATEN`) — 갈리면 원격/로컬 한쪽에 Win이 눌린 채 남아 "키보드가 안 먹는" 상태가 된다. (2) `vm_key_target`이 `lock_state()`를 **기다리지 않는다**(`try_lock` + `KEY_CHILD_CACHE`) — `update_position`/`set_header_cutout`이 락을 쥔 채 다른 프로세스 창에 동기 Win32 호출을 하므로, 훅이 거기서 멈추면 시스템 전체 키 입력이 멈추고 타임아웃 누적 시 훅이 말없이 빠진다. (3) 재설치 `install → unhook`, 주기 3초→**500ms** — Horizon은 포커스 받을 때 자기 LL 훅을 새로 걸어 맨 앞에서 Alt+숫자를 먹으므로 3초면 클릭 직후 최대 3초간 전환이 안 됐다(실측: Horizon/mstsc/vmconnect의 보이는 최상위 창은 0개 — 전부 우리 창의 자식이라 `app_is_foreground` 판정 문제는 아님). (3)번 Alt+1~4·(4)번 커서는 **사용자 실기기 확인 완료(2026-09-28)**. Win키는 아래 설계 전환 후에도 **미해결**.
+- **설계 전환(2026-09-28, `[keytrace]`로 전제가 뒤집힘): 훅을 앞/뒤 둘로 나눴다.** 우리 훅이 아무것도 안 넘긴(PASS) 첫 Win도 VM에 들어갔다 — **원격 클라이언트는 SetParent 뒤에도 자기 LL 훅으로 Win을 원격에 보낸다.** 다만 자기 창이 진짜 포그라운드가 아니라 키를 아래로 흘려 로컬 셸도 받는다(초기 기록의 "양쪽에서 열림"). 그래서 (a) **앞쪽 훅**(`ll_keyboard_proc`, 500ms마다 맨 앞으로 재설치)은 Alt+1~4만 처리하고 Win/Alt+Tab은 건드리지 않는다. (b) **뒤쪽 훅**(`ll_tail_proc`, **한 번만** 설치 — 클라이언트가 포커스 때 새로 걸어 그 앞에 서야 한다)이 클라이언트가 흘려보낸 Win/Alt+Tab을 **먹기만** 한다. **맨 앞에서 먹고 세션 창에 WM_KEY*를 직접 post하던 방식은 되살리지 말 것** — 클라이언트 훅을 건너뛰게 만들고, 직후 로컬 시작 메뉴가 포그라운드를 가져가 두 번째 Win부터 전부 로컬로 갔다("처음만 VM"). Esc로 시작 메뉴를 닫는 우회책도 금지(남은 Esc가 멀티뷰 "Esc=전체화면 해제"를 발동). 진단: `[keytrace]` HEAD_SEEN / TAIL_EAT / TAIL_PASS. HEAD_SEEN만 있고 TAIL_*이 없으면 클라이언트가 먹은 것(정상), TAIL_PASS면 포그라운드/포커스 판정 실패. **실기기 결과: 여전히 안 됨.** 로그상 누름·뗌을 둘 다 TAIL_EAT로 먹었는데도 다음 누름 시점엔 이미 로컬 시작 메뉴(`CoreWindow`)가 포그라운드였다 → 로컬 시작 메뉴를 여는 건 **키 입력이 아니라 원격 클라이언트 자신**이다(자기 창이 진짜 포그라운드가 아니라서로 추정). 훅 수준에서는 더 할 게 없다. 남은 길: (A) SetParent 대신 소유(owned) 창으로 슬롯 위에 겹쳐 세션 창을 진짜 포그라운드로 만들기, (B) RDP ActiveX 인프로세스 호스팅.
+- **Issue:** `rdp://` 링크를 열면 "localhost 연결을 거부했습니다"(ERR_CONNECTION_REFUSED) 화면이 뜬다 (2026-09-28).
+- **Fix:** `rdplink::register_protocol`이 **매 실행마다 자기 exe 경로로** `HKCU\Software\Classes\HyperDesk.rdp`를 덮어써서, debug 빌드를 한 번만 띄워도 링크가 `target\debug\hyperdesk.exe`로 넘어갔다. debug exe는 화면을 dev 서버(localhost:1420)에서 불러오므로 서버가 꺼져 있으면 저 화면이 뜬다. 등록 호출을 `#[cfg(not(debug_assertions))]`로 막았다 — **debug에서 다시 켜지 말 것.** 추가로 **Store(MSIX) 설치본은 이 HKCU 쓰기가 패키지 안으로 격리돼 시스템에 안 보인다** — 그래서 Store 빌드는 `src-tauri/gen/windows/bundle.config.json`의 `extensions.protocolHandlers`(→ AppxManifest `windows.protocol`)로 `rdp`를 선언한다. 이게 비어 있으면 Store 설치본은 `rdp:` 링크를 못 받는다. 미검증: MSIX 프로토콜 활성화 시 URI가 argv로 넘어와 `rdplink::accept_args`가 받는지.
+- **Issue:** VM 위에서 원격 커서(I빔·손가락 등)가 **계속 깜빡이며** 적용 안 됨 (2026-09-28).
+- **Fix:** swallow된 자식이 `WM_SETCURSOR`를 DefWindowProc로 넘기면 **부모에게 먼저** 묻는데, 부모 `Chrome_WidgetWin_0`은 **우리 프로세스 소유**(실측 — 그 아래 `Chrome_WidgetWin_1`/렌더러만 msedgewebview2)이고 그 위의 tao는 클라이언트 영역 `WM_SETCURSOR`마다 화살표로 `SetCursor`한다. 그래서 원격 커서와 화살표가 매 이동마다 번갈아 찍혔다. `hook_container_cursor`가 컨테이너 wndproc을 교체해 **swallow된 자식 트리에서 온** `WM_SETCURSOR`엔 FALSE를 돌려준다(단독 실행과 같은 동작). 웹뷰 자신의 창(`Chrome_*`/`Intermediate D3D`)은 원래 경로 그대로. 휠 미적용은 아직 원인 미확정 — `[wheel] reached container` dlog가 찍히면 "세션이 휠을 안 받고 부모로 흘림", 안 찍히면 "휠이 세션으로 안 감"이다. **사용자 실기기 확인: 커서·휠 모두 해결(2026-09-28).**
+- **진단 원칙(이번에 값비싸게 배운 것):**
+  - **콜백 안에서 `dlog!`(파일 I/O)·락·창 열거 금지.** 공식 문서: `LowLevelHooksTimeout`(기본 300ms)을 넘기면 훅이 "silently removed without being called" 된다. 진단이 필요하면 콜백은 원자 저장만 하고 별도 스레드가 파일로 흘린다.
+  - **연번은 "빠진 이벤트"를 증명하지 못한다.** 번호를 우리 콜백이 매기므로 우리를 안 거친 이벤트는 구멍을 남기지 않는다. "번호가 연속이니 전부 거쳤다"고 판단했다가 틀렸다. 빠짐을 보려면 **포그라운드 전환 같은 외부 사건과 대조**해야 한다.
+  - **"안 먹은 것"만 찍으면 "훅에 오지도 않은 것"이 안 보인다.** 판정 이전 지점에서 전부 기록할 것.
+- **Issue:** RDP 슬롯이 있는 상태로 전체화면(F11/몰입)에 들어가면 작업표시줄이 자동숨김으로 바뀌며 **화면이 번쩍이고**, 다른 모니터의 최대화 창까지 **리사이즈**되는 현상 (2026-09-10, 09-21 사용자 보고).
+- **Fix: 작업표시줄을 숨기지 말고 작업영역 값만 바꾼다** (`commands.rs` `expand_work_area`/`restore_work_area`). 전체화면에서 작업영역을 건드리는 이유는 **mstsc가 자기 창을 모니터 작업영역에 클램프**하기 때문(작업표시줄 높이만큼 하단이 안 채워짐, 실측 2026-09-03)이다. 예전엔 `SHAppBarMessage(ABS_AUTOHIDE)`로 작업표시줄을 자동숨김으로 바꿔 작업영역을 넓혔는데, 그건 전역 설정 토글이라 작업표시줄 슬라이드(번쩍임)와 설정 변경 브로드캐스트(다른 창 리플로우)가 따라온다. `SystemParametersInfo(SPI_SETWORKAREA, …, 0)`은 **`SPIF_SENDCHANGE` 없이** 값만 바꿔서 둘 다 없다 — 실측(2026-09-21 프로브 `work_area_changes_without_broadcast`, `--ignored`): 알림 없이 `(0,0,1920,1032)`→`(0,0,1920,1080)`이 `GetMonitorInfo`에 즉시 반영되고 원복도 정확했다.
+- **하지 말 것:** (1) `ABS_AUTOHIDE` 방식으로 되돌리지 말 것. (2) `SPIF_SENDCHANGE`/`SPIF_UPDATEINIFILE`을 넣지 말 것 — 넣는 순간 브로드캐스트/영구 저장이 돼 리플로우가 되살아난다. (3) "RDP가 있을 때만" 같은 게이트를 다시 넣지 말 것 — autohide 시절엔 토글이 번쩍여서 필요했지만, 게이트는 "Hyper-V 슬롯에서 전체화면 → RDP로 전환하면 하단 안 채워짐"을 낳았다. 알림 없는 변경은 부작용이 안 보이므로 전체화면 진입 시 항상 넓힌다. (4) 원래 값은 `GetMonitorInfo`로 **그 모니터의** `rcWork`를 저장할 것(`SPI_GETWORKAREA`는 주 모니터만 준다). 종료 경로(X·트레이 종료·Destroyed)에서도 `restore_work_area()`를 부른다.
+- **미검증:** mstsc가 넓힌 작업영역을 실제로 받아들여 하단까지 채우는지는 화면으로 확인해야 한다(프로브는 OS 값 반영까지만 증명). 또 전체화면 도중 Explorer가 작업영역을 스스로 재계산(작업표시줄 크기 변경·디스플레이 변경 등)하면 원래 값으로 돌아갈 수 있다.

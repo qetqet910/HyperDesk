@@ -34,9 +34,11 @@ interface SwallowSlotProps {
       세로는 항상 최상단 고정이라 저장하지 않는다. */
   pillX: number;
   onPillMove: (x: number) => void;
+  /** 바깥(`rdp:` 링크)에서 이 슬롯에 연결하라는 요청. nonce당 한 번, 슬롯이 보일 때 처리한다. */
+  connectRequest?: { nonce: number; conn: RemoteHost } | null;
 }
 
-export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange, pillX, onPillMove }: SwallowSlotProps) {
+export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange, pillX, onPillMove, connectRequest }: SwallowSlotProps) {
   // contentRef points to slot-content-area (below the fixed 36px header bar).
   // syncBounds and handleConnect both measure this div so the Win32 window
   // is positioned to fill exactly the content area, never under the header.
@@ -63,7 +65,6 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
   const [isActuallyHidden, setIsActuallyHidden] = useState(!isVisible);
 
   // Use Refs for logic control to avoid infinite re-render loops
-  const retryCountRef = useRef(0);
   const lastSyncRef = useRef<number>(0);
   const lastBoundsRef = useRef({ x: -1, y: -1, w: -1, h: -1 });
   const prevSyncLockedRef = useRef<boolean>(!!isSyncLocked);
@@ -99,7 +100,6 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
         setIsSwallowed(true);
         setIsConnecting(false);
         setIsGlitched(false);
-        retryCountRef.current = 0;
 
         // Immediate sync to lock position before stabilization
         syncBounds();
@@ -148,7 +148,6 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
         if (mounted && isValid) {
           setIsSwallowed(true);
           setIsGlitched(false);
-          retryCountRef.current = 0;
         }
       } catch (e) {
         console.error("Check status failed", e);
@@ -491,7 +490,6 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
         if (isValid && !isSwallowedRef.current) {
           setIsSwallowed(true);
           setIsGlitched(false);
-          retryCountRef.current = 0;
         } else if (!isValid && isSwallowedRef.current) {
           setIsSwallowed(false);
           setIsGlitched(true);
@@ -552,6 +550,21 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
       onError(String(e));
     }
   };
+
+  // 바깥 요청으로 연결. 슬롯이 방금 보이게 된 경우 레이아웃이 끝나야 contentRef 크기가
+  // 잡히므로 한 틱 미룬다(0 크기로 재면 mstsc가 0×0으로 뜬다). 처리 표시는 실제로 연결을
+  // 시작할 때 남긴다 — 그 전에 isVisible이 흔들려 타이머가 취소되면 다음 렌더에서 다시 잡는다.
+  const handledRequestRef = useRef(0);
+  useEffect(() => {
+    if (!connectRequest || !isVisible || handledRequestRef.current === connectRequest.nonce) return;
+    const req = connectRequest;
+    const timer = setTimeout(() => {
+      handledRequestRef.current = req.nonce;
+      handleConnect(req.conn);
+    }, 50);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectRequest?.nonce, isVisible]);
 
   // DEV-ONLY: swallow a throwaway Character Map window so SwallowGrid behavior
   // (header overlap, focus, theater, drag, z-index) can be tested with no VM/RDP.
@@ -661,13 +674,11 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
               <>
                 <RefreshCw size={24} className="spinning" />
                 <span>{selectedConnection?.name} 분석 중...</span>
-                {retryCountRef.current > 0 && <span className="retry-status">재연결 시퀀스 가동 ({retryCountRef.current} / 7)</span>}
                 <button
                   className="retry-btn-sm"
                   style={{ marginTop: '12px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.3)', color: 'var(--text-main)' }}
                   onClick={() => {
                     setIsConnecting(false);
-                    retryCountRef.current = 0;
                     // Bumps the backend's per-slot generation counter so the
                     // in-flight hunt thread (which has nothing in SWALLOW_STATE
                     // to tear down yet) notices it's been superseded and exits
@@ -686,8 +697,11 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                   {selectedConnection?.name} {isGlitched ? "(신호 유실)" : "(연결 끊김)"}
                 </span>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  {/* 자동 재접속은 일부러 없다 — 세션이 끝난 게 비정상 종료인지, 사용자가
+                      VM 안에서 로그오프/연결 끊기를 한 건지 구분할 수 없어서 다시 붙으면
+                      안 되는 경우까지 붙어버린다. 끊긴 슬롯은 한 번 클릭으로 다시 연결한다. */}
                   <button className="retry-btn-sm" onClick={() => selectedConnection && handleConnect(selectedConnection)}>
-                    연결 시작
+                    {isGlitched ? "다시 연결" : "연결 시작"}
                   </button>
                   <button className="retry-btn-sm" style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-main)' }} onClick={handleClearAssignment}>
                     슬롯 비우기

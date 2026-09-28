@@ -4,6 +4,7 @@ import {
   Globe, Cpu, Settings as LucideSettings,
   Server,
   Play,
+  Notebook,
   AlertTriangle
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
@@ -23,8 +24,7 @@ import { CreateVmModal } from "@/components/CreateVmModal";
 // the initial app chunk (and its parse cost at startup).
 const SettingsPage = lazy(() => import("@/components/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const MultiView = lazy(() => import("@/components/MultiView").then(m => ({ default: m.MultiView })));
-const SnapshotsPage = lazy(() => import("@/components/SnapshotsPage").then(m => ({ default: m.SnapshotsPage })));
-import { AssetModal } from "@/components/AssetModal";
+const SnapshotsPage = lazy(() => import("@/components/SnapshotsPage").then(m => ({ default: m.SnapshotsPage })));import { AssetModal } from "@/components/AssetModal";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { MemoModal } from "@/components/MemoModal";
 import { ColumnToggle } from "@/components/ColumnToggle";
@@ -38,7 +38,7 @@ const RemotePage = lazy(() => import("@/components/RemotePage").then(m => ({ def
 import { CommandPalette } from "@/components/CommandPalette";
 import { useT, type Key } from "@/lib/i18n";
 import { useVmActions } from "@/hooks/useDashboard";
-import type { VmInfo, RemoteHost } from "@/types";
+import type { VmInfo, RemoteHost, SlotConnectRequest } from "@/types";
 import { Reorder, AnimatePresence, motion, MotionConfig } from 'framer-motion';
 import { DotLottieReact, setWasmUrl } from "@lottiefiles/dotlottie-react";
 // dotlottie-web fetches its WASM from a CDN by default (cdn.jsdelivr.net), which
@@ -68,8 +68,7 @@ const PAGE_KEYS: Record<Page, { title: Key; subtitle: Key }> = {
   multiview: { title: "nav.multiview", subtitle: "page.multiview.sub" },
   vms:       { title: "nav.vms",       subtitle: "page.vms.sub" },
   remote:    { title: "nav.remote",    subtitle: "page.remote.sub" },
-  snapshots: { title: "nav.snapshots", subtitle: "page.snapshots.sub" },
-  events:    { title: "nav.events",    subtitle: "page.events.sub" },
+  snapshots: { title: "nav.snapshots", subtitle: "page.snapshots.sub" },  events:    { title: "nav.events",    subtitle: "page.events.sub" },
   settings:  { title: "nav.settings",  subtitle: "page.settings.sub" },
 };
 
@@ -112,33 +111,19 @@ export default function App() {
   // ── Modals ──
   const [showAssetModal, setShowAssetModal] = useState(false);
   const [editingHost, setEditingHost] = useState<RemoteHost | null>(null);
+  // 신규 등록 시 미리 고를 프로토콜. 가상 머신 탭의 "Omnissa 등록"은 VDI로,
+  // 원격 자산 탭의 "원격 자산 등록"은 RDP로 연다(편집일 땐 무시된다).
+  const [addProtocol, setAddProtocol] = useState<"RDP" | "HORIZON">("RDP");
   const [showVmSettings, setShowVmSettings] = useState<VmInfo | null>(null);
   const [showCreateVm, setShowCreateVm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [errorModal, setErrorModal] = useState<{ title: string; body: string } | null>(null);
   const [showSearch, setShowSearch] = useState(false);
-  const [showQuitConfirm, setShowQuitConfirm] = useState(false);
   // Notepad-style memo modal for a remote asset (opened from asset rows).
   const [memoHost, setMemoHost] = useState<RemoteHost | null>(null);
-  const isOverlayActive = !!(showAssetModal || confirmDelete || showVmSettings || errorModal || showSearch || showQuitConfirm || memoHost);
-
-  // Release builds: the window's own X button no longer silently minimizes to
-  // tray (see lib.rs CloseRequested — it prevent_close()s and emits this
-  // instead). Confirm→hide to tray; Cancel/✕ leaves the window exactly as it
-  // was, since the native close was already prevented.
-  useEffect(() => {
-    const unlisten = listen("close-requested", () => setShowQuitConfirm(true));
-    return () => { unlisten.then(f => f()); };
-  }, []);
-
-  const handleMinimizeToTray = async () => {
-    try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      await getCurrentWindow().hide();
-    } catch (e) {
-      console.error("Failed to hide window", e);
-    }
-  };
+  // `rdp:` 링크가 왔는데 빈 슬롯이 없을 때 "지금 슬롯을 비울까?"를 묻는 대상.
+  const [replaceAsk, setReplaceAsk] = useState<RemoteHost | null>(null);
+  const isOverlayActive = !!(showAssetModal || confirmDelete || showVmSettings || errorModal || showSearch || memoHost || replaceAsk);
 
   // ── Data ──
   const [logs, setLogs] = useState<{ id: string; msg: string; type: string; time: string }[]>([]);
@@ -148,6 +133,54 @@ export default function App() {
   const vms = data?.vms ?? [];
   const remoteHosts = data?.remote_hosts ?? [];
   const horizonHosts = useMemo(() => remoteHosts.filter(h => h.protocol === "HORIZON"), [remoteHosts]);
+
+  // ── `rdp:` 링크 ─────────────────────────────────────────────────────────────
+  // Windows 선택 창에서 HyperDesk로 연 `rdp:` 링크: 원격 자산에 없으면 추가하고, 빈
+  // 슬롯에 바로 연결한다. 빈 슬롯이 없으면 지금 슬롯을 비울지 묻는다(아니오 = 자산만 추가).
+  const [slotRequest, setSlotRequest] = useState<SlotConnectRequest | null>(null);
+  // 리스너가 한 번만 걸리도록 최신 목록은 ref로 읽는다(클로저에 옛 목록이 갇히지 않게).
+  const linkCtx = useRef({ remoteHosts, slotAssignments: settings.slotAssignments ?? {} });
+  linkCtx.current = { remoteHosts, slotAssignments: settings.slotAssignments ?? {} };
+
+  const connectToSlot = useCallback((slot: number | "current", host: RemoteHost) => {
+    setPage("multiview"); // MultiView는 이 페이지에서만 마운트된다
+    setSlotRequest({ nonce: Date.now(), slot, host });
+  }, []);
+
+  const handleRdpLink = useCallback(async () => {
+    const link = await api.takeRdpLink().catch(() => null);
+    if (!link) return;
+    const { remoteHosts: hosts, slotAssignments } = linkCtx.current;
+    // 기본 포트(3389)는 붙이든 안 붙이든 같은 대상이다 — 레지스트리에서 감지된 자산은
+    // 보통 포트 없이, 링크는 `host:3389`로 오는 경우가 많아 중복 등록되기 쉽다.
+    const norm = (h: string) => h.toLowerCase().replace(/:3389$/, "");
+    let host = hosts.find(h => h.protocol === "RDP" && norm(h.host) === norm(link.host));
+    if (!host) {
+      try {
+        const id = await api.addRemoteHost(link.host, link.host, "RDP", link.username ?? undefined);
+        host = { id, name: link.host, host: link.host, username: link.username ?? undefined, protocol: "RDP", is_detected: false, is_hidden: false };
+        refetch();
+        addToast(t("toast.linkAssetAdded", { name: link.host }), "success");
+      } catch (e) {
+        addToast(String(e), "error");
+        return;
+      }
+    }
+    const empty = [0, 1, 2, 3].find(i => !slotAssignments[i]);
+    if (empty === undefined) setReplaceAsk(host);
+    else connectToSlot(empty, host);
+  }, [connectToSlot, refetch, addToast, t]);
+
+  // 목록이 로드된 뒤에만 처리한다. 링크로 앱이 막 켜진 순간엔 원격 자산 목록이 아직
+  // 비어 있어서, 이미 있는 자산을 또 추가하게 된다. 링크는 백엔드 대기열에 남아 있으니
+  // 로드가 끝날 때 가져가면 된다.
+  const dashboardReady = !!data;
+  useEffect(() => {
+    if (!dashboardReady) return;
+    handleRdpLink(); // 꺼져 있다가 링크로 실행된 경우
+    const unlisten = listen("rdp-link", () => { handleRdpLink(); }); // 이미 떠 있을 때
+    return () => { unlisten.then(f => f()); };
+  }, [dashboardReady, handleRdpLink]);
   const mstHostsList  = useMemo(() => remoteHosts.filter(h => h.protocol !== "HORIZON"), [remoteHosts]);
   const runningVms    = vms.filter(v => v.state === "Running").length;
 
@@ -308,7 +341,7 @@ export default function App() {
       {page !== "settings" && (
         <button
           className="tool-btn"
-          onClick={() => { setEditingHost(null); setShowAssetModal(true); }}
+          onClick={() => { setEditingHost(null); setAddProtocol("RDP"); setShowAssetModal(true); }}
           title={t("dash.addAsset")}
         >
           <Plus size={15} />
@@ -561,7 +594,7 @@ export default function App() {
         >
           <Globe size={14} color="var(--accent-blue)" /><h3>{t("dash.remoteAssets")}</h3><div className="section-line" />
           <ColumnToggle value={settings.remoteAssetColumns} onChange={(v) => updateSettings({ remoteAssetColumns: v })} />
-          <button className="hd-segment-btn" onClick={() => { setEditingHost(null); setShowAssetModal(true); }} title={t("dash.registerAsset")}>
+          <button className="hd-segment-btn" onClick={() => { setEditingHost(null); setAddProtocol("RDP"); setShowAssetModal(true); }} title={t("dash.registerAsset")}>
             <Plus size={13} />
           </button>
         </motion.div>
@@ -608,18 +641,22 @@ export default function App() {
                       <span className={`mst-proto-tag ${proto}`}>{host.protocol}</span>
                       {host.is_detected && <span className="mst-proto-tag auto">AUTO</span>}
                     </div>
-                    {/* 주소 */}
-                    <div className="mst-rack-addr">{host.host}</div>
+                    {/* 주소. 자동 감지는 이름이 곧 주소라 겹쳐 찍지 않는다(원격 자산 탭과 동일). */}
+                    <div className={`mst-rack-addr${host.host === host.name ? " is-same" : ""}`}>
+                      {host.host === host.name ? "" : host.host}
+                    </div>
                     {/* 액션 */}
                     <div className="mst-rack-actions">
                       <button
                         className={`mst-rack-connect ${isOffline ? "disabled" : ""}`}
                         disabled={isOffline}
+                        title={isOffline ? t("dash.offline") : t("dash.connect")}
                         onClick={() => !isOffline && connectHost.mutateAsync({ host: host.host, protocol: host.protocol, username: host.username })}
                       >
-                        <Play/>
+                        <Play size={13} />
                       </button>
-                      <button className="mst-rack-icon-btn" title={t("dash.memo")} onClick={() => setMemoHost(host)}>✎</button>
+                      {/* 글리프("✎") 대신 아이콘 — 나머지 버튼과 같은 획 두께·크기를 쓴다. */}
+                      <button className="mst-rack-icon-btn" title={t("dash.memo")} onClick={() => setMemoHost(host)}><Notebook size={14} /></button>
                     </div>
                   </div>
                 </Reorder.Item>
@@ -683,8 +720,8 @@ export default function App() {
                 setPage(p);
               }
             }}
-            vmCount={vms.length}
-            remoteCount={remoteHosts.length}
+            vmCount={vms.length + horizonHosts.length}
+            remoteCount={mstHostsList.length}
             runningCount={runningVms}
             occupiedSlots={Object.keys(settings.slotAssignments ?? {}).length}
           />
@@ -713,12 +750,25 @@ export default function App() {
                   never shows the fallback on first paint. */}
               <Suspense fallback={<div className="hd-page" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "12px" }}>{t("common.loading")}</div>}>
                 {page === "multiview" ? (
-                  <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} onError={(msg) => { addToast(msg, "error"); addLog(`[MULTIVIEW] ${msg}`, "error"); }} />
+                  <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} connectRequest={slotRequest} onConnectRequestHandled={() => setSlotRequest(null)} onError={(msg) => { addToast(msg, "error"); addLog(`[MULTIVIEW] ${msg}`, "error"); }} />
                 ) : (
                   <div className="hd-page" key={page}>
                     {page === "dashboard" && DashboardContent}
-                    {page === "vms" && <VmsPage vms={vms} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={setShowVmSettings} onCreate={() => setShowCreateVm(true)} />}
-                    {page === "remote" && <RemotePage remoteHosts={remoteHosts} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onMemo={setMemoHost} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setShowAssetModal(true); }} />}
+                    {page === "vms" && <VmsPage
+                      vms={vms}
+                      statsData={statsData}
+                      horizonHosts={horizonHosts}
+                      onError={handleError}
+                      onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }}
+                      onSettings={setShowVmSettings}
+                      onCreate={() => setShowCreateVm(true)}
+                      onHostConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })}
+                      onHostEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }}
+                      onHostMemo={setMemoHost}
+                      onHostDelete={setConfirmDelete}
+                      onHostAdd={() => { setEditingHost(null); setAddProtocol("HORIZON"); setShowAssetModal(true); }}
+                    />}
+                    {page === "remote" && <RemotePage remoteHosts={mstHostsList} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onMemo={setMemoHost} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setAddProtocol("RDP"); setShowAssetModal(true); }} />}
                     {page === "snapshots" && <SnapshotsPage vms={vms} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[SNAP] ${msg}`, "success"); }} onError={(msg) => { addToast(msg, "error"); addLog(`[SNAP] ${msg}`, "error"); }} />}
                     {page === "events"    && <EventsPage logs={logs} onClear={() => setLogs([])} />}
                     {page === "settings"  && <SettingsPage addToast={addToast} />}
@@ -757,7 +807,7 @@ export default function App() {
             onQuickConnect={(host) => connectHost.mutate({ host, protocol: "RDP", username: settings.defaultUsername || undefined })}
             onHostEdit={(host) => { setEditingHost(host); setShowAssetModal(true); closeSearch(); }}
             onHostDelete={(host) => { setConfirmDelete(host.id); closeSearch(); }}
-            onAddAsset={() => { setEditingHost(null); setShowAssetModal(true); closeSearch(); }}
+            onAddAsset={() => { setEditingHost(null); setAddProtocol("RDP"); setShowAssetModal(true); closeSearch(); }}
             onThemeToggle={() => { const next = settings.theme === "light" ? "dark" : "light"; applyTheme(next); updateSettings({ theme: next }); }}
           />
 
@@ -767,10 +817,12 @@ export default function App() {
             onCreated={(name) => { setShowCreateVm(false); addToast(t("toast.vmCreated", { name }), "success"); addLog(t("log.vmCreated", { name }), "success"); refetch(); }}
             onError={(msg) => { handleError(msg); }}
           />}
-          {showAssetModal  && <AssetModal initialData={editingHost ?? undefined} isEditing={!!editingHost} isPending={addHost.isPending || updateHost.isPending} onClose={() => { setShowAssetModal(false); setEditingHost(null); }} onSubmit={handleAssetAction} />}
+          {showAssetModal  && <AssetModal initialData={editingHost ?? (addProtocol === "HORIZON"
+            ? { id: "", name: "", host: "", username: "", protocol: "HORIZON", is_detected: false, is_hidden: false }
+            : undefined)} isEditing={!!editingHost} isPending={addHost.isPending || updateHost.isPending} onClose={() => { setShowAssetModal(false); setEditingHost(null); }} onSubmit={handleAssetAction} />}
           {confirmDelete   && <ConfirmModal title={t("modal.deleteAsset.title")} message={t("modal.deleteAsset.body")} confirmText={t("modal.deleteAsset.confirm")} type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
+          {replaceAsk && <ConfirmModal title={t("modal.slotFull.title")} message={t("modal.slotFull.body", { name: replaceAsk.name })} confirmText={t("modal.slotFull.confirm")} cancelText={t("modal.slotFull.no")} type="warning" onConfirm={() => connectToSlot("current", replaceAsk)} onClose={() => setReplaceAsk(null)} />}
           {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText={t("modal.ok")} onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}
-          {showQuitConfirm && <ConfirmModal title={t("modal.quit.title")} message={t("modal.quit.body")} confirmText={t("modal.quit.confirm")} cancelText={t("modal.cancel")} extraText={t("modal.quit.extra")} onExtra={() => api.quitApp().catch(console.error)} onConfirm={handleMinimizeToTray} onClose={() => setShowQuitConfirm(false)} />}
           {memoHost        && <MemoModal host={memoHost} onClose={() => setMemoHost(null)} onSaved={() => { refetch(); addToast(t("toast.memoSaved"), "success"); }} />}
         </motion.div>
       )}

@@ -36,23 +36,23 @@ export function ConfirmModal({
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ backdropFilter: 'blur(12px)', background: 'rgba(0,0,0,0.7)', zIndex: 1000 }}>
-      <div className="modal-content glass-modal confirm-modal" onClick={(e) => e.stopPropagation()} style={{ width: '400px', padding: 0, overflow: 'hidden', border: 'none' }}>
+      <div className="modal-content glass-modal confirm-modal" onClick={(e) => e.stopPropagation()} style={{ width: '380px', padding: 0, overflow: 'hidden', border: 'none' }}>
         {/* Decorative Neon Header Line */}
         <div style={{ height: '2px', width: '100%', background: `linear-gradient(90deg, transparent, ${getAccentColor()}, transparent)` }} />
 
-        <div className="modal-header" style={{ padding: '24px 24px 12px', border: 'none', marginBottom: 0 }}>
+        <div className="modal-header" style={{ padding: '18px 20px 12px', border: 'none', marginBottom: 0 }}>
           <div className="header-title" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)' }}>
               {getIcon()}
             </div>
-            <h3 style={{ fontSize: '18px', fontWeight: 900, color: '#fff', letterSpacing: '-0.3px' }}>{title}</h3>
+            <h3 style={{ fontSize: '16px', fontWeight: 900, color: '#fff', letterSpacing: '-0.3px' }}>{title}</h3>
           </div>
           <button className="btn-icon" onClick={onClose} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
             <X size={18} />
           </button>
         </div>
 
-        <div className="modal-body" style={{ padding: '0 24px 24px' }}>
+        <div className="modal-body" style={{ padding: '0 20px 18px' }}>
           <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6', wordBreak: 'keep-all' }}>
             {message}
           </p>

@@ -49,7 +49,7 @@ const WORKSPACE_ITEMS: NavItem[] = [
   { id: "vms",       label: "nav.vms",       icon: <Server size={15} /> },
   { id: "remote",    label: "nav.remote",    icon: <Globe size={15} /> },
   { id: "snapshots", label: "nav.snapshots", icon: <Camera size={15} /> },
-  { id: "events",    label: "nav.events",    icon: <Terminal size={15} /> },
+  { id: "events",   label: "nav.events",    icon: <Terminal size={15} /> },
 ];
 
 const SYSTEM_ITEMS: NavItem[] = [

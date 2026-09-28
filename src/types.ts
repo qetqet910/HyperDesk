@@ -101,3 +101,16 @@ export interface DashboardData {
   mem_history: number[];
   net_history: number[];
 }
+
+/** `rdp:` 링크로 들어온 연결 대상. 백엔드(rdplink.rs)가 주소·사용자명만 걸러서 넘긴다. */
+export interface RdpLink {
+  host: string;
+  username?: string | null;
+}
+
+/** 바깥(App)이 멀티뷰 슬롯에 연결을 요청할 때. `"current"` = 지금 보이는 슬롯을 비우고 연결. */
+export interface SlotConnectRequest {
+  nonce: number;
+  slot: number | "current";
+  host: RemoteHost;
+}

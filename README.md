@@ -1,13 +1,13 @@
 <div align="center">
   <img src="src/assets/logo.png" width="80" height="80" alt="HyperDesk Logo" />
   <h1>HyperDesk</h1>
-  <p><b>Run your Hyper-V consoles and RDP sessions as real windows inside one app.</b></p>
+  <p><b>Run your Hyper-V consoles, RDP sessions and Horizon desktops as real windows inside one app.</b></p>
 
   [![Tauri v2](https://img.shields.io/badge/Tauri-v2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
   [![React 19](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white)](https://react.dev/)
   [![Rust](https://img.shields.io/badge/Rust-1.80%2B-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
   [![Windows Only](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](#)
-  [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-red.svg?style=flat-square)](LICENSE)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
   <br />
 
@@ -35,97 +35,117 @@
 
 ## What it does
 
-Most remote-desktop managers give you tabs. HyperDesk gives you the **actual window**.
+Keep four remote sessions open and jump between them with one keystroke.
 
-`mstsc.exe` and `vmconnect.exe` are reparented into the app with the Win32 `SetParent`
-API, so a live RDP session or a Hyper-V console renders as a native child window inside
-a HyperDesk slot — not a screenshot, not a re-implemented protocol client. Four sessions
-stay alive at once; `Alt+1`–`4` pages between them instantly and nothing disconnects.
+Press `Alt+1`, `Alt+2`, `Alt+3` or `Alt+4` and the matching session fills the view
+instantly. Nothing reconnects, nothing reloads, and the sessions you left keep running in
+the background. One full-size session at a time, switched in a keystroke, instead of four
+shrunken ones side by side.
 
-It also does the boring parts: start/stop VMs, snapshots, per-VM telemetry, the Hyper-V
-event log, and a `Ctrl+K` palette to reach any of it.
+What makes this possible is that the sessions are the real client windows. The Remote
+Desktop client (`mstsc.exe`), the Hyper-V console (`vmconnect.exe`) and the
+Omnissa/VMware Horizon client are reparented into HyperDesk with the Win32 `SetParent`
+API. They are not screenshots or a re-implemented protocol, so the real client's behaviour
+comes along with them, including clipboard sharing and your saved Windows credentials.
 
-> **Scope.** Hyper-V (VMConnect) and RDP are the verified targets. VMware/Omnissa Horizon
-> code exists (registry scan, launching the external client) but is unverified in practice,
-> and **grid embedding for Horizon is deliberately disabled** — its MKS child windows are
-> pinned to absolute monitor coordinates and do not follow a reparented frame. Connecting
-> to a Horizon host outside the grid works.
+Around that, HyperDesk handles the day-to-day Hyper-V work: starting and stopping VMs,
+snapshots, per-VM resource usage, the Hyper-V event log, and a `Ctrl+K` palette that
+reaches all of it.
 
-## Why you might want it
+## Built with React and Tauri, not Electron
 
-* **No credentials stored.** HyperDesk keeps a username at most. There is no vault, no
-  password field, no secret at rest — Windows handles authentication. Nothing to leak.
-* **Sessions survive switching.** Slots are hidden, never torn down.
-* **It is not a browser tab.** The remote desktop is a real window with real input.
-* **Free.** PolyForm Noncommercial — free for noncommercial use.
+HyperDesk is a React 19 app, but it is not a browser in a box.
 
-## Key features
+- **Small.** The v1.3.0 installer is about 7.5 MB. There is no bundled Chromium: the UI
+  runs on the WebView2 engine already built into Windows, through Tauri v2.
+- **Rust where it matters.** Window embedding, keyboard hooks, the Hyper-V PowerShell
+  bridge and registry discovery are written in Rust against the Win32 API directly, with
+  no native add-on layer in between.
+- **React where it's pleasant.** The interface is React 19 + TypeScript with TanStack
+  Query for live data, Framer Motion for the session switcher, and Recharts for the
+  graphs.
+- **Locked down.** The web layer runs under a strict Content Security Policy and Tauri's
+  permission system, and it talks to the Rust side only through one typed command
+  module (`src/lib/tauri-api.ts`).
 
-### Window embedding — SwallowGrid™
+The unusual part is that a Tauri/WebView2 window hosts other programs' native windows and
+keeps them in step with the React layout. The notes on how that works, and the Win32
+edge cases it ran into, are in [CLAUDE.md](CLAUDE.md).
 
-* **External process embedding.** RDP and VMConnect windows are reparented into the
-  HyperDesk UI and tracked as first-class slot content.
-* **Deadlock-free by design.** `AttachThreadInput` is deliberately avoided. A credential
-  or certificate dialog raised by the embedded process cannot freeze the host UI.
-* **Tight position sync.** `requestAnimationFrame` on the front end plus delta filtering
-  in Rust keeps the embedded window locked to its slot through layout changes and resizes.
-* **VMConnect ribbon masking.** VMConnect's non-removable 30px client-area ribbon is
-  clipped with `SetWindowRgn` so the slot shows only the guest.
-* **Four live, one visible.** Up to four sessions run simultaneously; `Alt+1`–`4` (or the
-  slot header) pages between them without reconnecting.
+## Features
 
-### Immersive mode
+### Session switching (SwallowGrid™)
 
-* **Full-screen VM.** The active slot fills the entire display with no app chrome. Push the
-  cursor to the top edge and the header slides back in; `Esc` exits. Borderless, so there
-  is no title-bar flash.
-* **Keyboard routing.** While an embedded session holds focus, Win key and `Alt+Tab` are
-  forwarded into the guest instead of being eaten by the host shell.
+- **Real windows in slots.** RDP, Hyper-V console and Horizon sessions are embedded into
+  the app and follow the slot through window moves, resizes and layout changes.
+- **Four live, one visible.** Up to four sessions run at the same time. Switch with
+  `Alt+1`–`4` or the session rail; hidden slots keep running.
+- **Hyper-V console by VM name.** VMConnect is matched by the VM name in its window title,
+  so the right console lands in the right slot even when VMConnect hands off to an
+  existing instance. Its ribbon and border are clipped away so only the guest shows.
+- **Horizon desktops.** The Horizon display surface is pinned to the slot. Horizon's
+  connection bar is hidden.
+- **Floating header.** A thin header pill sits on top of the session and can be dragged
+  sideways. It holds the connection name, full-screen buttons and disconnect; in VM full
+  screen it also shows the 1–4 slot switcher.
+- **Full screen, two ways.** `F11` makes the app window full screen; the VM full-screen
+  button also hides the app UI so the session gets the whole display. Leaving either
+  returns you to exactly the state you entered from. `Esc` exits.
+- **No deadlocks.** `AttachThreadInput` is never used, so a credential or certificate
+  dialog in the embedded client cannot freeze HyperDesk.
 
 ### VM and remote asset management
 
-* **VM control.** Start, stop, save, resume, pause; adjust memory and processor count in place.
-* **Snapshots.** Create, restore and delete from the dashboard.
-* **Remote assets.** RDP history auto-detected from the registry is merged with manually
-  registered hosts. Auto-detected entries can be renamed, hidden or removed.
-* **Memos and tags.** Attach a notepad-style memo and tags to any VM or remote asset,
-  then filter by `@tag` from the command palette.
-* **Quick connect.** `Ctrl+K`, type an address, Enter. No registration step.
+- **VM control.** Start, stop, save, resume and pause; change memory and processor count
+  in place; create new VMs.
+- **Snapshots.** Create, restore and delete from the dashboard.
+- **Remote assets.** RDP history and Horizon servers found in the registry are merged
+  with hosts you add yourself. Detected entries can be renamed, hidden or removed.
+- **Memos and tags.** Attach a memo and tags to any VM or host, then filter with `@tag`
+  in the command palette.
+- **Quick connect.** `Ctrl+K`, type an address, press Enter.
+- **`rdp:` links.** HyperDesk can be chosen as the app that opens `rdp://` links. The
+  link's host is added to your assets and opened in a slot. Only the address and user
+  name are taken from the link; every other `.rdp` setting in it is ignored. You can take
+  HyperDesk off that list again in Settings.
 
-### Telemetry and recovery
+### Monitoring
 
-* **Live resource tracking.** Per-VM CPU, memory, disk headroom, IP and uptime, plus host
-  CPU/memory/disk sparklines beside the session rail.
-* **Crash detection.** A watchdog notices when an embedded process dies and retries the
-  connection with exponential backoff.
-* **Smart sizing.** RDP smart sizing keeps the picture fitted when a slot changes size
-  without renegotiating the session.
+- **Resource usage.** Per-VM CPU, memory, disk headroom, IP address and uptime, plus host
+  CPU, memory and disk graphs next to the sessions.
+- **Host status.** Each remote host gets a quick TCP check, so offline hosts show up
+  before you try to connect.
+- **Network.** Hyper-V virtual switches, the switch each VM is connected to, and host
+  network traffic.
+- **Event log.** Recent Hyper-V events (VMMS and worker logs) alongside HyperDesk's own
+  activity.
+- **Closed-session detection.** If an embedded client exits or crashes, the slot notices
+  and offers a one-click reconnect instead of showing a dead window. It never reconnects
+  on its own, so a session you logged off from stays closed.
 
-### Network and events
+### Everyday use
 
-* **Network topology.** Inspect Hyper-V virtual switches and adapter configuration.
-* **Event log.** Hyper-V events as a live stream.
+- **Command palette.** `Ctrl+K` for search, navigation and VM/host actions.
+- **Three themes.** Dark, light, and a Windows 9x retro skin.
+- **English and Korean.** Picked from your OS language, changeable in Settings.
+- **Clean exit.** Closing HyperDesk releases every embedded window and ends those
+  sessions, so no client is left stuck inside a closed app.
+- **Collapsible sidebar.** `Ctrl+B`.
 
-### UX
+## Keyboard shortcuts
 
-* **Command palette.** `Ctrl+K` for search, navigation and actions.
-* **Three themes.** Dark, light, and a Windows 9x retro skin.
-* **English and Korean.** Detected from your OS locale, switchable in Settings.
-* **Safe exit.** Closing the window asks: minimize to tray (sessions stay alive), quit
-  completely (sessions are cleaned up), or cancel.
-* **Collapsible sidebar.** `Ctrl+B`.
-
-## Tech stack
-
-* **Frontend** — React 19, TypeScript, Vite, plain CSS, Framer Motion, Recharts, dotLottie
-* **Backend** — Tauri v2, Rust
-* **System** — Win32 (`SetParent`, `SetWindowPos`, `EnumWindows`, `SetWindowRgn`, …),
-  PowerShell for Hyper-V automation, Windows Registry for RDP/Horizon host discovery
-* **CI/CD** — GitHub Actions (stable Rust toolchain, Tauri v2 release)
+| Keys | Action |
+|---|---|
+| `Alt+1` – `Alt+4` | Switch slot (works even while a session has focus) |
+| `F11` | App full screen on/off (Multi-View) |
+| `Esc` | Leave full screen / VM full screen |
+| `Ctrl+K` | Command palette |
+| `Ctrl+B` | Collapse or expand the sidebar |
 
 ## Install
 
-Install from the **Microsoft Store** — Microsoft signs, verifies and auto-updates it.
+Install from the **Microsoft Store**. Microsoft signs and verifies the package and keeps
+it updated.
 
 > **[▶ Install from the Microsoft Store](https://apps.microsoft.com/detail/9NPVXL622ZQQ)**
 
@@ -134,45 +154,91 @@ Install from the **Microsoft Store** — Microsoft signs, verifies and auto-upda
 
 **Requirements**
 
-* Windows 10/11 with the [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
-  (preinstalled on Windows 11)
-* Hyper-V enabled. To manage VMs (`Get-VM`, `Start-VM`, …) your account must be in the
-  local **Hyper-V Administrators** group — the app itself runs unelevated (`asInvoker`),
-  and window embedding does not require admin.
+- Windows 10 or 11 with the [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
+  (included with Windows 11).
+- Hyper-V enabled, if you want to manage VMs. Your account must be in the local
+  **Hyper-V Administrators** group for `Get-VM`, `Start-VM` and the rest. HyperDesk itself
+  runs without admin rights, and embedding windows does not need them.
+- For Horizon slots, the Omnissa/VMware Horizon Client installed.
+
+## Known limitations
+
+- **The Windows key inside a session.** While a session has focus, the Windows key also
+  opens the *local* Start menu. The remote clients do this themselves when their window is
+  embedded, so HyperDesk cannot block it from outside. `Alt+Tab` and `Alt+1`–`4` are
+  handled correctly.
+- **RDP resolution.** Classic `mstsc` cannot change a session's resolution while it runs.
+  When a slot changes size, the picture is scaled to fit (smart sizing) rather than
+  re-rendered, so it can look soft after large changes. Reconnect for a sharp image.
+- **Windows only.** HyperDesk is built on Win32 APIs and has no macOS or Linux version.
+
+## Privacy
+
+HyperDesk has no telemetry, analytics or accounts, and sends nothing to the developer.
+It stores no passwords; logins are handled by the Remote Desktop and Horizon clients.
+The only internet request is the optional update check in Settings, which you can turn
+off for air-gapped networks. The full list of what it reads, stores and connects to is in
+[PRIVACY.md](PRIVACY.md).
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| VMs don't appear, or Start/Stop fails with a permission error | Add your account to the local **Hyper-V Administrators** group, then sign out and back in. |
+| `Alt+1`–`4` stops working for no clear reason | Check Task Manager for a leftover `hyperdesk.exe` from an earlier run. An old instance holds the shortcuts; end it and restart HyperDesk. |
+| An `rdp://` link opens a "can't reach localhost" page | The link is registered to a development build. In that build's Settings, remove the `rdp://` link registration, then open the link again and pick the installed HyperDesk. |
+| A slot stays black | Disconnect the slot with its X button and connect again. If it keeps happening, please [open an issue](https://github.com/qetqet910/HyperDesk/issues). |
 
 ## Development
 
 ### Prerequisites
 
-* [Rust](https://www.rust-lang.org/tools/install) 1.80+
-* [Node.js](https://nodejs.org/) (LTS)
-* [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
+- [Rust](https://www.rust-lang.org/tools/install) 1.80+
+- [Node.js](https://nodejs.org/) LTS
+- [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
 
 ### Run
 
 ```bash
 npm install
-npm run tauri dev     # Rust backend + React with HMR
+npm run tauri dev     # Rust backend + React with hot reload
 ```
 
 ### Other commands
 
 ```bash
 npm run build         # TypeScript check + Vite bundle
-npm test -- --run     # Frontend test suite
-npm run tauri build   # Production build → NSIS installer
+npx vitest run        # Frontend tests
+npm run tauri build   # Production build (NSIS installer)
 
 cd src-tauri
 cargo test            # Rust unit tests
 cargo clippy          # Rust lints
 ```
 
-Architecture notes, Win32 constraints and the accumulated troubleshooting log live in
+Debug builds write a diagnostic log to `%TEMP%\hyperdesk-swallow.log`. It is the first
+place to look when an embedded window misbehaves.
+
+Architecture notes, Win32 constraints and the troubleshooting history are in
 [CLAUDE.md](CLAUDE.md).
+
+### Release
+
+Pushing a `v*` tag builds and publishes the release through GitHub Actions
+(`.github/workflows/release.yml`). Keep the version identical in `package.json`,
+`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/hyperdesk.exe.manifest`.
+
+## Tech stack
+
+- **Frontend:** React 19, TypeScript, Vite, plain CSS, Framer Motion, Recharts, dotLottie
+- **Backend:** Tauri v2, Rust
+- **System:** Win32 (`SetParent`, `SetWindowPos`, `SetWindowRgn`, low-level keyboard hooks),
+  PowerShell for Hyper-V, the Windows Registry for RDP and Horizon host discovery
 
 ## License
 
-Copyright © 2026 HyperDesk.
+[MIT](LICENSE). Third-party components and their licenses are listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) — free for
-noncommercial use; commercial use requires a separate license.
+HyperDesk is not affiliated with Microsoft, Broadcom (VMware) or Omnissa. Their product
+names are trademarks of their respective owners.

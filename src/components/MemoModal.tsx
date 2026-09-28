@@ -32,10 +32,10 @@ export function MemoModal({ host, onClose, onSaved }: MemoModalProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ backdropFilter: "blur(12px)", background: "rgba(0,0,0,0.7)", zIndex: 500 }}>
-      <div className="modal-content glass-modal memo-modal" onClick={(e) => e.stopPropagation()} style={{ width: "520px", maxWidth: "520px", padding: 0, overflow: "hidden", border: "none", display: "flex", flexDirection: "column", maxHeight: "82vh" }}>
+      <div className="modal-content glass-modal memo-modal" onClick={(e) => e.stopPropagation()} style={{ width: "470px", maxWidth: "470px", padding: 0, overflow: "hidden", border: "none", display: "flex", flexDirection: "column", maxHeight: "82vh" }}>
         <div style={{ height: "2px", width: "100%", background: "linear-gradient(90deg, transparent, var(--accent-orange), transparent)" }} />
 
-        <div className="modal-header" style={{ padding: "22px 24px 14px", border: "none", marginBottom: 0 }}>
+        <div className="modal-header" style={{ padding: "18px 20px 12px", border: "none", marginBottom: 0 }}>
           <div className="header-title" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <StickyNote size={18} style={{ color: "var(--accent-orange)" }} />
             <h3 style={{ fontSize: "17px", fontWeight: 900, letterSpacing: "-0.3px" }}>{host.name}</h3>
@@ -46,7 +46,7 @@ export function MemoModal({ host, onClose, onSaved }: MemoModalProps) {
         </div>
 
         {/* 접속정보 — read-only quick reference */}
-        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", padding: "0 24px 14px", fontSize: "12px", color: "var(--text-secondary)" }}>
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", padding: "0 20px 12px", fontSize: "12px", color: "var(--text-secondary)" }}>
           <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <Globe size={12} style={{ opacity: 0.6 }} /> {host.host}
           </span>
@@ -61,22 +61,22 @@ export function MemoModal({ host, onClose, onSaved }: MemoModalProps) {
           {host.status && <span style={{ opacity: 0.7 }}>{host.status}</span>}
         </div>
 
-        <div style={{ padding: "0 22px", flex: 1, minHeight: 0, display: "flex" }}>
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
           <textarea
             autoFocus
             placeholder={"메모를 입력하세요…\n예) 접속 계정, 방화벽 포트, 담당자, 점검 이력"}
             value={memo}
             onChange={(e) => setMemo(e.target.value)}
             style={{
-              width: "100%", minHeight: "220px", background: "rgba(0,0,0,0.25)",
-              border: "1px solid var(--glass-border)", borderRadius: "12px",
+              width: "100%", minHeight: "380px", background: "rgba(0,0,0,0.25)",
               padding: "14px", color: "var(--text-main)", fontSize: "13px",
               outline: "none", resize: "vertical", fontFamily: "inherit", lineHeight: 1.7,
+              boxShadow: "0px 0px 3px #222", border: "none"
             }}
           />
         </div>
 
-        <div className="modal-actions" style={{ padding: "16px 24px 22px", background: "rgba(0,0,0,0.2)", display: "flex", gap: "12px" }}>
+        <div className="modal-actions" style={{ padding: "14px 20px 16px", background: "rgba(0,0,0,0.2)", display: "flex", gap: "12px" }}>
           <button
             className="cancel-btn"
             onClick={onClose}

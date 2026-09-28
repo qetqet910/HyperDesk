@@ -2,13 +2,14 @@ pub mod models;
 pub mod commands;
 pub mod hosts;
 pub mod swallow;
+mod rdplink;
 
 use commands::{
     get_vms, get_vm_ip, start_vm, stop_vm, save_vm, resume_vm,
     pause_vm, connect_vm, connect_console, get_dashboard, get_system_stats, create_vm,
     add_remote_host, remove_remote_host, update_remote_host,
     set_vm_memory, set_vm_processors, get_horizon_path, connect_horizon, check_host,
-    set_window_visibility, is_window_valid, swallow_window, set_hotkey_modifier,
+    set_window_visibility, is_window_valid, swallow_window,
     unswallow_window, sync_slot_bounds, set_header_cutout, toggle_fullscreen, set_fullscreen, quit_app, focus_slot_window,
     set_connect_lock,
     list_snapshots, create_snapshot, restore_snapshot, delete_snapshot,
@@ -29,28 +30,15 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Modifiers, Code};
 
-/// 슬롯 전환 단축키(수정자+1~4)를 현재 설정값으로 (재)등록한다.
-///
-/// 설정에서 수정자를 바꿀 때도 이 함수를 다시 부른다 — 등록 로직이 두 곳에 있으면
-/// 한쪽만 고쳐져 "설정은 바뀌었는데 옛 키가 계속 먹는" 상태가 된다.
+/// 슬롯 전환 단축키 Alt+1~4를 등록한다.
 pub(crate) fn register_slot_hotkeys(app: &tauri::AppHandle) {
     let shortcuts = app.global_shortcut();
-    // 이전 등록을 먼저 지운다 — 안 지우면 옛 수정자가 계속 살아 있고,
-    // 재등록도 "already registered"로 실패한다.
     let _ = shortcuts.unregister_all();
-    let m = commands::hotkey_mod().lock().map(|g| g.clone()).unwrap_or_else(|e| e.into_inner().clone());
-    let mods = match m.as_str() {
-        "ctrl" => Modifiers::CONTROL,
-        "shift" => Modifiers::SHIFT,
-        "super" => Modifiers::SUPER,
-        _ => Modifiers::ALT,
-    };
     for (n, code) in [(1, Code::Digit1), (2, Code::Digit2), (3, Code::Digit3), (4, Code::Digit4)] {
-        match shortcuts.register(Shortcut::new(Some(mods), code)) {
-            Ok(()) => crate::swallow::dlog(&format!("[hotkey] registered {m}+{n}")),
-            // 다른 앱이 이미 잡고 있으면 여기서 실패한다 — 조용히 안 먹는 것보다
-            // 로그로 드러나는 게 낫다(사용자가 다른 수정자로 바꾸면 된다).
-            Err(e) => crate::swallow::dlog(&format!("[hotkey] FAILED {m}+{n}: {e}")),
+        match shortcuts.register(Shortcut::new(Some(Modifiers::ALT), code)) {
+            Ok(()) => crate::swallow::dlog(&format!("[hotkey] registered alt+{n}")),
+            // 다른 앱이 이미 잡고 있으면 실패한다 — 조용히 안 먹는 것보다 로그로 드러나는 게 낫다.
+            Err(e) => crate::swallow::dlog(&format!("[hotkey] FAILED alt+{n}: {e}")),
         }
     }
 }
@@ -58,16 +46,18 @@ pub(crate) fn register_slot_hotkeys(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // MUST be the first plugin. A second launch (tray app — closing the window
-        // only hides it, so the process lingers and the next launch would stack
-        // another instance fighting over the global Alt+1..4 hotkeys) is rejected
-        // here: the new process exits and we just re-show the existing window.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        // MUST be the first plugin. A second launch would stack another instance
+        // fighting over the global Alt+1..4 hotkeys and the LL keyboard hook; it is
+        // rejected here: the new process exits and we just re-show the existing window.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
                 let _ = win.unminimize();
                 let _ = win.set_focus();
             }
+            // 이미 떠 있는 상태에서 `rdp:` 링크를 누르면 새 프로세스는 여기서 거부되고,
+            // 그 링크는 argv로 이쪽에 넘어온다.
+            rdplink::accept_args(app, argv);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -101,6 +91,18 @@ pub fn run() {
             }
         }).build())
         .setup(|app| {
+            // "이 rdp 링크를 열 앱" 선택지에 HyperDesk를 올린다(HKCU, 기본 앱은 안 빼앗음).
+            // **release 빌드에서만.** 매 실행마다 자기 exe 경로로 덮어쓰므로 debug 빌드를
+            // 한 번만 띄워도 `rdp:` 링크가 target\debug\hyperdesk.exe로 넘어가고, dev 서버가
+            // 꺼져 있으면 "localhost 연결 거부" 화면이 떴다(2026-09-28). Store(MSIX) 설치본은
+            // 이 HKCU 쓰기가 패키지 안으로 격리돼 효과가 없고, 대신 gen/windows/bundle.config.json의
+            // protocolHandlers(→ AppxManifest의 windows.protocol)로 등록된다.
+            #[cfg(not(debug_assertions))]
+            if let Err(e) = rdplink::register_protocol() {
+                crate::swallow::dlog(&format!("[rdplink] register failed: {e}"));
+            }
+            // 꺼져 있다가 `rdp:` 링크로 실행된 경우. 프론트가 준비되면 take_rdp_link로 가져간다.
+            rdplink::accept_args(app.handle(), std::env::args().skip(1));
             // Must run before anything touches hosts.json/vm-tags.json/vm-memos.json —
             // see hosts.rs for why (2026-07 identifier change would otherwise silently
             // drop every existing user's data on update).
@@ -129,7 +131,12 @@ pub fn run() {
                 .menu(&menu)
                 .tooltip("HyperDesk - VM Manager")
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => app.exit(0),
+                    // X와 같은 정리 순서 — exit(0)은 Destroyed의 정리를 못 기다린다.
+                    "quit" => {
+                        commands::restore_work_area();
+                        swallow::unswallow_all();
+                        app.exit(0);
+                    }
                     "show" => {
                         if let Some(win) = app.get_webview_window("main") {
                             let _ = win.show();
@@ -164,36 +171,21 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             match event {
-                #[allow(unused_variables)]
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // Dev: actually exit immediately, otherwise every `tauri dev`
-                    // restart leaves a zombie holding the global Alt+1..4 hotkeys, so
-                    // the next instance fails to register them. No confirmation here —
-                    // it would have to be clicked through on every dev reload.
-                    #[cfg(debug_assertions)]
-                    {
-                        // Unparent swallowed children before exit — exit(0) kills the
-                        // process immediately and Destroyed's unswallow_all() may not run.
-                        commands::set_taskbar_autohide(false);
-                        swallow::unswallow_all();
-                        window.app_handle().exit(0);
-                    }
-                    // Production: never close silently to tray. Prevent the close and
-                    // ask the frontend first (ConfirmModal) — the user picks tray vs.
-                    // cancel; "quit for real" is still reachable from the tray menu.
-                    #[cfg(not(debug_assertions))]
-                    {
-                        api.prevent_close();
-                        let _ = window.emit("close-requested", ());
-                    }
+                // X = 묻지 않고 완전 종료. exit(0)은 프로세스를 즉시 끝내서 Destroyed의
+                // 정리가 안 돌 수 있으므로, swallow된 창 해제와 작업영역 원복을 먼저 한다
+                // (안 하면 남의 프로세스 창이 죽어가는 부모에 붙은 채 남는다).
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    commands::restore_work_area();
+                    swallow::unswallow_all();
+                    window.app_handle().exit(0);
                 }
                 // Shortcuts are registered once in setup() and stay registered for the
                 // app's lifetime (global, so they fire even while a swallowed native
                 // window has focus). Re-registering on every Focused event only threw
                 // "already registered" and left them broken — removed.
                 tauri::WindowEvent::Destroyed => {
-                    // 전체화면 상태로 종료돼도 사용자 작업표시줄 설정을 되돌린다.
-                    commands::set_taskbar_autohide(false);
+                    // 전체화면 상태로 종료돼도 넓혀둔 작업영역을 되돌린다.
+                    commands::restore_work_area();
                     swallow::unswallow_all();
                 }
                 // Native maximize()/restore on this decorations:false window needs the
@@ -213,6 +205,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            rdplink::take_rdp_link,
+            rdplink::rdp_link_registered,
+            rdplink::set_rdp_link,
             get_dashboard,
             get_system_stats,
             create_vm,
@@ -244,7 +239,6 @@ pub fn run() {
             quit_app,
             focus_slot_window,
             set_connect_lock,
-            set_hotkey_modifier,
             list_snapshots,
             create_snapshot,
             restore_snapshot,

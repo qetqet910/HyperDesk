@@ -539,7 +539,7 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
 
     // session bpp + perf flags trade visual fidelity for bandwidth on slower links
     // (disable_wallpaper, allow_font_smoothing, disable_themes, disable_drag, disable_menu_anims)
-    let (disable_wallpaper, allow_font_smoothing, disable_themes, disable_anims) = match quality.as_deref().unwrap_or("balanced") {
+    let (disable_wallpaper, allow_font_smoothing, disable_themes, disable_anims) = match quality.as_deref().unwrap_or("high") {
         "low" => (1, 0, 1, 1),
         "high" => (0, 1, 0, 0),
         _ => (0, 1, 0, 0),
@@ -944,10 +944,12 @@ pub async fn get_dashboard(app: AppHandle) -> Result<DashboardData, String> {
 }
 
 #[tauri::command]
-pub async fn add_remote_host(app: AppHandle, name: String, host: String, protocol: String, username: Option<String>, tags: Option<Vec<String>>) -> Result<(), String> {
+/// 새로 만든 자산의 id를 돌려준다 — `rdp:` 링크 처리가 추가 직후 그 id로 슬롯을 배정한다.
+pub async fn add_remote_host(app: AppHandle, name: String, host: String, protocol: String, username: Option<String>, tags: Option<Vec<String>>) -> Result<String, String> {
     let mut hosts = load_hosts(&app);
+    let id = format!("manual-{}", Uuid::new_v4());
     let new_host = RemoteHost {
-        id: format!("manual-{}", Uuid::new_v4()),
+        id: id.clone(),
         name,
         host,
         username,
@@ -961,7 +963,8 @@ pub async fn add_remote_host(app: AppHandle, name: String, host: String, protoco
         tags,
     };
     hosts.push(new_host);
-    save_hosts(&app, &hosts)
+    save_hosts(&app, &hosts)?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -1438,6 +1441,8 @@ struct SavedWindowState {
     /// border on every fullscreen round-trip.
     size: tauri::PhysicalSize<u32>,
     maximized: bool,
+    /// 전체화면 동안 리사이즈를 끄므로, 이탈 시 원래 값으로 되돌리려고 보관한다.
+    resizable: bool,
 }
 /// Some(saved) == currently fullscreen (holds the state to restore on exit).
 static FS_SAVED: OnceLock<Mutex<Option<SavedWindowState>>> = OnceLock::new();
@@ -1461,31 +1466,6 @@ fn mark_fullscreen_native(window: &tauri::Window, on: bool) {
     // Also lets focus_window (Alt+1~4 slot switch) re-assert this after
     // SetForegroundWindow on a swallowed child drops it — see swallow.rs.
     crate::swallow::set_fullscreen_active(on);
-}
-
-/// 슬롯 전환 단축키의 **수정자 키**. 사용자가 설정에서 고른다.
-///
-/// 전역 단축키라 다른 앱과 충돌할 수 있어서(Alt+1~4는 흔하다) 바꿀 수 있어야 한다.
-/// LL 키보드 훅도 같은 값을 봐야 하므로 여기 한 곳에 두고 양쪽이 참조한다 —
-/// 두 군데에 하드코딩하면 훅만 옛 키를 가로채는 상태가 된다.
-static HOTKEY_MOD: OnceLock<Mutex<String>> = OnceLock::new();
-
-pub(crate) fn hotkey_mod() -> &'static Mutex<String> {
-    HOTKEY_MOD.get_or_init(|| Mutex::new("alt".to_string()))
-}
-
-/// 슬롯 전환 단축키의 수정자를 바꾸고 즉시 다시 등록한다.
-/// `modifier`: "alt" | "ctrl" | "shift" | "super"(Win키)
-#[tauri::command]
-pub async fn set_hotkey_modifier(app: AppHandle, modifier: String) -> Result<(), String> {
-    let m = modifier.to_lowercase();
-    if !["alt", "ctrl", "shift", "super"].contains(&m.as_str()) {
-        return Err(format!("지원하지 않는 수정자: {modifier}"));
-    }
-    *lock_or_recover(hotkey_mod()) = m.clone();
-    crate::swallow::set_hotkey_modifier(&m);
-    crate::register_slot_hotkeys(&app);
-    Ok(())
 }
 
 static LAST_NATIVE_MAXIMIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1576,55 +1556,71 @@ pub(crate) fn sync_restore_from_minimize(window: &tauri::Window) {
     });
 }
 
-/// 전체화면 동안 작업표시줄을 자동 숨김으로 두고, 나갈 때 원래 상태로 되돌린다.
+/// 전체화면 동안 모니터의 **작업영역**을 모니터 전체로 넓히고, 나갈 때 원래대로 되돌린다.
 ///
 /// **이게 없으면 RDP는 전체화면에서 하단이 안 채워진다.** mstsc는 자기 클라이언트를
-/// 로컬 모니터의 **작업영역**에 클램프한다 — 실측(2026-09-03): 작업영역이
-/// 1920x1032일 때 슬롯을 1918x1078로 잡아도 mstsc 창은 1920x1040에서 더 이상
-/// 안 커진다(1040 = 클라이언트 1032 그리고 보이지 않는 테두리 8). 바깥에서 SetWindowPos로 아무리
-/// 밀어도 튕겨낸다(실측 400회+). 그래서 화면 하단 46px이 안 덮이고 그 자리에 로컬
-/// 작업표시줄이 원격 작업표시줄 바로 아래 겹쳐 보인다. vmconnect는 이 클램프를
-/// 안 해서 목표대로 커지므로 Hyper-V만 멀쩡했다.
+/// 로컬 모니터의 **작업영역**에 클램프한다 — 실측(2026-09-03): 작업영역이 1920x1032일 때
+/// 슬롯을 1918x1078로 잡아도 mstsc 창은 1920x1040(= 클라이언트 1032 + 보이지 않는 테두리 8)
+/// 에서 더 안 커졌고, 바깥에서 SetWindowPos로 아무리 밀어도 튕겨냈다(400회+). 그래서
+/// 화면 하단 ~46px이 비었다. vmconnect는 이 클램프를 안 해서 Hyper-V는 멀쩡했다.
 ///
-/// 창 크기로는 못 이기지만 **작업영역 자체를 바꾸면** mstsc가 스스로 커진다.
-/// 자동 숨김 상태의 작업표시줄은 작업영역을 거의 예약하지 않는다.
+/// **작업표시줄을 숨기지 않는다.** 예전엔 `SHAppBarMessage(ABS_AUTOHIDE)`로 작업표시줄을
+/// 자동숨김으로 바꿔 작업영역을 넓혔는데, 그건 전역 설정 토글이라 (a) 작업표시줄이
+/// 슬라이드하며 **화면이 번쩍이고** (b) 변경이 브로드캐스트돼 **다른 모니터의 최대화
+/// 창까지 리사이즈**됐다(2026-09-10, 09-21 사용자 보고). mstsc에 필요한 건 작업영역 **값**
+/// 뿐이라 `SPI_SETWORKAREA`로 그 값만 바꾼다. `SPIF_SENDCHANGE`를 주지 않아 아무 창에도
+/// 알리지 않는다 — 작업표시줄 상태도, 다른 창도 그대로다. 작업표시줄 자체는 그대로
+/// 있지만 전체화면 창이 `MarkFullscreenWindow`로 셸에 등록돼 있어 그 위로 올라오지 않는다.
+/// "알림 없이도 값이 즉시 반영된다"는 전제는 `work_area_changes_without_broadcast`
+/// (`cargo test -- --ignored`, 실기기 프로브)로 확인한다.
 ///
-/// 사용자 설정을 건드리므로 **반드시 원복**한다 — 진입 시 이전 상태를 저장하고
-/// 이탈 시 그대로 되돌린다.
-pub(crate) fn set_taskbar_autohide(on: bool) {
-    use windows::Win32::UI::Shell::{SHAppBarMessage, APPBARDATA, ABM_GETSTATE, ABM_SETSTATE};
-    const ABS_AUTOHIDE: u32 = 0x1;
-    const ABS_ALWAYSONTOP: u32 = 0x2;
+/// 원래 값은 `GetMonitorInfo`로 **그 모니터의** 작업영역을 저장한다(`SPI_GETWORKAREA`는
+/// 주 모니터 것만 준다). `SPI_SETWORKAREA`는 넘긴 사각형이 속한 모니터의 작업영역을 바꾼다.
+pub(crate) fn expand_work_area(mon_x: i32, mon_y: i32, mon_w: u32, mon_h: u32) {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    let full = RECT { left: mon_x, top: mon_y, right: mon_x + mon_w as i32, bottom: mon_y + mon_h as i32 };
     unsafe {
-        let mut abd = APPBARDATA {
-            cbSize: std::mem::size_of::<APPBARDATA>() as u32,
-            ..Default::default()
-        };
-        if on {
-            // 이전 상태를 한 번만 저장한다(중첩 진입 시 덮어쓰지 않도록).
-            let cur = SHAppBarMessage(ABM_GETSTATE, &mut abd) as u32;
-            let mut saved = lock_or_recover(taskbar_saved());
+        let hmon = MonitorFromRect(&full, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(hmon, &mut mi).as_bool() {
+            return;
+        }
+        {
+            // 한 번만 저장한다 — 중첩 진입 시 이미 넓힌 값으로 덮어쓰면 원복할 값을 잃는다.
+            let mut saved = lock_or_recover(work_area_saved());
             if saved.is_none() {
-                *saved = Some(cur);
-            }
-            abd.lParam = windows::Win32::Foundation::LPARAM(ABS_AUTOHIDE as isize);
-            SHAppBarMessage(ABM_SETSTATE, &mut abd);
-        } else {
-            let prev = { lock_or_recover(taskbar_saved()).take() };
-            if let Some(prev) = prev {
-                abd.lParam = windows::Win32::Foundation::LPARAM(prev as isize);
-                SHAppBarMessage(ABM_SETSTATE, &mut abd);
-            } else {
-                abd.lParam = windows::Win32::Foundation::LPARAM(ABS_ALWAYSONTOP as isize);
-                SHAppBarMessage(ABM_SETSTATE, &mut abd);
+                *saved = Some(mi.rcWork);
             }
         }
     }
+    set_work_area(full);
 }
 
-static TASKBAR_SAVED: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
-fn taskbar_saved() -> &'static Mutex<Option<u32>> {
-    TASKBAR_SAVED.get_or_init(|| Mutex::new(None))
+/// `expand_work_area`로 넓힌 적이 있으면 원래 작업영역으로 되돌린다. 넓힌 적 없으면 아무것도
+/// 안 한다 — 종료 경로에서도 부르므로, 건드린 적 없는 값을 바꾸면 안 된다.
+pub(crate) fn restore_work_area() {
+    let prev = lock_or_recover(work_area_saved()).take();
+    if let Some(r) = prev {
+        set_work_area(r);
+    }
+}
+
+fn set_work_area(r: windows::Win32::Foundation::RECT) {
+    use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_SETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS};
+    let mut r = r;
+    unsafe {
+        // fwinini = 0: 레지스트리에 안 쓰고(SPIF_UPDATEINIFILE 없음) 브로드캐스트도 안 한다
+        // (SPIF_SENDCHANGE 없음). 둘 중 하나라도 넣으면 번쩍임/리플로우가 되살아난다.
+        let _ = SystemParametersInfoW(
+            SPI_SETWORKAREA, 0, Some(&mut r as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+    }
+}
+
+static WORK_AREA_SAVED: OnceLock<Mutex<Option<windows::Win32::Foundation::RECT>>> = OnceLock::new();
+fn work_area_saved() -> &'static Mutex<Option<windows::Win32::Foundation::RECT>> {
+    WORK_AREA_SAVED.get_or_init(|| Mutex::new(None))
 }
 
 fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
@@ -1653,13 +1649,24 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
         }
         let pos = window.outer_position().map_err(|e| e.to_string())?;
         let size = window.inner_size().map_err(|e| e.to_string())?;
-        let inner_pos = window.inner_position().map_err(|e| e.to_string())?;
         let monitor = window.current_monitor().map_err(|e| e.to_string())?
             .ok_or("no monitor")?;
+        let resizable = window.is_resizable().unwrap_or(true);
+        #[cfg(debug_assertions)]
+        crate::swallow::dlog(&format!("[fs] enter maximized={maximized} saved_pos={pos:?} saved_size={size:?}"));
         {
             let mut saved = lock_or_recover(fs_saved());
-            *saved = Some(SavedWindowState { pos, size, maximized });
+            *saved = Some(SavedWindowState { pos, size, maximized, resizable });
         }
+        // **전체화면 동안은 리사이즈를 끈다.** decorations:false 창의 리사이즈 경계는
+        // 클라이언트 영역 안쪽 가장자리에 있어서, 전체화면에서 모니터 상단에 마우스를
+        // 대면 세로 조정 커서가 뜨고 실제로 높이가 바뀌었다. 같은 경계가 우상단
+        // 모서리에서는 VM 위를 덮고 있어 마우스가 닿는 순간 앱 창이 입력을 가져갔다
+        // (2026-09-21 사용자 보고). 스타일이 바뀌면 보이지 않는 테두리 폭도 달라지므로
+        // 아래 인셋은 **이 호출 뒤에** 다시 잰다.
+        let _ = window.set_resizable(false);
+        let pos = window.outer_position().map_err(|e| e.to_string())?;
+        let inner_pos = window.inner_position().map_err(|e| e.to_string())?;
 
         // tao keeps WS_THICKFRAME on a decorations:false window (resize/snap),
         // and on Win10/11 that style carries an INVISIBLE resize border: the
@@ -1672,12 +1679,15 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
         // INNER size to the monitor size exactly. The outer rect then overhangs
         // the screen edges by the border width — invisible by definition, and
         // still covering the monitor, which geometric fullscreen detection needs.
-        // **크기를 잡기 전에** 작업영역을 넓힌다. 뒤에 걸면 작업영역 변경이
-        // 레이아웃 재계산을 유발해 슬롯이 한 번 더 커진다 — 실측(2026-09-03):
-        // 전체화면 직후 슬롯이 1918x1078 → 1918x1085로 7px 늘어 모니터(1080)를
-        // 넘겼고, 그만큼 아래가 화면 밖으로 밀렸다. 순서만 바꾸면 최종 작업영역
-        // 기준으로 한 번에 계산된다.
-        set_taskbar_autohide(true);
+        // **크기를 잡기 전에** 작업영역을 넓힌다. 뒤에 하면 작업영역 변경이 레이아웃
+        // 재계산을 유발해 슬롯이 한 번 더 커진다 — 실측(2026-09-03): 전체화면 직후 슬롯이
+        // 1918x1078 → 1918x1085로 7px 늘어 모니터(1080)를 넘겼다.
+        //
+        // RDP 유무와 무관하게 항상 넓힌다. 예전 autohide 방식은 토글할 때마다 번쩍여서
+        // RDP가 있을 때만 켜는 게이트가 필요했는데, 알림 없는 작업영역 변경은 눈에 보이는
+        // 부작용이 없어서 게이트가 필요 없다 — 덕분에 전체화면 도중 RDP로 전환하거나
+        // 새로 연결해도 처음부터 넓혀져 있다.
+        expand_work_area(monitor.position().x, monitor.position().y, monitor.size().width, monitor.size().height);
 
         let inset_l = inner_pos.x - pos.x;
         let inset_t = inner_pos.y - pos.y;
@@ -1691,9 +1701,13 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
             let mut saved = lock_or_recover(fs_saved());
             saved.take()
         };
+        #[cfg(debug_assertions)]
+        crate::swallow::dlog(&format!("[fs] exit restore={:?}", taken.as_ref().map(|s| (s.maximized, s.size, s.pos))));
         if let Some(s) = taken {
             mark_fullscreen_native(window, false);
-            set_taskbar_autohide(false);
+            restore_work_area();
+            // 저장해 둔 크기/위치는 리사이즈 가능 상태에서 잰 값이라, 먼저 되돌린 뒤 복원한다.
+            let _ = window.set_resizable(s.resizable);
             if s.maximized {
                 let _ = window.maximize();
             } else {
@@ -1718,14 +1732,13 @@ pub async fn set_fullscreen(window: tauri::Window, on: bool) -> Result<(), Strin
     apply_fullscreen(&window, on)
 }
 
-/// Fully quit the app (the window X only prevent_close()es → the frontend's
-/// close-requested modal calls this when the user picks "완전 종료"). Restores
+/// Fully quit the app (tray menu "종료"). Restores
 /// any swallowed children first so they aren't left reparented into a dying
 /// process.
 #[tauri::command]
 pub async fn quit_app(app: AppHandle) {
     // 전체화면 중 종료해도 작업표시줄이 숨겨진 채 남지 않게 원복한다.
-    set_taskbar_autohide(false);
+    restore_work_area();
     crate::swallow::unswallow_all();
     app.exit(0);
 }
@@ -2175,6 +2188,37 @@ pub async fn get_vm_network_adapters() -> Result<Vec<crate::models::VmNetworkAda
 
 #[cfg(test)]
 mod tests {
+    /// 실기기 프로브(수동: `cargo test -- --ignored work_area`): **알림 없이** `SPI_SETWORKAREA`로
+    /// 바꾼 작업영역이 `GetMonitorInfo`에 즉시 보이는가. 거짓이면 mstsc도 새 값을 못 보고
+    /// `expand_work_area`는 무의미하다. 실제 작업영역을 잠깐 넓혔다 되돌린다(브로드캐스트가
+    /// 없어 화면엔 안 보인다). 주 모니터에 작업표시줄이 있어야 의미가 있다(없으면 전후가 같다).
+    #[test]
+    #[ignore]
+    fn work_area_changes_without_broadcast() {
+        use windows::Win32::Foundation::{POINT, RECT};
+        use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
+        let t = |r: RECT| (r.left, r.top, r.right, r.bottom);
+        unsafe {
+            let hmon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+            let read = || {
+                let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+                let _ = GetMonitorInfoW(hmon, &mut mi);
+                mi
+            };
+            let before = read();
+            let m = before.rcMonitor;
+            eprintln!("monitor={:?} work(before)={:?}", t(m), t(before.rcWork));
+            assert_ne!(t(before.rcWork), t(m), "작업표시줄이 없는 모니터라 판정 불가");
+            super::expand_work_area(m.left, m.top, (m.right - m.left) as u32, (m.bottom - m.top) as u32);
+            let during = read().rcWork;
+            super::restore_work_area();
+            let after = read().rcWork;
+            eprintln!("work(during)={:?} work(after)={:?}", t(during), t(after));
+            assert_eq!(t(during), t(m), "알림 없이도 작업영역이 모니터 전체로 반영돼야 한다");
+            assert_eq!(t(after), t(before.rcWork), "원래 값으로 복원돼야 한다");
+        }
+    }
+
     use super::*;
 
     #[test]

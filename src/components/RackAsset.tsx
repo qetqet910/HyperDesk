@@ -41,7 +41,7 @@ export function CardWrapper({
         animationDelay: `${animDelay}ms`,
         position: 'relative',
         overflow: 'hidden',
-        height: '68px',
+        height: '62px',
         marginBottom: '2px'
       }}
     >
@@ -68,42 +68,32 @@ export function CardWrapper({
         {/* 1. Status Icon Section */}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <div style={{
-            width: '34px', height: '34px', borderRadius: '8px',
+            width: '30px', height: '30px', borderRadius: '8px',
             background: isRunning ? `color-mix(in srgb, ${themeColor} 15%, transparent)` : 'rgba(255,255,255,0.03)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: isRunning ? themeColor : 'var(--text-muted)',
             border: `1px solid ${isRunning ? `color-mix(in srgb, ${themeColor} 33%, transparent)` : 'transparent'}`,
             transition: 'all 0.3s ease'
           }}>
-            {isBusy ? <RefreshCw size={16} className="spinning" /> : <Monitor size={18} strokeWidth={1.5} />}
+            {isBusy ? <RefreshCw size={16} className="spinning" /> : <Monitor size={16} strokeWidth={1.5} />}
           </div>
         </div>
 
-        {/* 2. Identity Section — source pill sits next to the status badge so
-               the origin (Hyper-V vs Omnissa) is explicit without breaking the grid */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{
-              fontWeight: 800, fontSize: '15px', color: 'var(--text-main)', letterSpacing: '-0.2px',
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
-            }}>{name}</span>
-            <StatusBadge state={statusText} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: '4px',
-              fontSize: '9px', fontWeight: 800, letterSpacing: '0.4px',
-              color: themeColor, background: `color-mix(in srgb, ${themeColor} 18%, transparent)`,
-              border: `1px solid color-mix(in srgb, ${themeColor} 35%, transparent)`,
-              borderRadius: '4px', padding: '1px 6px', flexShrink: 0,
-            }}>
-              {source.icon}
-              {source.label}
-            </span>
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'flex', gap: '6px', fontWeight: 700, letterSpacing: '0.2px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-              {subtitles}
-            </div>
-          </div>
+        {/* 2. Identity Section — 2×2 격자. 1열(이름/출처 배지)의 폭이 고정이라
+               상태 배지와 서브타이틀이 행마다 **같은 x**에서 시작한다. 내용 폭에
+               맡기면 이름 길이("v9.2" vs "SKAC")만큼 배지가 밀려 줄이 안 맞는다. */}
+        <div className="vm-row-identity">
+          <span className="vm-row-name" title={name}>{name}</span>
+          <StatusBadge state={statusText} />
+          <span className="vm-row-source" style={{
+            color: themeColor,
+            background: `color-mix(in srgb, ${themeColor} 18%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${themeColor} 35%, transparent)`,
+          }}>
+            {source.icon}
+            {source.label}
+          </span>
+          <div className="vm-row-sub">{subtitles}</div>
         </div>
 
         {/* 3 & 4. Metrics Section (Unified Grid) */}
@@ -160,21 +150,21 @@ export function HyperVCard({ vm, animDelay = 0, onError, onSuccess, onSettings }
   const metrics = (
     <>
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
-        <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>CPU Load</div>
+        <div style={{ fontSize: '8px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>CPU Load</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-          <span style={{ fontSize: '18px', fontWeight: 900, color: isRunning ? 'var(--text-main)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>
+          <span style={{ fontSize: '16px', fontWeight: 900, color: isRunning ? 'var(--text-main)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>
             {cpu.toString().padStart(2, '0')}
           </span>
-          <span style={{ fontSize: '10px', opacity: 0.4, fontWeight: 800 }}>%</span>
+          <span style={{ fontSize: '9px', opacity: 0.4, fontWeight: 800 }}>%</span>
         </div>
       </div>
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px', minWidth: 0, overflow: 'hidden' }}>
-        <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Memory Allocation</div>
+        <div style={{ fontSize: '8px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Memory Allocation</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px', whiteSpace: 'nowrap' }}>
-          <span style={{ fontSize: '18px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>
+          <span style={{ fontSize: '16px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>
             {isRunning ? memGB(vm.memory_assigned) : memGB(vm.memory_startup)}
           </span>
-          <span style={{ fontSize: '11px', opacity: 0.4, fontWeight: 800 }}>GB</span>
+          <span style={{ fontSize: '10px', opacity: 0.4, fontWeight: 800 }}>GB</span>
           {/* Status dot instead of the raw enum string: on a Korean host
               MemoryStatus can be a localized word that overflowed the column and
               collided with the STOP button. A 6px dot conveys OK/not-OK without
@@ -198,28 +188,28 @@ export function HyperVCard({ vm, animDelay = 0, onError, onSuccess, onSettings }
     <>
       {isOff || isPaused ? (
         <button
-          className="action-btn start"
+          className="action-btn start vm-row-action"
           disabled={isBusy}
-          style={{ width: '110px', height: '36px', fontSize: '12px', background: 'var(--accent-blue)', fontWeight: 900, borderRadius: '6px', letterSpacing: '0.5px' }}
           onClick={() => run(() => isPaused ? resume.mutateAsync(vm.name) : start.mutateAsync(vm.name), `${vm.name} 가상 머신 시작됨`)}
         >
           START
         </button>
       ) : (
-        <button className="action-btn stop" disabled={isBusy} style={{ width: '110px', height: '36px', background: 'rgba(244,63,94,0.1)', color: 'var(--accent-red)', border: '1px solid rgba(244,63,94,0.2)', fontSize: '12px', fontWeight: 900, borderRadius: '6px' }}
+        <button className="action-btn stop vm-row-action" disabled={isBusy}
+          style={{ background: 'rgba(244,63,94,0.1)', color: 'var(--accent-red)', border: '1px solid rgba(244,63,94,0.2)' }}
           onClick={() => run(() => stop.mutateAsync(vm.name), `${vm.name} 중단됨`)}>
           STOP
         </button>
       )}
 
-      <button className="refresh-btn" disabled={isBusy} style={{ width: '36px', height: '36px', borderRadius: '6px' }}
+      <button className="refresh-btn vm-row-icon" disabled={isBusy}
         onClick={onSettings} title="VM 설정">
-        <Settings size={16} />
+        <Settings size={15} />
       </button>
 
-      <button className="refresh-btn" disabled={isBusy || isOff} style={{ width: '36px', height: '36px', borderRadius: '6px' }}
+      <button className="refresh-btn vm-row-icon" disabled={isBusy || isOff}
         onClick={() => run(() => connectConsole.mutateAsync(vm.name), "콘솔 열기")} title="콘솔 연결">
-        <Monitor size={16} />
+        <Monitor size={15} />
       </button>
     </>
   );
@@ -278,21 +268,21 @@ export function HorizonCard({ host, animDelay = 0, onEdit, onError, onSuccess }:
   const metrics = (
     <>
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
-        <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Net Latency</div>
+        <div style={{ fontSize: '8px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Net Latency</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-          <span style={{ fontSize: '18px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: 'var(--font-num)' }}>
+          <span style={{ fontSize: '16px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: 'var(--font-num)' }}>
             {isOffline ? '---' : host.latency?.toString().padStart(3, '0')}
           </span>
-          <span style={{ fontSize: '10px', opacity: 0.4, fontWeight: 800 }}>ms</span>
+          <span style={{ fontSize: '9px', opacity: 0.4, fontWeight: 800 }}>ms</span>
         </div>
       </div>
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
-        <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Server Load</div>
+        <div style={{ fontSize: '8px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>Server Load</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-          <span style={{ fontSize: '18px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: 'var(--font-num)' }}>
+          <span style={{ fontSize: '16px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: 'var(--font-num)' }}>
             {isOffline ? '--' : Math.round(host.load ?? 0).toString().padStart(2, '0')}
           </span>
-          <span style={{ fontSize: '10px', opacity: 0.4, fontWeight: 800 }}>%</span>
+          <span style={{ fontSize: '9px', opacity: 0.4, fontWeight: 800 }}>%</span>
         </div>
       </div>
     </>
@@ -301,9 +291,9 @@ export function HorizonCard({ host, animDelay = 0, onEdit, onError, onSuccess }:
   const controls = (
     <>
       <button
-        className={`action-btn vdi`}
+        className="action-btn vdi vm-row-action"
         disabled={isBusy}
-        style={{ width: '110px', height: '36px', fontSize: '12px', background: isOffline ? 'rgba(255,255,255,0.03)' : 'var(--accent-purple)', color: isOffline ? 'var(--text-muted)' : '#fff', border: isOffline ? '1px solid var(--border)' : 'none', cursor: 'pointer', fontWeight: 900, borderRadius: '6px', letterSpacing: '0.5px' }}
+        style={{ background: isOffline ? 'rgba(255,255,255,0.03)' : 'rgba(100,100,255,0.1)', color: isOffline ? 'var(--text-muted)' : '#fff', border: isOffline ? '1px solid var(--border)' : 'none' }}
         onClick={() => run(
           () => connect.mutateAsync({ host: host.host, protocol: host.protocol, username: host.username }),
           "VDI 연결 시도"
@@ -312,12 +302,13 @@ export function HorizonCard({ host, animDelay = 0, onEdit, onError, onSuccess }:
         CONNECT
       </button>
 
-      <button className="refresh-btn" disabled={isBusy} style={{ width: '36px', height: '36px', borderRadius: '6px' }} onClick={() => onEdit?.(host)} title="자산 수정">
-        <Settings size={16} />
+      <button className="refresh-btn vm-row-icon" disabled={isBusy} onClick={() => onEdit?.(host)} title="자산 수정">
+        <Settings size={15} />
       </button>
 
-      <button className="action-btn stop" disabled={isBusy} style={{ width: '36px', height: '36px', background: 'rgba(244,63,94,0.08)', color: 'var(--accent-red)', border: '1px solid rgba(244,63,94,0.15)', borderRadius: '6px' }} onClick={() => run(() => removeHost.mutateAsync(host.id), "자산 삭제됨")} title="자산 삭제">
-        <Trash2 size={16} />
+      {/* Hyper-V 행의 두 번째 아이콘 버튼과 같은 크기·모양 — 색만 위험색이다. */}
+      <button className="refresh-btn vm-row-icon vm-row-icon--danger" disabled={isBusy} onClick={() => run(() => removeHost.mutateAsync(host.id), "자산 삭제됨")} title="자산 삭제">
+        <Trash2 size={15} />
       </button>
     </>
   );

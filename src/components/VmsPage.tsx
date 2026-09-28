@@ -1,21 +1,33 @@
 import { useState, useMemo } from "react";
-import { Server, Plus } from "lucide-react";
+import { Server, Plus, MonitorPlay } from "lucide-react";
 import { HyperVCard } from "@/components/RackAsset";
+import { RemoteAssetRow } from "@/components/RemotePage";
 import { ColumnToggle } from "@/components/ColumnToggle";
+import { NetworkPage } from "@/components/NetworkPage";
 import { useSettings } from "@/contexts/SettingsContext";
-import type { VmInfo } from "@/types";
+import type { VmInfo, RemoteHost, SystemStats } from "@/types";
 
 interface VmsPageProps {
   vms: VmInfo[];
+  /** 아래 네트워크 섹션(호스트 트래픽 그래프)용. */
+  statsData?: SystemStats;
+  /** Omnissa/Horizon 데스크톱. RDP 호스트와 달리 "원격 자산"이 아니라 가상 머신이라
+   *  이 탭에서 관리한다 — 원격 자산 탭에는 RDP만 남는다. */
+  horizonHosts: RemoteHost[];
   onError: (msg: string) => void;
   onSuccess: (msg: string) => void;
   onSettings: (vm: VmInfo) => void;
   onCreate: () => void;
+  onHostConnect: (host: string, protocol: string, username?: string) => void;
+  onHostEdit: (host: RemoteHost) => void;
+  onHostMemo: (host: RemoteHost) => void;
+  onHostDelete: (id: string) => void;
+  onHostAdd: () => void;
 }
 
 type VmFilter = "all" | "running" | "paused" | "off";
 
-export function VmsPage({ vms, onError, onSuccess, onSettings, onCreate }: VmsPageProps) {
+export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSettings, onCreate, onHostConnect, onHostEdit, onHostMemo, onHostDelete, onHostAdd }: VmsPageProps) {
   const { settings, updateSettings } = useSettings();
   const [vmFilter, setVmFilter] = useState<VmFilter>("all");
 
@@ -86,6 +98,41 @@ export function VmsPage({ vms, onError, onSuccess, onSettings, onCreate }: VmsPa
             <div style={{ fontSize: "12px", fontWeight: 700 }}>해당 조건의 가상 머신이 없습니다.</div>
           </div>
         )}
+      </div>
+
+      {/* ── Omnissa (VDI) ── 원격 자산 탭이 아니라 여기서 관리한다. 줄 자체는
+          RemotePage의 랙 줄을 그대로 재사용해서 동작/모양이 갈리지 않게 한다. */}
+      <div className="section-label" style={{ gridColumn: "1 / -1", marginTop: "18px" }}>
+        <MonitorPlay size={14} color="var(--accent-purple)" />
+        <h3>OMNISSA · VDI</h3>
+        <div className="section-line" />
+        <button className="hd-segment-btn" onClick={onHostAdd} title="Omnissa 데스크톱 등록">
+          <Plus size={13} /> 등록
+        </button>
+      </div>
+
+      <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "4px" }}>
+        {horizonHosts.length > 0 ? horizonHosts.map((host) => (
+          <RemoteAssetRow
+            key={host.id}
+            host={host}
+            onConnect={onHostConnect}
+            onEdit={onHostEdit}
+            onMemo={onHostMemo}
+            onDelete={onHostDelete}
+          />
+        )) : (
+          <div style={{ padding: "28px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
+            <div style={{ fontSize: "12px", fontWeight: 700 }}>등록된 Omnissa 데스크톱이 없습니다.</div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 네트워크 ── 가상 스위치·VM별 스위치·트래픽. 별도 메뉴로 두기엔 작고 VM과
+          붙어 있는 정보라 이 페이지 맨 아래에 둔다. NetworkPage는 자기 그리드를 가지므로
+          한 칸을 통째로 차지하는 래퍼 안에 넣는다. */}
+      <div style={{ gridColumn: "1 / -1", marginTop: "18px" }}>
+        <NetworkPage vms={vms} statsData={statsData} netHistory={statsData?.net_history ?? []} />
       </div>
     </div>
   );

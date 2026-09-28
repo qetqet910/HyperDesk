@@ -75,26 +75,26 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ backdropFilter: 'blur(12px)', background: 'rgba(0,0,0,0.7)', zIndex: 500 }}>
-      <div className="modal-content glass-modal asset-modal" onClick={(e) => e.stopPropagation()} style={{ width: '560px', maxWidth: '560px', padding: 0, overflow: 'hidden', border: 'none', display: 'flex', flexDirection: 'column', maxHeight: '88vh' }}>
+      <div className="modal-content glass-modal asset-modal" onClick={(e) => e.stopPropagation()} style={{ width: '480px', maxWidth: '480px', padding: 0, overflow: 'hidden', border: 'none', display: 'flex', flexDirection: 'column', maxHeight: '88vh' }}>
         {/* Decorative Neon Header Line */}
         <div style={{ height: '2px', width: '100%', background: 'linear-gradient(90deg, transparent, var(--neon-blue), transparent)' }} />
 
-        <div className="modal-header" style={{ padding: '28px 24px 20px', border: 'none', marginBottom: 0 }}>
+        <div className="modal-header" style={{ padding: '18px 20px 14px', border: 'none', marginBottom: 0 }}>
           <div className="header-title" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div className="neon-text-blue" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <Globe size={20} />
-              <h3 style={{ fontSize: '19px', fontWeight: 900, letterSpacing: '-0.5px', textTransform: 'uppercase' }}>
+              <Globe size={17} />
+              <h3 style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.5px', textTransform: 'uppercase' }}>
                 {isEditing ? '원격 자산 명세 수정' : '신규 원격 자산 등록'}
               </h3>
             </div>
           </div>
           <button className="btn-icon" onClick={onClose} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
 
-        <div className="modal-body" style={{ padding: '0 24px 24px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
-          <form onSubmit={handleSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div className="modal-body" style={{ padding: '0 20px 18px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <form onSubmit={handleSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             
             {/* Protocol Selector */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -106,7 +106,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                   type="button"
                   onClick={() => setHostData({ ...hostData, protocol: 'RDP' })}
                   style={{ 
-                    flex: 1, height: '42px', borderRadius: '10px', 
+                    flex: 1, height: '36px', borderRadius: '10px', 
                     background: hostData.protocol === 'RDP' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.03)', 
                     border: '1px solid var(--glass-border)', color: hostData.protocol === 'RDP' ? '#fff' : 'var(--text-muted)',
                     fontSize: '12px', fontWeight: 800, cursor: 'pointer', transition: 'all 0.2s',
@@ -119,7 +119,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                   type="button"
                   onClick={() => setHostData({ ...hostData, protocol: 'HORIZON' })}
                   style={{ 
-                    flex: 1, height: '42px', borderRadius: '10px', 
+                    flex: 1, height: '36px', borderRadius: '10px', 
                     background: hostData.protocol === 'HORIZON' ? 'var(--accent-purple)' : 'rgba(255,255,255,0.03)', 
                     border: '1px solid var(--glass-border)', color: hostData.protocol === 'HORIZON' ? '#fff' : 'var(--text-muted)',
                     fontSize: '12px', fontWeight: 800, cursor: 'pointer', transition: 'all 0.2s',
@@ -133,10 +133,10 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
 
             {/* Asset Name */}
             <div className="settings-card" style={{ 
-              background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '14px',
+              background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '10px'
             }}>
-              <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)' }}>자산 별칭 (Alias)</label>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>자산 별칭 (Alias)</label>
               <input
                 ref={nameRef}
                 type="text"
@@ -144,9 +144,9 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                 value={hostData.name}
                 onChange={(e) => { setHostData({ ...hostData, name: e.target.value }); if (errors.name) setErrors({ ...errors, name: undefined }); }}
                 style={{
-                  width: '100%', height: '42px', background: 'rgba(0,0,0,0.2)',
+                  width: '100%', height: '36px', background: 'rgba(0,0,0,0.2)',
                   border: `1px solid ${errors.name ? 'var(--accent-red)' : 'var(--glass-border)'}`, borderRadius: '10px',
-                  padding: '0 12px', color: '#fff', fontSize: '14px', outline: 'none', transition: 'border-color 0.15s'
+                  padding: '0 12px', color: '#fff', fontSize: '13px', outline: 'none', transition: 'border-color 0.15s'
                 }}
               />
               {errors.name && (
@@ -156,10 +156,10 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
 
             {/* Connection Address */}
             <div className="settings-card" style={{ 
-              background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '14px',
+              background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '10px'
             }}>
-              <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)' }}>접속 엔드포인트 (IP/FQDN)</label>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>접속 엔드포인트 (IP/FQDN)</label>
               <input
                 ref={hostRef}
                 type="text"
@@ -167,9 +167,9 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                 value={hostData.host}
                 onChange={(e) => { setHostData({ ...hostData, host: e.target.value }); setVerifyState('idle'); if (errors.host) setErrors({ ...errors, host: undefined }); }}
                 style={{
-                  width: '100%', height: '42px', background: 'rgba(0,0,0,0.2)',
+                  width: '100%', height: '36px', background: 'rgba(0,0,0,0.2)',
                   border: `1px solid ${errors.host ? 'var(--accent-red)' : 'var(--glass-border)'}`, borderRadius: '10px',
-                  padding: '0 12px', color: '#fff', fontSize: '14px', outline: 'none', transition: 'border-color 0.15s'
+                  padding: '0 12px', color: '#fff', fontSize: '13px', outline: 'none', transition: 'border-color 0.15s'
                 }}
               />
               {errors.host && (
@@ -182,7 +182,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                   disabled={!hostData.host || verifyState === 'checking'}
                   onClick={handleVerify}
                   style={{
-                    height: '34px', padding: '0 14px', borderRadius: '8px', fontSize: '11px', fontWeight: 800,
+                    height: '30px', padding: '0 14px', borderRadius: '8px', fontSize: '11px', fontWeight: 800,
                     background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
                     color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
                     opacity: (!hostData.host || verifyState === 'checking') ? 0.4 : 1,
@@ -208,13 +208,13 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
 
             {/* Credentials */}
             <div className="settings-card" style={{
-              background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '14px',
+              background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '12px'
             }}>
               {/* Username */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)' }}>사용자 계정</label>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>사용자 계정</label>
                   <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({hostData.protocol === 'HORIZON' ? 'OMNISSA 로그인' : 'RDP 세션 전용'})</span>
                 </div>
                 <div style={{ position: 'relative' }}>
@@ -224,9 +224,9 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                     value={hostData.username}
                     onChange={(e) => setHostData({ ...hostData, username: e.target.value })}
                     style={{
-                      width: '100%', height: '42px', background: 'rgba(0,0,0,0.2)',
+                      width: '100%', height: '36px', background: 'rgba(0,0,0,0.2)',
                       border: '1px solid var(--glass-border)', borderRadius: '10px',
-                      padding: '0 40px 0 12px', color: '#fff', fontSize: '14px', outline: 'none'
+                      padding: '0 40px 0 12px', color: '#fff', fontSize: '13px', outline: 'none'
                     }}
                   />
                   <User size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.3 }} />
@@ -237,10 +237,10 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
 
             {/* Tags */}
             <div className="settings-card" style={{
-              background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '14px',
+              background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '10px'
             }}>
-              <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)' }}>태그</label>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>태그</label>
               <TagEditor tags={tags} onChange={setTags} />
             </div>
 
@@ -248,16 +248,16 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                 asset rows) — not buried here in the edit form. */}
 
             {/* Actions */}
-            <div className="modal-actions" style={{ marginTop: '10px', display: 'flex', gap: '12px' }}>
+            <div className="modal-actions" style={{ marginTop: '4px', display: 'flex', gap: '10px' }}>
               <button 
                 type="button"
                 className="cancel-btn" 
                 onClick={onClose}
                 disabled={isPending}
                 style={{ 
-                  flex: 1, height: '48px', borderRadius: '12px', background: 'transparent', 
+                  flex: 1, height: '38px', borderRadius: '12px', background: 'transparent', 
                   border: '1px solid var(--glass-border)', color: 'var(--text-secondary)', 
-                  fontWeight: 700, cursor: 'pointer', fontSize: '15px'
+                  fontWeight: 700, cursor: 'pointer', fontSize: '13px'
                 }}
               >
                 취소
@@ -267,9 +267,9 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                 className="confirm-btn" 
                 disabled={isPending}
                 style={{ 
-                  flex: 2, height: '48px', borderRadius: '12px', 
+                  flex: 2, height: '38px', borderRadius: '12px', 
                   background: 'linear-gradient(135deg, var(--accent-blue), #4f8ef7)', 
-                  color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer', fontSize: '15px',
+                  color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer', fontSize: '13px',
                   boxShadow: '0 6px 20px rgba(0, 210, 255, 0.3)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px'
                 }}
