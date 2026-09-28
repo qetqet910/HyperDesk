@@ -104,10 +104,14 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest }: Mu
   const immersiveRef = useRef(false);
   // Tracks plain OS fullscreen (F11, not immersive) so ESC knows to exit it.
   const fullscreenRef = useRef(false);
+  // 몰입모드가 OS 전체화면을 **직접 켰는지**. F11 전체화면 상태에서 몰입에 들어갔다면
+  // 나올 때 전체화면을 끄면 안 된다 — 끄면 F11 이전의 창 크기(apply_fullscreen이
+  // 처음 저장한 값)로 떨어져서 "해제하면 전체화면 전 크기가 아니라 엉뚱한 크기"가 됐다.
+  const immersiveOwnsFsRef = useRef(false);
   useEffect(() => { immersiveRef.current = isImmersive; }, [isImmersive]);
   useEffect(() => {
     return () => {
-      if (immersiveRef.current) {
+      if (immersiveRef.current && immersiveOwnsFsRef.current) {
         api.setFullscreen(false).catch(console.error);
       }
     };
@@ -125,7 +129,8 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest }: Mu
     const next = !immersiveRef.current;
     immersiveRef.current = next;
     setIsImmersive(next);
-    api.setFullscreen(next).catch(console.error);
+    if (next) immersiveOwnsFsRef.current = !fullscreenRef.current;
+    if (immersiveOwnsFsRef.current) api.setFullscreen(next).catch(console.error);
   };
 
   // F11 toggles OS fullscreen — but while immersive, it exits immersive (which

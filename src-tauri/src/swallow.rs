@@ -505,11 +505,69 @@ pub fn find_main_window(pid: u32, title_needle: Option<&str>) -> Option<HWND> {
 
 pub fn find_webview_container(parent: HWND) -> HWND {
     let mut param = ChildParam { found: parent };
-    
+
     unsafe {
         let _ = EnumChildWindows(parent, Some(enum_child_callback), LPARAM(&mut param as *mut ChildParam as isize));
     }
     param.found
+}
+
+// ─── 커서: 부모가 VM의 커서를 덮어쓰지 않게 한다 ─────────────────────────────
+//
+// VM 위에서 마우스가 움직이면 Windows는 커서 아래 창에 WM_SETCURSOR를 보내고, 그 창이
+// DefWindowProc로 넘기면 **부모에게 먼저** 물어본다(부모가 TRUE면 거기서 끝). swallow된
+// 자식의 부모는 우리 프로세스의 Chrome_WidgetWin_0(실측 2026-09-28: 그 아래 렌더러만
+// msedgewebview2 소유)이고, 그 위로 올라가면 tao가 클라이언트 영역의 WM_SETCURSOR마다
+// **화살표로 SetCursor**한다. 그래서 원격이 I빔/손가락으로 바꾼 커서가 매 이동마다
+// 화살표로 되돌아가 깜빡였다. 자식 트리에서 온 WM_SETCURSOR엔 FALSE를 돌려 단독 실행
+// 때와 똑같이 자식이 자기 커서를 쓰게 둔다. 웹뷰 자신의 창(Chrome_*/D3D)은 원래대로.
+static CONTAINER_ORIG_PROC: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+fn hook_container_cursor(container: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::GWLP_WNDPROC;
+    let ours = container_proc as *const () as isize;
+    unsafe {
+        // 같은 프로세스라 어느 스레드에서든 교체할 수 있다. 이미 우리 것이면(두 번째 슬롯) 끝.
+        let cur = GetWindowLongPtrW(container, GWLP_WNDPROC);
+        if cur == 0 || cur == ours { return; }
+        CONTAINER_ORIG_PROC.store(cur, std::sync::atomic::Ordering::Relaxed);
+        SetWindowLongPtrW(container, GWLP_WNDPROC, ours);
+    }
+}
+
+/// `w`가 컨테이너 바로 아래의 어느 창 밑에 있는지 따라 올라가, 그게 웹뷰 자신의 창이
+/// 아니면(= swallow된 자식 트리면) 참.
+fn from_swallowed_child(container: HWND, w: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::GetParent;
+    let mut top = w;
+    for _ in 0..32 {
+        let p = unsafe { GetParent(top) }.unwrap_or_default();
+        if p.is_invalid() { return false; }
+        if p == container { break; }
+        top = p;
+    }
+    if top == container { return false; }
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetClassNameW(top, &mut buf) } as usize;
+    let cls = String::from_utf16_lossy(&buf[..n]);
+    !(cls.starts_with("Chrome_") || cls.starts_with("Intermediate D3D"))
+}
+
+unsafe extern "system" fn container_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::{CallWindowProcW, DefWindowProcW, WM_SETCURSOR, WM_MOUSEWHEEL, WM_MOUSEHWHEEL, WNDPROC};
+    if msg == WM_SETCURSOR && from_swallowed_child(hwnd, HWND(wp.0 as *mut _)) {
+        return LRESULT(0);
+    }
+    // 휠 진단: 자식이 휠을 처리하지 않고 부모로 흘려보냈다면 여기 도착한다. 이 줄이 찍히면
+    // "세션이 휠을 안 받는다", 안 찍히면 "휠이 애초에 세션으로 안 간다(웹뷰 포커스)"다.
+    if msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL {
+        dlog!("[wheel] reached container msg=0x{:x}", msg);
+    }
+    match CONTAINER_ORIG_PROC.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => DefWindowProcW(hwnd, msg, wp, lp),
+        orig => CallWindowProcW(std::mem::transmute::<isize, WNDPROC>(orig), hwnd, msg, wp, lp),
+    }
 }
 
 extern "system" fn enum_child_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -835,6 +893,7 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
     let my_gen = bump_generation(slot_id);
     let _parent_h = SendHWND(parent_hwnd);
     let actual_parent = SendHWND(find_webview_container(parent_hwnd));
+    hook_container_cursor(actual_parent.0);
     let app = app_handle.clone();
 
     std::thread::spawn(move || {
@@ -2206,8 +2265,18 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
     };
     let _ = APP_HANDLE.set(app);
     MAIN_HWND.store(main_hwnd, std::sync::atomic::Ordering::Relaxed);
+    spawn_foreground_tracker();
+    #[cfg(debug_assertions)]
+    spawn_key_trace_writer();
     std::thread::spawn(|| unsafe {
         // LL hooks need a message pump on the installing thread.
+        // **뒤쪽 훅: 한 번만 건다(재설치 금지).** 원격 클라이언트는 세션이 포커스를 받을 때
+        // 자기 훅을 새로 걸어 이 훅보다 앞에 선다 — 그게 의도다. 클라이언트가 Win/Alt+Tab을
+        // 원격에 보내고 흘려보낸 것을 여기서 먹어 로컬 셸에 안 닿게 한다(ll_tail_proc 참고).
+        if SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_tail_proc), None, 0).is_err() {
+            dlog!("[keyhook] tail hook install FAILED");
+        }
+        // 앞쪽 훅(Alt+1~4 전용): 뒤쪽 훅보다 **나중에** 걸어야 앞에 선다.
         let mut hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0) {
             Ok(h) => h,
             Err(_) => return,
@@ -2220,18 +2289,24 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
         //      슬롯에서 Alt+1~4를 눌러도 [keyhook] 로그가 한 줄도 안 찍혔다.
         //  (b) 프로시저가 LowLevelHooksTimeout(기본 300ms)을 넘기면 Windows가 훅을
         //      말없이 제거한다. 이후 모든 키 가로채기가 조용히 죽는다.
-        // 둘 다 unhook → 재설치 한 방으로 복구되고, 재설치는 우리를 체인 맨 앞에 놓는다.
+        // 재설치는 우리를 체인 맨 앞에 놓는다.
+        //
+        // **주기 500ms**(예전 3초): Horizon은 세션이 포커스를 받을 때마다 자기 훅을 새로
+        // 걸어 맨 앞을 차지하고 Alt+숫자를 원격으로 먹는다. 3초면 클릭 직후 최대 3초간
+        // Alt+1~4가 안 먹어서 "될 때도 있고 안 될 때도 있음"이 됐다(2026-09-28).
         // NULL hwnd로 건 타이머는 이 스레드 큐로 WM_TIMER를 보내므로 GetMessageW가 받는다.
-        SetTimer(HWND(std::ptr::null_mut()), 1, 3000, None);
+        SetTimer(HWND(std::ptr::null_mut()), 1, 500, None);
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             if msg.message == WM_TIMER {
-                let _ = UnhookWindowsHookEx(hook);
+                // **새 훅을 먼저 걸고 옛 훅을 뗀다.** unhook → install 순서면 그 사이 훅이
+                // 하나도 없어서 도착한 키가 그대로 로컬로 샌다. 둘 다 걸린 순간은 안전하다 —
+                // 새 훅이 먼저 불리고, 먹으면 옛 훅은 호출되지 않는다.
                 match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0) {
-                    Ok(h) => hook = h,
-                    // 재설치 실패는 되돌릴 방법이 없다 — 훅 없이 도는 것보다 로그를 남긴다.
+                    Ok(h) => { let _ = UnhookWindowsHookEx(hook); hook = h; }
+                    // 새로 못 걸었으면 옛 훅을 유지한다(떼면 아무것도 안 남는다).
                     // `_e`: 릴리즈에선 dlog!가 no-op이라 `e`가 미사용 경고를 낸다.
-                    Err(_e) => { dlog!("[keyhook] REINSTALL FAILED: {_e}"); return; }
+                    Err(_e) => { dlog!("[keyhook] REINSTALL FAILED (keeping old hook): {_e}"); }
                 }
             }
         }
@@ -2287,18 +2362,81 @@ fn app_is_foreground() -> bool {
     }
 }
 
+static KEY_CHILD_CACHE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// 시작 메뉴 창을 뺀 **마지막 진짜 포그라운드**가 HyperDesk(본체나 swallow된 세션)였는가.
+/// 훅 콜백은 창 트리를 오래 뒤질 수 없으므로 별도 스레드가 50ms마다 갱신한다.
+static LAST_FG_OURS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 로컬 시작 메뉴/검색 호스트 창인가. GetClassNameW는 메시지를 안 보내서 훅 안에서도 안전하다.
+fn is_start_host(h: HWND) -> bool {
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetClassNameW(h, &mut buf) } as usize;
+    String::from_utf16_lossy(&buf[..n]) == "Windows.UI.Core.CoreWindow"
+}
+
+fn spawn_foreground_tracker() {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsChild};
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let fg = unsafe { GetForegroundWindow() };
+        if fg.is_invalid() || is_start_host(fg) { continue; }
+        let main = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
+        let ours = fg.0 as isize == main
+            || lock_state().values().any(|i| i.child_hwnd == fg.0 as isize
+                || unsafe { IsChild(HWND(i.child_hwnd as *mut _), fg) }.as_bool());
+        LAST_FG_OURS.store(ours, std::sync::atomic::Ordering::Relaxed);
+    });
+}
+
 fn vm_key_target() -> Option<HWND> {
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetGUIThreadInfo, GUITHREADINFO, IsChild};
     let main = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
     if main == 0 { return None; }
     unsafe {
-        if GetForegroundWindow().0 as isize != main {
+        // **훅 콜백 안이라 락을 기다리면 안 된다.** update_position/set_header_cutout은
+        // 락을 쥔 채 다른 프로세스 창에 동기 SetWindowPos/SetWindowRgn을 하는데, 그 창이
+        // 바쁘면 여기서 같이 멈춘다. LL 훅이 멈추면 **시스템 전체 키 입력이 멈추고**,
+        // LowLevelHooksTimeout을 넘기면 Windows가 훅을 말없이 떼어 Win키가 로컬로 샌다.
+        // 락이 잡혀 있으면 마지막으로 본 값을 쓴다(한 번에 슬롯 하나만 보이므로 하나면 충분).
+        let collect = |s: &HashMap<String, SwallowInfo>| -> Vec<isize> {
+            s.values()
+                .filter(|i| i.is_visible)
+                .map(|i| i.child_hwnd)
+                .collect()
+        };
+        let children: Vec<isize> = match swallow_state().try_lock() {
+            Ok(s) => {
+                let v = collect(&s);
+                KEY_CHILD_CACHE.store(v.first().copied().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                v
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => collect(&e.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                match KEY_CHILD_CACHE.load(std::sync::atomic::Ordering::Relaxed) {
+                    0 => Vec::new(),
+                    c => vec![c],
+                }
+            }
+        };
+        // 포그라운드가 본체이거나 **swallow된 프레임 자신/그 트리**면 우리 것이다.
+        // vmconnect의 WinForms 프레임은 SetParent 뒤에도 자기 자신이 포그라운드가 될 수
+        // 있어서, 본체와만 비교하면 Hyper-V 슬롯에서 Win키가 그대로 로컬로 샌다
+        // (실측 2026-09-11: 같은 Win키가 RDP 슬롯에선 true, Hyper-V 슬롯에선 false).
+        let fg = GetForegroundWindow();
+        // 로컬 시작 메뉴 창이 포그라운드면 **그 직전의 진짜 포그라운드**로 판단한다.
+        // 실측(2026-09-28): 세션 포커스 중인데도 Win을 누르는 순간 포그라운드가 이미
+        // `Windows.UI.Core.CoreWindow`였고(원격 클라이언트가 로컬 셸을 건드린 여파), 그 뒤
+        // 모든 Win이 "우리 것 아님"으로 흘러가 아무 데도 안 먹었다.
+        let fg_ours = if is_start_host(fg) {
+            LAST_FG_OURS.load(std::sync::atomic::Ordering::Relaxed)
+        } else {
+            fg.0 as isize == main
+                || children.iter().any(|&c| fg.0 as isize == c || IsChild(HWND(c as *mut _), fg).as_bool())
+        };
+        if !fg_ours {
             return None;
         }
-        let children: Vec<isize> = lock_state().values()
-            .filter(|i| i.is_visible)
-            .map(|i| i.child_hwnd)
-            .collect();
         for raw in children {
             let child = HWND(raw as *mut _);
             if !IsWindow(child).as_bool() { continue; }
@@ -2323,71 +2461,168 @@ fn vm_key_target() -> Option<HWND> {
 unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: windows::Win32::Foundation::WPARAM, lparam: LPARAM) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, PostMessageW, KBDLLHOOKSTRUCT, HC_ACTION,
-        LLKHF_INJECTED, LLKHF_UP, LLKHF_EXTENDED, LLKHF_ALTDOWN,
-        WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+        CallNextHookEx, KBDLLHOOKSTRUCT, HC_ACTION, LLKHF_INJECTED, LLKHF_UP, LLKHF_ALTDOWN,
     };
-    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LWIN, VK_RWIN, VK_TAB};
+    use std::sync::atomic::Ordering::Relaxed;
 
     if code == HC_ACTION as i32 {
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
         let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
         let alt_down = kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
-        let is_win = kb.vkCode == VK_LWIN.0 as u32 || kb.vkCode == VK_RWIN.0 as u32;
-        let is_alt_tab = kb.vkCode == VK_TAB.0 as u32 && alt_down;
+        let up = kb.flags.0 & LLKHF_UP.0 != 0;
+        let vki = (kb.vkCode & 0xFF) as usize;
+
+        // 진단: Win/Tab이 **앞쪽 훅에 오기는 하는지** 남긴다(뒤쪽 훅 기록과 짝지어 본다).
+        let traced = kb.vkCode == 0x5B || kb.vkCode == 0x5C || kb.vkCode == 0x09;
+        if traced && !injected && !up { trace_key(kb, KT_HEAD_SEEN); }
+        if up && !injected {
+            if DOWN_ACTION[vki].swap(false, Relaxed) { return LRESULT(1); } // 슬롯 키의 keyup
+            return CallNextHookEx(None, code, wparam, lparam);
+        }
+        if !injected {
+            DOWN_ACTION[vki].store(false, Relaxed);
+        }
+
         // Alt+1..4 (slot switching) must keep working while a VM holds focus —
         // with keyboardhook:i:1 the remote would otherwise swallow them.
         let is_slot_key = alt_down && (0x31..=0x34).contains(&kb.vkCode);
 
         if !injected && is_slot_key {
-            let up = kb.flags.0 & LLKHF_UP.0 != 0;
-            // 여기(와 이 콜백이 부르는 vm_key_target)에 dlog!를 두지 말 것. dlog는 debug
-            // 빌드에서만 파일에 쓰는데, 훅 콜백 안의 파일 I/O는 LowLevelHooksTimeout을 넘겨
-            // 훅이 조용히 빠지게 만들 수 있다 — 그러면 `tauri dev`에서만 Win키가 release
-            // 설치본보다 나쁘게 동작해 비교가 무의미해진다(2026-09-21).
-            // **포그라운드가 우리면 슬롯 키는 우리 것이다.** 예전엔 vm_key_target()이
-            // Some일 때만(= 포커스가 swallow된 자식 트리 안일 때만) 가로챘는데,
-            // Omnissa/Horizon은 포커스 토폴로지가 달라 그 검사를 통과하지 못해
-            // Alt+1~4가 원격으로 넘어가 버렸다(실측: Horizon 슬롯에서 [keyhook]
-            // target 줄이 아예 안 찍힘). 어떤 앱이 어떤 식으로 포커스를 잡든
-            // "HyperDesk가 포그라운드"면 슬롯 전환은 우리가 처리하는 게 맞다.
+            // 여기(와 이 콜백이 부르는 함수)에 dlog!를 두지 말 것 — 훅 콜백 안의 파일 I/O는
+            // LowLevelHooksTimeout을 넘겨 훅이 조용히 빠지게 만들 수 있다.
+            // **포그라운드가 우리면 슬롯 키는 우리 것이다** — Omnissa/Horizon은 포커스
+            // 토폴로지가 달라 "포커스가 세션 트리 안인가" 검사를 통과하지 못했다.
             if app_is_foreground() {
-                if !up {
-                    let idx = kb.vkCode - 0x31;
-                    // Off-thread: app.emit serializes into the webview; the hook
-                    // callback must return fast (system LL-hook timeout).
-                    std::thread::spawn(move || {
-                        if let Some(app) = APP_HANDLE.get() {
-                            let slot = format!("slot-{}", idx);
-                            let _ = app.emit("hotkey-focus", slot.clone());
-                            focus_window(&slot);
-                        }
-                    });
-                }
+                let idx = kb.vkCode - 0x31;
+                // Off-thread: app.emit serializes into the webview; the hook
+                // callback must return fast (system LL-hook timeout).
+                std::thread::spawn(move || {
+                    if let Some(app) = APP_HANDLE.get() {
+                        let slot = format!("slot-{}", idx);
+                        let _ = app.emit("hotkey-focus", slot.clone());
+                        focus_window(&slot);
+                    }
+                });
+                DOWN_ACTION[vki].store(true, Relaxed); // keyup도 같이 먹는다
                 return LRESULT(1); // keep it away from both the remote and RegisterHotKey
             }
         }
-
-        if !injected && (is_win || is_alt_tab) {
-            if let Some(target) = vm_key_target() {
-                let up = kb.flags.0 & LLKHF_UP.0 != 0;
-                // Rebuild the WM_KEY* lparam: repeat=1, scancode, extended,
-                // and for keyup the previous-state + transition bits.
-                let mut l: isize = 1 | (((kb.scanCode & 0xFF) as isize) << 16);
-                if kb.flags.0 & LLKHF_EXTENDED.0 != 0 { l |= 1 << 24; }
-                if up { l |= (1 << 30) | (1 << 31); }
-                let msg = if is_alt_tab {
-                    l |= 1 << 29; // context bit: Alt is held
-                    if up { WM_SYSKEYUP } else { WM_SYSKEYDOWN }
-                } else if up { WM_KEYUP } else { WM_KEYDOWN };
-                let _ = PostMessageW(target, msg,
-                    windows::Win32::Foundation::WPARAM(kb.vkCode as usize), LPARAM(l));
-                return LRESULT(1); // eaten locally — host shell never reacts
-            }
-        }
+        // Win/Alt+Tab은 **여기서 건드리지 않는다** — 원격 클라이언트의 훅이 받아 원격에
+        // 보내야 한다. 로컬 셸 차단은 체인 뒤쪽의 ll_tail_proc가 한다.
     }
     CallNextHookEx(None, code, wparam, lparam)
 }
+
+/// **뒤쪽 훅: 원격 클라이언트가 원격에 보내고 흘려보낸 Win/Alt+Tab을 먹는다.**
+///
+/// 실측(2026-09-28 `[keytrace]`)으로 뒤집힌 전제: 원격 클라이언트(mstsc/vmconnect/Horizon)는
+/// SetParent 뒤에도 **자기 훅으로 Win을 원격에 보낸다** — 우리 훅이 아무것도 안 넘긴(PASS)
+/// 첫 Win도 VM에 들어갔다. 다만 자기 창이 진짜 포그라운드가 아니라서 키를 **아래로 흘려**
+/// 로컬 셸도 받는다("시작 메뉴가 양쪽에서 열림"). 그래서 할 일은 키를 대신 전달하는 게
+/// 아니라 **클라이언트 뒤에서 로컬로 가는 것만 막는 것**이다.
+///
+/// 예전 방식(맨 앞에서 먹고 세션 창에 WM_KEY*를 직접 post)은 클라이언트 훅을 건너뛰게
+/// 만들었고, 그 직후 로컬 시작 메뉴가 포그라운드를 가져가 두 번째 Win부터는 전부 로컬로
+/// 갔다("처음만 VM"). 되살리지 말 것.
+///
+/// 이 훅은 재설치하지 않는다 — 클라이언트는 세션이 포커스를 받을 때 훅을 새로 걸어
+/// 이 훅보다 앞에 선다. 재설치하면 클라이언트보다 앞에 서서 원격이 키를 못 받는다.
+unsafe extern "system" fn ll_tail_proc(code: i32, wparam: windows::Win32::Foundation::WPARAM, lparam: LPARAM) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, KBDLLHOOKSTRUCT, HC_ACTION, LLKHF_INJECTED, LLKHF_UP, LLKHF_ALTDOWN,
+    };
+    use std::sync::atomic::Ordering::Relaxed;
+
+    if code == HC_ACTION as i32 {
+        let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+        let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
+        let up = kb.flags.0 & LLKHF_UP.0 != 0;
+        let vki = (kb.vkCode & 0xFF) as usize;
+        let is_win = kb.vkCode == 0x5B || kb.vkCode == 0x5C;
+        let is_alt_tab = kb.vkCode == 0x09 && kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
+        let traced = is_win || kb.vkCode == 0x09;
+        if !injected {
+            if up {
+                if TAIL_EATEN[vki].swap(false, Relaxed) {
+                    if traced { trace_key(kb, KT_TAIL_EAT_UP); }
+                    return LRESULT(1);
+                }
+            } else {
+                TAIL_EATEN[vki].store(false, Relaxed);
+                // **Win은 먹지 않는다(v1.3.1, 사용자 결정).** 누름·뗌을 둘 다 먹어도 원격
+                // 클라이언트가 스스로 로컬 시작 메뉴를 열어서(실측 2026-09-28) 먹는 게 득이
+                // 없었다 — "VM/로컬이 번갈아 반응"만 남았다. 해결은 훅이 아니라 구조 쪽
+                // (CLAUDE.md "실기기 결과: 여전히 안 됨" 항목의 A/B). Alt+Tab은 계속 막는다.
+                if is_alt_tab && vm_key_target().is_some() {
+                    TAIL_EATEN[vki].store(true, Relaxed);
+                    trace_key(kb, KT_TAIL_EAT);
+                    return LRESULT(1);
+                }
+            }
+        }
+        if traced { trace_key(kb, if up { KT_TAIL_PASS_UP } else { KT_TAIL_PASS }); }
+    }
+    CallNextHookEx(None, code, wparam, lparam)
+}
+
+// ─── 키 진단 트레이스 (debug 빌드 전용) ─────────────────────────────────────
+// 콜백 안에서는 **원자 저장만** 한다(파일 I/O·락은 LowLevelHooksTimeout을 넘겨 훅을
+// 빠지게 만든다). 별도 스레드가 300ms마다 `[keytrace]`로 흘린다. 포그라운드 창도 같이
+// 찍으므로 "Win을 눌렀는데 줄이 없음" = 우리 훅에 오지도 않음(다른 훅/드라이버가 먼저),
+// "DOWN_PASS" = 왔는데 세션 대상을 못 찾음, "DELEGATED" = 세션에 넘김 — 셋이 갈린다.
+const KT_HEAD_SEEN: u64 = 1;
+const KT_TAIL_EAT: u64 = 2;
+const KT_TAIL_EAT_UP: u64 = 3;
+const KT_TAIL_PASS: u64 = 4;
+const KT_TAIL_PASS_UP: u64 = 5;
+#[cfg(debug_assertions)]
+static KEY_TRACE: [std::sync::atomic::AtomicU64; 64] = [const { std::sync::atomic::AtomicU64::new(0) }; 64];
+#[cfg(debug_assertions)]
+static KEY_TRACE_W: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(debug_assertions)]
+fn trace_key(kb: &windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT, what: u64) {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let fg = unsafe { GetForegroundWindow() }.0 as usize as u64 & 0xFFFF_FFFF;
+    let v = (kb.vkCode as u64 & 0xFF) | (what << 8) | (fg << 32);
+    let i = KEY_TRACE_W.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    KEY_TRACE[i % 64].store(v, std::sync::atomic::Ordering::Relaxed);
+}
+#[cfg(not(debug_assertions))]
+fn trace_key(_: &windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT, _: u64) {}
+
+#[cfg(debug_assertions)]
+fn spawn_key_trace_writer() {
+    std::thread::spawn(|| {
+        let mut r = 0usize;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let w = KEY_TRACE_W.load(std::sync::atomic::Ordering::Relaxed);
+            if w - r > 64 { dlog!("[keytrace] dropped {} events", w - r - 64); r = w - 64; }
+            while r < w {
+                let v = KEY_TRACE[r % 64].load(std::sync::atomic::Ordering::Relaxed);
+                let fg = HWND((v >> 32) as usize as *mut _);
+                let mut buf = [0u16; 128];
+                let n = unsafe { GetClassNameW(fg, &mut buf) } as usize;
+                let what = match (v >> 8) & 0xFF { 1 => "HEAD_SEEN", 2 => "TAIL_EAT", 3 => "TAIL_EAT_UP", 4 => "TAIL_PASS", 5 => "TAIL_PASS_UP", _ => "?" };
+                dlog!("[keytrace] vk=0x{:02X} {} fg=0x{:X} '{}' main_fg={}", v & 0xFF, what, v >> 32,
+                    String::from_utf16_lossy(&buf[..n]),
+                    (v >> 32) as isize == MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed) & 0xFFFF_FFFF);
+                r += 1;
+            }
+        }
+    });
+}
+
+/// 앞쪽 훅이 슬롯 키를 먹었는지 vk별로 기억한다 — keyup이 keydown 판정을 그대로 따르게.
+/// (Alt+1에서 Alt를 먼저 떼면 '1'의 keyup은 is_slot_key=false라 재분류하면 새어 나간다.)
+static DOWN_ACTION: [std::sync::atomic::AtomicBool; 256] =
+    [const { std::sync::atomic::AtomicBool::new(false) }; 256];
+/// 뒤쪽 훅이 먹은 keydown. 같은 이유로 keyup도 같이 먹는다 — 한쪽만 먹으면 로컬 OS에
+/// Win이 눌린 채 남거나 뗌만 새서 시작 메뉴가 열린다.
+static TAIL_EATEN: [std::sync::atomic::AtomicBool; 256] =
+    [const { std::sync::atomic::AtomicBool::new(false) }; 256];
 
 /// Forward keyboard focus to a swallowed window by slot ID.
 /// Called from hotkey handlers and the focus_slot_window command.

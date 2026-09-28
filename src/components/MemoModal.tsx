@@ -61,17 +61,17 @@ export function MemoModal({ host, onClose, onSaved }: MemoModalProps) {
           {host.status && <span style={{ opacity: 0.7 }}>{host.status}</span>}
         </div>
 
-        <div style={{ padding: "0 22px", flex: 1, minHeight: 0, display: "flex" }}>
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
           <textarea
             autoFocus
             placeholder={"메모를 입력하세요…\n예) 접속 계정, 방화벽 포트, 담당자, 점검 이력"}
             value={memo}
             onChange={(e) => setMemo(e.target.value)}
             style={{
-              width: "100%", minHeight: "220px", background: "rgba(0,0,0,0.25)",
-              border: "1px solid var(--glass-border)", borderRadius: "12px",
+              width: "100%", minHeight: "380px", background: "rgba(0,0,0,0.25)",
               padding: "14px", color: "var(--text-main)", fontSize: "13px",
               outline: "none", resize: "vertical", fontFamily: "inherit", lineHeight: 1.7,
+              boxShadow: "0px 0px 3px #222", border: "none"
             }}
           />
         </div>

@@ -1652,6 +1652,8 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
         let monitor = window.current_monitor().map_err(|e| e.to_string())?
             .ok_or("no monitor")?;
         let resizable = window.is_resizable().unwrap_or(true);
+        #[cfg(debug_assertions)]
+        crate::swallow::dlog(&format!("[fs] enter maximized={maximized} saved_pos={pos:?} saved_size={size:?}"));
         {
             let mut saved = lock_or_recover(fs_saved());
             *saved = Some(SavedWindowState { pos, size, maximized, resizable });
@@ -1699,6 +1701,8 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
             let mut saved = lock_or_recover(fs_saved());
             saved.take()
         };
+        #[cfg(debug_assertions)]
+        crate::swallow::dlog(&format!("[fs] exit restore={:?}", taken.as_ref().map(|s| (s.maximized, s.size, s.pos))));
         if let Some(s) = taken {
             mark_fullscreen_native(window, false);
             restore_work_area();

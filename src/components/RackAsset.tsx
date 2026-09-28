@@ -293,7 +293,7 @@ export function HorizonCard({ host, animDelay = 0, onEdit, onError, onSuccess }:
       <button
         className="action-btn vdi vm-row-action"
         disabled={isBusy}
-        style={{ background: isOffline ? 'rgba(255,255,255,0.03)' : 'var(--accent-purple)', color: isOffline ? 'var(--text-muted)' : '#fff', border: isOffline ? '1px solid var(--border)' : 'none' }}
+        style={{ background: isOffline ? 'rgba(255,255,255,0.03)' : 'rgba(100,100,255,0.1)', color: isOffline ? 'var(--text-muted)' : '#fff', border: isOffline ? '1px solid var(--border)' : 'none' }}
         onClick={() => run(
           () => connect.mutateAsync({ host: host.host, protocol: host.protocol, username: host.username }),
           "VDI 연결 시도"
