@@ -25,6 +25,7 @@ import { CreateVmModal } from "@/components/CreateVmModal";
 const SettingsPage = lazy(() => import("@/components/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const MultiView = lazy(() => import("@/components/MultiView").then(m => ({ default: m.MultiView })));
 const SnapshotsPage = lazy(() => import("@/components/SnapshotsPage").then(m => ({ default: m.SnapshotsPage })));
+const NetworkPage = lazy(() => import("@/components/NetworkPage").then(m => ({ default: m.NetworkPage })));
 import { AssetModal } from "@/components/AssetModal";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { MemoModal } from "@/components/MemoModal";
@@ -70,6 +71,7 @@ const PAGE_KEYS: Record<Page, { title: Key; subtitle: Key }> = {
   vms:       { title: "nav.vms",       subtitle: "page.vms.sub" },
   remote:    { title: "nav.remote",    subtitle: "page.remote.sub" },
   snapshots: { title: "nav.snapshots", subtitle: "page.snapshots.sub" },
+  network: { title: "nav.network", subtitle: "page.network.sub" },
   events:    { title: "nav.events",    subtitle: "page.events.sub" },
   settings:  { title: "nav.settings",  subtitle: "page.settings.sub" },
 };
@@ -92,7 +94,7 @@ export default function App() {
   // ── Page routing (localStorage-persisted) ──
   const [page, setPage] = useState<Page>(() => {
     const saved = localStorage.getItem("hd_page") as Page | null;
-    const validPages: Page[] = ["dashboard", "multiview", "vms", "remote", "snapshots", "events"];
+    const validPages: Page[] = ["dashboard", "multiview", "vms", "remote", "snapshots", "network", "events"];
     if (saved && validPages.includes(saved)) return saved;
     if (!saved && settings.viewMode === "multiview") return "multiview";
     return "dashboard";
@@ -718,7 +720,7 @@ export default function App() {
           <Sidebar
             current={page}
             onNav={(p) => {
-              if (p === "events" || p === "dashboard" || p === "multiview" || p === "vms" || p === "remote" || p === "snapshots" || p === "settings") {
+              if (p === "events" || p === "dashboard" || p === "multiview" || p === "vms" || p === "remote" || p === "snapshots" || p === "network" || p === "settings") {
                 setPage(p);
               }
             }}
@@ -770,6 +772,7 @@ export default function App() {
                       onHostAdd={() => { setEditingHost(null); setAddProtocol("HORIZON"); setShowAssetModal(true); }}
                     />}
                     {page === "remote" && <RemotePage remoteHosts={mstHostsList} onConnect={(host, protocol, username) => connectHost.mutateAsync({ host, protocol, username })} onEdit={(host) => { setEditingHost(host); setShowAssetModal(true); }} onMemo={setMemoHost} onDelete={setConfirmDelete} onAdd={() => { setEditingHost(null); setAddProtocol("RDP"); setShowAssetModal(true); }} />}
+                    {page === "network"   && <NetworkPage vms={vms} statsData={statsData} netHistory={statsData?.net_history ?? []} />}
                     {page === "snapshots" && <SnapshotsPage vms={vms} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[SNAP] ${msg}`, "success"); }} onError={(msg) => { addToast(msg, "error"); addLog(`[SNAP] ${msg}`, "error"); }} />}
                     {page === "events"    && <EventsPage logs={logs} onClear={() => setLogs([])} />}
                     {page === "settings"  && <SettingsPage addToast={addToast} />}

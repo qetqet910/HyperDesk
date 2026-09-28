@@ -92,6 +92,12 @@ pub fn run() {
         }).build())
         .setup(|app| {
             // "이 rdp 링크를 열 앱" 선택지에 HyperDesk를 올린다(HKCU, 기본 앱은 안 빼앗음).
+            // **release 빌드에서만.** 매 실행마다 자기 exe 경로로 덮어쓰므로 debug 빌드를
+            // 한 번만 띄워도 `rdp:` 링크가 target\debug\hyperdesk.exe로 넘어가고, dev 서버가
+            // 꺼져 있으면 "localhost 연결 거부" 화면이 떴다(2026-09-28). Store(MSIX) 설치본은
+            // 이 HKCU 쓰기가 패키지 안으로 격리돼 효과가 없고, 대신 gen/windows/bundle.config.json의
+            // protocolHandlers(→ AppxManifest의 windows.protocol)로 등록된다.
+            #[cfg(not(debug_assertions))]
             if let Err(e) = rdplink::register_protocol() {
                 crate::swallow::dlog(&format!("[rdplink] register failed: {e}"));
             }
@@ -200,6 +206,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             rdplink::take_rdp_link,
+            rdplink::rdp_link_registered,
+            rdplink::set_rdp_link,
             get_dashboard,
             get_system_stats,
             create_vm,

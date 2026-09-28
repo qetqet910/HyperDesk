@@ -9,7 +9,9 @@
   "extensions": {
     "shareTarget": false,
     "fileAssociations": [],
-    "protocolHandlers": []
+    "protocolHandlers": [
+      { "name": "rdp", "displayName": "RDP 연결 (HyperDesk)" }
+    ]
   },
   "signing": {
     "pfx": null,

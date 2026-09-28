@@ -1,29 +1,21 @@
-PolyForm Noncommercial License 1.0.0
+MIT License
 
-Copyright (c) 2026 HyperDesk
+Copyright (c) 2026 김현민
 
-This license applies to any software and associated documentation (the "Software") that is distributed under this PolyForm Noncommercial License 1.0.0.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-1. Acceptance
-In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-2. Copyright License
-The licensor grants you a copyright license for the Software to do everything you might do with the Software that would otherwise infringe the licensor's copyright in it for any permitted purpose. However, you may only distribute the Software according to these terms.
-
-3. Patent License
-The licensor grants you a patent license for the Software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the Software.
-
-4. Noncommercial Purposes
-Any purposes are permitted purposes, except for commercial purposes.
-
-5. Commercial Purposes
-Commercial purposes include running the Software as part of a service, selling the Software, or using the Software for any other revenue-generating purpose.
-
-6. Notices
-You must ensure that anyone who gets a copy of any part of the Software from you also gets a copy of these terms or the URL for them: https://polyformproject.org/licenses/noncommercial/1.0.0.
-
-7. No Other Rights
-Each license is granted only for the Software in the exact state it was in when you received it. The licensor does not license you to use its trademarks or other intellectual property.
-
-8. As Is
-As far as the law allows, the Software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the Software, under any kind of legal claim.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

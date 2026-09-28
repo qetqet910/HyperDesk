@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { User, Bell, Sun, Moon, Monitor, Palette, Shield, RefreshCw, MonitorPlay, Keyboard, Database, FolderOpen, EyeOff, Trash2, Package, Languages } from "lucide-react";
+import { User, Bell, Sun, Moon, Monitor, Palette, Shield, RefreshCw, MonitorPlay, Keyboard, Database, FolderOpen, EyeOff, Trash2, Package, Languages, Link2 } from "lucide-react";
 import { useSettings } from "@/contexts/SettingsContext";
 import { applyTheme } from "@/lib/theme";
 import { useT, LANGS, LANG_LABEL, type Key } from "@/lib/i18n";
@@ -72,6 +72,21 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
       addToast(t("set.toast.clearFailed"), "error");
     } finally {
       setConfirmAction(null);
+    }
+  };
+
+  // null = 아직 모름(조회 전) — 그동안은 행을 그리지 않는다.
+  const [rdpLinked, setRdpLinked] = useState<boolean | null>(null);
+  useEffect(() => {
+    api.rdpLinkRegistered().then(setRdpLinked).catch(() => setRdpLinked(null));
+  }, []);
+  const toggleRdpLink = async (enable: boolean) => {
+    try {
+      await api.setRdpLink(enable);
+      setRdpLinked(await api.rdpLinkRegistered());
+      addToast(t(enable ? "set.toast.rdpLinkAdded" : "set.toast.rdpLinkRemoved"), "success");
+    } catch (e) {
+      addToast(t("set.toast.rdpLinkFailed", { err: String(e) }), "error");
     }
   };
 
@@ -275,6 +290,21 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
                 ))}
               </div>
             </div>
+            {/* `rdp:` 링크 선택지 등록. 해제하면 다음 실행에도 다시 등록하지 않는다.
+                Store 설치본은 패키지 선언으로 등록돼 여기서 끌 수 없다(앱 제거 시 정리). */}
+            {rdpLinked !== null && (
+              <div className="settings-row col">
+                <div className="settings-row-label">{t("set.rdpLink")}</div>
+                <div className="settings-row-desc">{t(rdpLinked ? "set.rdpLinkDescOn" : "set.rdpLinkDescOff")}</div>
+                <button
+                  className={`hd-segment-btn ${rdpLinked ? "hd-segment-btn--danger" : ""}`}
+                  style={{ alignSelf: "flex-start" }}
+                  onClick={() => toggleRdpLink(!rdpLinked)}
+                >
+                  {rdpLinked ? <><Trash2 size={13} /> {t("set.rdpLink.remove")}</> : <><Link2 size={13} /> {t("set.rdpLink.add")}</>}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

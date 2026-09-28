@@ -106,12 +106,17 @@ pub fn take_rdp_link() -> Option<RdpLink> {
 /// 쓰면 묻지 않고 가로채게 되므로, Default Programs 방식(Capabilities + RegisteredApplications)
 /// 으로 **선택지에만** 오른다. 어떤 앱을 쓸지는 사용자가 저 선택 창에서 고른다.
 /// 매 실행마다 덮어써서 실행 파일 경로가 바뀌어도(업데이트·재설치) 스스로 복구된다.
+
 pub fn register_protocol() -> std::io::Result<()> {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    // 사용자가 설정에서 해제했으면 다시 쓰지 않는다 — 안 그러면 매 실행마다 되살아난다.
+    if opted_out(&hkcu) {
+        return Ok(());
+    }
     let exe = std::env::current_exe()?;
     let exe = exe.to_string_lossy();
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
     let (prog, _) = hkcu.create_subkey(r"Software\Classes\HyperDesk.rdp")?;
     prog.set_value("", &"RDP 연결 (HyperDesk)")?;
@@ -139,6 +144,64 @@ pub fn register_protocol() -> std::io::Result<()> {
         scheme.set_value("URL Protocol", &"")?;
     }
     Ok(())
+}
+
+/// 설정에서 "rdp: 링크 등록 해제"를 누른 상태. `Software\HyperDesk`에 둔다(설치 제거 훅이
+/// `/ifempty`로 지우는 키라 남아도 제거 시 같이 정리된다).
+const OPT_OUT_KEY: &str = r"Software\HyperDesk";
+const OPT_OUT_VALUE: &str = "RdpLinkDisabled";
+
+fn opted_out(hkcu: &winreg::RegKey) -> bool {
+    hkcu.open_subkey(OPT_OUT_KEY)
+        .and_then(|k| k.get_value::<u32, _>(OPT_OUT_VALUE))
+        .map(|v| v == 1)
+        .unwrap_or(false)
+}
+
+/// 등록을 지운다. 지우는 범위는 NSIS 제거 훅(`windows/installer-hooks.nsh`)과 같다 —
+/// `Software\Classes\rdp` 스킴 키는 다른 앱이 만든 것일 수 있어 건드리지 않는다.
+fn unregister_protocol() -> std::io::Result<()> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let gone = |r: std::io::Result<()>| match r {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    };
+    gone(hkcu.delete_subkey_all(r"Software\Classes\HyperDesk.rdp"))?;
+    gone(hkcu.delete_subkey_all(r"Software\HyperDesk\Capabilities"))?;
+    if let Ok(apps) = hkcu.open_subkey_with_flags(r"Software\RegisteredApplications", winreg::enums::KEY_SET_VALUE) {
+        gone(apps.delete_value("HyperDesk"))?;
+    }
+    let (k, _) = hkcu.create_subkey(OPT_OUT_KEY)?;
+    k.set_value(OPT_OUT_VALUE, &1u32)
+}
+
+/// 이 PC에 HyperDesk가 `rdp:` 링크 선택지로 등록돼 있는가.
+#[tauri::command]
+pub fn rdp_link_registered() -> bool {
+    use winreg::enums::HKEY_CURRENT_USER;
+    winreg::RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Classes\HyperDesk.rdp\shell\open\command")
+        .is_ok()
+}
+
+/// 설정의 `rdp:` 링크 등록/해제 버튼.
+#[tauri::command]
+pub fn set_rdp_link(enabled: bool) -> Result<(), String> {
+    if !enabled {
+        return unregister_protocol().map_err(|e| e.to_string());
+    }
+    // debug 빌드는 등록하지 않는다 — 링크가 dev 서버에 기대는 debug exe로 넘어가
+    // "localhost 연결 거부" 화면이 뜬다(lib.rs setup 참고).
+    if cfg!(debug_assertions) {
+        return Err("개발 빌드에서는 rdp: 링크를 등록하지 않습니다".into());
+    }
+    use winreg::enums::HKEY_CURRENT_USER;
+    if let Ok(k) = winreg::RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(OPT_OUT_KEY, winreg::enums::KEY_SET_VALUE) {
+        let _ = k.delete_value(OPT_OUT_VALUE);
+    }
+    register_protocol().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ export const ko: Record<keyof typeof en, string> = {
   "nav.vms": "가상 머신",
   "nav.remote": "원격 자산",
   "nav.snapshots": "스냅샷",
+  "nav.network": "네트워크",
   "nav.events": "이벤트 로그",
   "nav.settings": "설정",
 
@@ -17,6 +18,7 @@ export const ko: Record<keyof typeof en, string> = {
   "page.vms.sub": "Hyper-V Units · Gen 1 + Gen 2",
   "page.remote.sub": "RDP · Horizon · MST",
   "page.snapshots.sub": "복원 지점 및 체크포인트 관리",
+  "page.network.sub": "가상 스위치 · 어댑터 · 트래픽",
   "page.events.sub": "실시간 시스템 스트림",
   "page.settings.sub": "테마 · 동기화 · 업데이트",
 
@@ -238,6 +240,14 @@ export const ko: Record<keyof typeof en, string> = {
   "set.toast.resetFailed": "초기화에 실패했습니다.",
   "set.toast.dataCleared": "저장된 자산/메모/태그 데이터를 모두 삭제했습니다. 앱을 재시작하세요.",
   "set.toast.clearFailed": "데이터 삭제에 실패했습니다.",
+  "set.rdpLink": "rdp:// 링크 열기",
+  "set.rdpLinkDescOn": "HyperDesk가 rdp:// 링크를 여는 앱 목록에 올라 있습니다. 해제하면 목록에서 빠지고, 다시 실행해도 등록하지 않습니다.",
+  "set.rdpLinkDescOff": "rdp:// 링크를 여는 앱 목록에 HyperDesk가 없습니다.",
+  "set.rdpLink.remove": "등록 해제",
+  "set.rdpLink.add": "다시 등록",
+  "set.toast.rdpLinkRemoved": "rdp:// 링크 등록을 해제했습니다.",
+  "set.toast.rdpLinkAdded": "rdp:// 링크를 다시 열 수 있습니다.",
+  "set.toast.rdpLinkFailed": "rdp:// 링크 설정을 바꾸지 못했습니다: {err}",
   "settings.language": "언어",
   "settings.languageHint": "즉시 적용됩니다. 재시작이 필요 없습니다.",
 };

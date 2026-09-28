@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Fuse from "fuse.js";
 import { useT, type Key } from "@/lib/i18n";
 import {
-  Search, Server, Globe, LayoutDashboard, Layers, Camera,
+  Search, Server, Globe, LayoutDashboard, Layers, Camera, Network,
   Terminal, Play, Square, Pause, Save, Monitor,
   Plus, Settings, ChevronRight, AlertTriangle, Wifi, Pencil, Trash2, Sun, Zap,
 } from "lucide-react";
@@ -68,6 +68,7 @@ const PAGES: { id: Page; labelKey: Key; icon: React.ReactNode }[] = [
   { id: "vms",       labelKey: "nav.vms",       icon: <Server size={14} /> },
   { id: "remote",    labelKey: "nav.remote",    icon: <Globe size={14} /> },
   { id: "snapshots", labelKey: "nav.snapshots", icon: <Camera size={14} /> },
+  { id: "network",   labelKey: "nav.network",   icon: <Network size={14} /> },
   { id: "events",    labelKey: "nav.events",    icon: <Terminal size={14} /> },
   { id: "settings",  labelKey: "nav.settings",  icon: <Settings size={14} /> },
 ];

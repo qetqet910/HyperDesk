@@ -8,6 +8,7 @@ export const en = {
   "nav.vms": "Virtual Machines",
   "nav.remote": "Remote Assets",
   "nav.snapshots": "Snapshots",
+  "nav.network": "Network",
   "nav.events": "Event Log",
   "nav.settings": "Settings",
 
@@ -16,6 +17,7 @@ export const en = {
   "page.vms.sub": "Hyper-V Units · Gen 1 + Gen 2",
   "page.remote.sub": "RDP · Horizon · MST",
   "page.snapshots.sub": "Restore points and checkpoints",
+  "page.network.sub": "Virtual switches · adapters · traffic",
   "page.events.sub": "Live system stream",
   "page.settings.sub": "Theme · Sync · Updates",
 
@@ -249,6 +251,14 @@ export const en = {
   "set.toast.resetFailed": "Reset failed.",
   "set.toast.dataCleared": "All stored asset/memo/tag data deleted. Please restart the app.",
   "set.toast.clearFailed": "Failed to delete data.",
+  "set.rdpLink": "Open rdp:// links",
+  "set.rdpLinkDescOn": "HyperDesk is listed as an app that can open rdp:// links. Remove it here to take it off that list; it stays off after restarting.",
+  "set.rdpLinkDescOff": "HyperDesk is not offered for rdp:// links.",
+  "set.rdpLink.remove": "Remove",
+  "set.rdpLink.add": "Register again",
+  "set.toast.rdpLinkRemoved": "HyperDesk no longer opens rdp:// links.",
+  "set.toast.rdpLinkAdded": "HyperDesk can open rdp:// links again.",
+  "set.toast.rdpLinkFailed": "Couldn't change the rdp:// link setting: {err}",
   // ─── Settings: language ───
   "settings.language": "Language",
   "settings.languageHint": "Applies immediately. Restart is not required.",

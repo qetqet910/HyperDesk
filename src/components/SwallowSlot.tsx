@@ -65,7 +65,6 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
   const [isActuallyHidden, setIsActuallyHidden] = useState(!isVisible);
 
   // Use Refs for logic control to avoid infinite re-render loops
-  const retryCountRef = useRef(0);
   const lastSyncRef = useRef<number>(0);
   const lastBoundsRef = useRef({ x: -1, y: -1, w: -1, h: -1 });
   const prevSyncLockedRef = useRef<boolean>(!!isSyncLocked);
@@ -101,7 +100,6 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
         setIsSwallowed(true);
         setIsConnecting(false);
         setIsGlitched(false);
-        retryCountRef.current = 0;
 
         // Immediate sync to lock position before stabilization
         syncBounds();
@@ -150,7 +148,6 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
         if (mounted && isValid) {
           setIsSwallowed(true);
           setIsGlitched(false);
-          retryCountRef.current = 0;
         }
       } catch (e) {
         console.error("Check status failed", e);
@@ -493,7 +490,6 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
         if (isValid && !isSwallowedRef.current) {
           setIsSwallowed(true);
           setIsGlitched(false);
-          retryCountRef.current = 0;
         } else if (!isValid && isSwallowedRef.current) {
           setIsSwallowed(false);
           setIsGlitched(true);
@@ -678,13 +674,11 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
               <>
                 <RefreshCw size={24} className="spinning" />
                 <span>{selectedConnection?.name} 분석 중...</span>
-                {retryCountRef.current > 0 && <span className="retry-status">재연결 시퀀스 가동 ({retryCountRef.current} / 7)</span>}
                 <button
                   className="retry-btn-sm"
                   style={{ marginTop: '12px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.3)', color: 'var(--text-main)' }}
                   onClick={() => {
                     setIsConnecting(false);
-                    retryCountRef.current = 0;
                     // Bumps the backend's per-slot generation counter so the
                     // in-flight hunt thread (which has nothing in SWALLOW_STATE
                     // to tear down yet) notices it's been superseded and exits
@@ -703,8 +697,11 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                   {selectedConnection?.name} {isGlitched ? "(신호 유실)" : "(연결 끊김)"}
                 </span>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  {/* 자동 재접속은 일부러 없다 — 세션이 끝난 게 비정상 종료인지, 사용자가
+                      VM 안에서 로그오프/연결 끊기를 한 건지 구분할 수 없어서 다시 붙으면
+                      안 되는 경우까지 붙어버린다. 끊긴 슬롯은 한 번 클릭으로 다시 연결한다. */}
                   <button className="retry-btn-sm" onClick={() => selectedConnection && handleConnect(selectedConnection)}>
-                    연결 시작
+                    {isGlitched ? "다시 연결" : "연결 시작"}
                   </button>
                   <button className="retry-btn-sm" style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-main)' }} onClick={handleClearAssignment}>
                     슬롯 비우기

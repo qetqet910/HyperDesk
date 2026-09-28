@@ -12,32 +12,36 @@ interface LicenseEntry {
 }
 
 const RUST_DEPS: LicenseEntry[] = [
-  { name: "tauri", license: "MIT OR Apache-2.0" },
-  { name: "tauri-plugin-opener", license: "MIT OR Apache-2.0" },
-  { name: "tauri-plugin-global-shortcut", license: "MIT OR Apache-2.0" },
+  { name: "tauri", license: "Apache-2.0 OR MIT" },
+  { name: "tauri-plugin-opener", license: "Apache-2.0 OR MIT" },
+  { name: "tauri-plugin-global-shortcut", license: "Apache-2.0 OR MIT" },
+  { name: "tauri-plugin-updater", license: "Apache-2.0 OR MIT" },
+  { name: "tauri-plugin-process", license: "Apache-2.0 OR MIT" },
+  { name: "tauri-plugin-single-instance", license: "Apache-2.0 OR MIT" },
   { name: "serde / serde_json", license: "MIT OR Apache-2.0" },
-  { name: "uuid", license: "MIT OR Apache-2.0" },
+  { name: "uuid", license: "Apache-2.0 OR MIT" },
   { name: "tokio", license: "MIT" },
+  { name: "futures", license: "MIT OR Apache-2.0" },
   { name: "winreg", license: "MIT" },
-  { name: "lazy_static", license: "MIT OR Apache-2.0" },
   { name: "windows (windows-rs, Microsoft)", license: "MIT OR Apache-2.0" },
   { name: "sysinfo", license: "MIT" },
-  { name: "futures", license: "MIT OR Apache-2.0" },
 ];
 
 const JS_DEPS: LicenseEntry[] = [
   { name: "react / react-dom", license: "MIT" },
-  { name: "@tauri-apps/api / plugin-opener", license: "MIT OR Apache-2.0" },
+  { name: "@tauri-apps/api", license: "Apache-2.0 OR MIT" },
+  { name: "@tauri-apps/plugin-opener / updater / process", license: "MIT OR Apache-2.0" },
   { name: "@tanstack/react-query", license: "MIT" },
-  { name: "fuse.js", license: "Apache-2.0" },
-  { name: "lucide-react", license: "ISC" },
+  { name: "@lottiefiles/dotlottie-react / dotlottie-web", license: "MIT" },
   { name: "framer-motion", license: "MIT" },
   { name: "recharts", license: "MIT" },
-  { name: "sharp (빌드 타임 전용)", license: "Apache-2.0" },
+  { name: "fuse.js", license: "Apache-2.0" },
+  { name: "lucide-react", license: "ISC" },
 ];
 
 const FONT_DEPS: LicenseEntry[] = [
   { name: "펴진고딕 (Pyeojin Gothic) — 서지환 (엔파피)", license: "SIL OFL 1.1" },
+  { name: "로딩 애니메이션 — LottieFiles", license: "Lottie Simple License" },
 ];
 
 interface LicenseModalProps {
@@ -82,7 +86,7 @@ export function LicenseModal({ onClose }: LicenseModalProps) {
           </p>
           <LicenseSection title="Rust (백엔드)" icon={<Package size={13} />} entries={RUST_DEPS} />
           <LicenseSection title="JavaScript / TypeScript" icon={<Package size={13} />} entries={JS_DEPS} />
-          <LicenseSection title="폰트" icon={<Type size={13} />} entries={FONT_DEPS} />
+          <LicenseSection title="폰트 · 애니메이션" icon={<Type size={13} />} entries={FONT_DEPS} />
         </div>
 
         <div style={{ padding: "12px 20px 16px", background: "rgba(0,0,0,0.2)" }}>
