@@ -1,6 +1,7 @@
 import { X, StickyNote, Globe, User, Save } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/lib/tauri-api";
+import { useT } from "@/lib/i18n";
 import type { RemoteHost } from "@/types";
 
 interface MemoModalProps {
@@ -15,6 +16,7 @@ interface MemoModalProps {
     Deliberately SEPARATE from AssetModal — a memo is something you open/read
     mid-work, not a form field you dig out of the edit dialog. */
 export function MemoModal({ host, onClose, onSaved }: MemoModalProps) {
+  const t = useT();
   const [memo, setMemo] = useState(host.memo ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -64,7 +66,7 @@ export function MemoModal({ host, onClose, onSaved }: MemoModalProps) {
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
           <textarea
             autoFocus
-            placeholder={"메모를 입력하세요…\n예) 접속 계정, 방화벽 포트, 담당자, 점검 이력"}
+            placeholder={t("memo.placeholder")}
             value={memo}
             onChange={(e) => setMemo(e.target.value)}
             style={{
@@ -82,7 +84,7 @@ export function MemoModal({ host, onClose, onSaved }: MemoModalProps) {
             onClick={onClose}
             style={{ flex: 1, height: "44px", borderRadius: "10px", background: "transparent", border: "1px solid var(--glass-border)", color: "var(--text-secondary)", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}
           >
-            취소
+            {t("common.cancel")}
           </button>
           <button
             className="confirm-btn"
@@ -90,7 +92,7 @@ export function MemoModal({ host, onClose, onSaved }: MemoModalProps) {
             onClick={handleSave}
             style={{ flex: 1.5, height: "44px", borderRadius: "10px", background: "linear-gradient(135deg, var(--accent-blue), #4f8ef7)", color: "#fff", border: "none", fontWeight: 800, cursor: "pointer", fontSize: "14px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
           >
-            <Save size={15} /> {saving ? "저장 중…" : "메모 저장"}
+            <Save size={15} /> {saving ? t("memo.saving") : t("memo.save")}
           </button>
         </div>
       </div>

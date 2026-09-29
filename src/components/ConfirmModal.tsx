@@ -1,4 +1,5 @@
 import { X, AlertTriangle, Trash2, HelpCircle } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 interface ConfirmModalProps {
   title: string;
@@ -14,9 +15,10 @@ interface ConfirmModalProps {
 }
 
 export function ConfirmModal({
-  title, message, confirmText = "확인", cancelText = "취소",
+  title, message, confirmText, cancelText,
   type = "info", onConfirm, onClose, extraText, onExtra
 }: ConfirmModalProps) {
+  const t = useT();
   
   const getIcon = () => {
     switch (type) {
@@ -68,7 +70,7 @@ export function ConfirmModal({
               fontWeight: 700, cursor: 'pointer', fontSize: '14px'
             }}
           >
-            {cancelText}
+            {cancelText ?? t("common.cancel")}
           </button>
           {extraText && onExtra && (
             <button
@@ -93,7 +95,7 @@ export function ConfirmModal({
               boxShadow: type === 'danger' ? '0 4px 15px rgba(244, 63, 94, 0.3)' : '0 4px 15px rgba(0, 210, 255, 0.3)'
             }}
           >
-            {confirmText}
+            {confirmText ?? t("common.ok")}
           </button>
         </div>
       </div>

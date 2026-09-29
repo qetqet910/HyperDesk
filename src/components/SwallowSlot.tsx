@@ -4,6 +4,7 @@ import { api } from "@/lib/tauri-api";
 import { VmInfo, RemoteHost } from "@/types";
 import { listen } from "@tauri-apps/api/event";
 import { useSettings } from "@/contexts/SettingsContext";
+import { useT } from "@/lib/i18n";
 
 interface SwallowSlotProps {
   id: string;
@@ -46,6 +47,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
   const [isSwallowed, setIsSwallowed] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const { settings } = useSettings();
+  const t = useT();
 
   // Keep refs in sync so the integrity-poll interval closure always reads current values.
   useEffect(() => { assignedIdRef.current = assignedId; }, [assignedId]);
@@ -623,7 +625,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
               onPillPointerDown은 버튼 위에서는 드래그를 시작하지 않으므로, 그립이
               없으면 잡을 수 있는 곳이 양끝 패딩 몇 px뿐이라 사실상 못 옮긴다
               (필을 26px로 얇게 만들면서 실제로 그렇게 됐다). */}
-          <span className="slot-pill-grip" aria-hidden="true" title="드래그해서 이동" />
+          <span className="slot-pill-grip" aria-hidden="true" title={t("slot.dragHint")} />
           {isSwallowed ? (
             <button
               className="slot-change-btn"
@@ -632,19 +634,19 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                 setIsSwallowed(false);
                 setShowSelector(true);
               }}
-              title="다른 연결로 변경"
+              title={t("slot.change")}
             >
-              <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? "테스트 창" : null)}</span>
+              <span className="slot-title">{selectedConnection?.name ?? (import.meta.env.DEV ? t("slot.testWindow") : null)}</span>
               <ChevronDown size={11} />
             </button>
           ) : (
             <span className="slot-header-bar__label">
-              {assignedId ? (selectedConnection?.name ?? assignedId) : "비어있음"}
+              {assignedId ? (selectedConnection?.name ?? assignedId) : t("slot.empty")}
             </span>
           )}
           <div className="slot-header-right">
             {headerControls}
-            <button className="slot-action-btn close" onClick={handleDisconnect} disabled={!isSwallowed} title="연결 해제">
+            <button className="slot-action-btn close" onClick={handleDisconnect} disabled={!isSwallowed} title={t("slot.disconnect")}>
               <X size={14} />
             </button>
           </div>
@@ -654,7 +656,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
         {!assignedId && (
           <div className="slot-empty" onClick={() => setShowSelector(true)}>
             <Plus size={24} />
-            <span>VM 또는 원격지 선택</span>
+            <span>{t("slot.pick")}</span>
             {import.meta.env.DEV && (
               <button
                 className="retry-btn-sm"
@@ -673,7 +675,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
             {isConnecting ? (
               <>
                 <RefreshCw size={24} className="spinning" />
-                <span>{selectedConnection?.name} 분석 중...</span>
+                <span>{t("slot.connecting", { name: selectedConnection?.name ?? "" })}</span>
                 <button
                   className="retry-btn-sm"
                   style={{ marginTop: '12px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.3)', color: 'var(--text-main)' }}
@@ -687,24 +689,24 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                     api.unswallowWindow(id).catch(console.error);
                   }}
                 >
-                  연결 취소
+                  {t("slot.cancel")}
                 </button>
               </>
             ) : (
               <>
                 {isGlitched ? <ZapOff size={24} className="error-icon" /> : <AlertCircle size={24} style={{ color: 'var(--accent-orange)' }} />}
                 <span className={isGlitched ? "error-text" : ""}>
-                  {selectedConnection?.name} {isGlitched ? "(신호 유실)" : "(연결 끊김)"}
+                  {selectedConnection?.name} {isGlitched ? t("slot.lost") : t("slot.disconnected")}
                 </span>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
                   {/* 자동 재접속은 일부러 없다 — 세션이 끝난 게 비정상 종료인지, 사용자가
                       VM 안에서 로그오프/연결 끊기를 한 건지 구분할 수 없어서 다시 붙으면
                       안 되는 경우까지 붙어버린다. 끊긴 슬롯은 한 번 클릭으로 다시 연결한다. */}
                   <button className="retry-btn-sm" onClick={() => selectedConnection && handleConnect(selectedConnection)}>
-                    {isGlitched ? "다시 연결" : "연결 시작"}
+                    {isGlitched ? t("slot.reconnect") : t("slot.connect")}
                   </button>
                   <button className="retry-btn-sm" style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-main)' }} onClick={handleClearAssignment}>
-                    슬롯 비우기
+                    {t("slot.clear")}
                   </button>
                 </div>
               </>
@@ -717,8 +719,8 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
           <div className="slot-overlay-security">
             <div className="overlay-placeholder-content">
               <div className="pulse-icon"><RefreshCw size={24} /></div>
-              <p>관리 메뉴 조작 중...</p>
-              <span>보안을 위해 화면 전송을 일시 감춥니다</span>
+              <p>{t("slot.overlayTitle")}</p>
+              <span>{t("slot.overlayBody")}</span>
             </div>
           </div>
         )}
@@ -727,13 +729,13 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
       {showSelector && (
         <div className="slot-selector-overlay" onClick={() => setShowSelector(false)}>
           <div className="slot-selector" onClick={e => e.stopPropagation()}>
-            <h4>슬롯 할당</h4>
+            <h4>{t("slot.assign")}</h4>
             <div className="selector-list">
               <div className="selector-section">
-                <h5>가상 머신</h5>
+                <h5>{t("slot.sectionVms")}</h5>
                 {/* VDI (Omnissa/Horizon) is a virtual desktop too, so list it here next
                     to Hyper-V VMs. The "원격 데스크톱" group below is RDP-only. */}
-                {data.vms.length === 0 && vdiHosts.length === 0 && <div className="selector-item empty">사용 가능한 VM 없음</div>}
+                {data.vms.length === 0 && vdiHosts.length === 0 && <div className="selector-item empty">{t("slot.noVms")}</div>}
                 {data.vms.map(vm => (
                   <div key={vm.name} className="selector-item" onClick={async () => {
                     if (isSwallowed) { await api.unswallowWindow(id); setIsSwallowed(false); }
@@ -763,8 +765,8 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                 ))}
               </div>
               <div className="selector-section">
-                <h5>원격 데스크톱</h5>
-                {rdpHosts.length === 0 && <div className="selector-item empty">사용 가능한 원격지 없음</div>}
+                <h5>{t("slot.sectionRdp")}</h5>
+                {rdpHosts.length === 0 && <div className="selector-item empty">{t("slot.noRdp")}</div>}
                 {rdpHosts.map(host => (
                   <div key={host.id} className="selector-item" onClick={async () => {
                     if (isSwallowed) { await api.unswallowWindow(id); setIsSwallowed(false); }
@@ -777,7 +779,7 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
                 ))}
               </div>
             </div>
-            <button className="close-btn" onClick={() => setShowSelector(false)}>취소</button>
+            <button className="close-btn" onClick={() => setShowSelector(false)}>{t("common.cancel")}</button>
           </div>
         </div>
       )}

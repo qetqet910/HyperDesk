@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  @font-face { font-family: "Pyeojin"; font-weight: 300; src: url("file:///C:/Users/pc241/Documents/Dev/HyperDesk/src/fonts/PyeojinGothic-Light.woff2") format("woff2"); }
+  @font-face { font-family: "Pyeojin"; font-weight: 400; src: url("file:///C:/Users/pc241/Documents/Dev/HyperDesk/src/fonts/PyeojinGothic-Regular.woff2") format("woff2"); }
+  @font-face { font-family: "Pyeojin"; font-weight: 700; src: url("file:///C:/Users/pc241/Documents/Dev/HyperDesk/src/fonts/PyeojinGothic-Bold.woff2") format("woff2"); }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; }
+  body {
+    font-family: "Pyeojin", "Segoe UI", sans-serif;
+    color: #eef2ff;
+    background:
+      radial-gradient(900px 620px at 8% 0%, rgba(34, 184, 207, 0.38), transparent 70%),
+      radial-gradient(1000px 700px at 100% 100%, rgba(124, 77, 255, 0.40), transparent 70%),
+      linear-gradient(160deg, #0a1022 0%, #0c1230 55%, #140f33 100%);
+    position: relative;
+  }
+  /* 은은한 격자 — 배경이 비어 보이지 않게 */
+  body::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.9), rgba(0,0,0,0.15) 45%, transparent 70%);
+  }
+
+  .brand { position: absolute; left: 96px; top: 64px; display: flex; align-items: center; gap: 16px; }
+  .brand img { height: 58px; }
+  .brand span { font-size: 32px; font-weight: 700; letter-spacing: 0.5px; }
+
+  .copy { position: absolute; left: 96px; top: 142px; width: 1180px; }
+  .copy h1 { font-size: 64px; font-weight: 700; line-height: 1.18; letter-spacing: -1px; }
+  .copy h1 em {
+    font-style: normal;
+    background: linear-gradient(90deg, #4fd6e6, #9b7bff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .copy p { margin-top: 18px; font-size: 26px; font-weight: 400; line-height: 1.5; color: #b9c3e6; }
+
+  .keys { position: absolute; right: 96px; top: 180px; display: flex; align-items: center; gap: 12px; }
+  .key {
+    min-width: 76px; height: 76px; padding: 0 20px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px; font-weight: 700; color: #f2f5ff;
+    background: linear-gradient(180deg, #2a3358, #1a2140);
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 6px 0 #0d1128, 0 12px 28px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.18);
+  }
+  .key.on { background: linear-gradient(180deg, #3aa9d8, #6b53e8); border-color: rgba(255,255,255,0.35); }
+  .plus { font-size: 30px; color: #8d98c4; font-weight: 700; }
+
+  .shot {
+    position: absolute; left: 80px; top: 420px; width: 1760px;
+    border-radius: 16px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.14);
+    box-shadow: 0 40px 90px rgba(0,0,0,0.55), 0 0 0 8px rgba(255,255,255,0.03), 0 0 120px rgba(90,120,255,0.18);
+  }
+  .shot img { display: block; width: 100%; }
+  /* 공개하면 안 되는 이름·IP·도메인 가림 */
+  .redact { position: absolute; backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); background: rgba(20,26,40,0.35); border-radius: 4px; }
+
+  .callout {
+    position: absolute; display: flex; align-items: center; gap: 12px;
+    padding: 14px 22px; border-radius: 999px;
+    font-size: 24px; font-weight: 700; color: #fff;
+    background: linear-gradient(90deg, rgba(58,169,216,0.95), rgba(107,83,232,0.95));
+    box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+    white-space: nowrap;
+  }
+  .callout .arrow { font-size: 26px; }
+
+  /* 하단 페이드 — 잘린 스크린샷이 자연스럽게 끝나게 */
+  .fade { position: absolute; left: 0; right: 0; bottom: 0; height: 160px; background: linear-gradient(180deg, transparent, #120f30 92%); }
+</style>
+</head>
+<body>
+  <div class="brand"><img src="file:///C:/Users/pc241/Documents/Dev/HyperDesk/src/assets/logo.png" alt=""><span>HyperDesk</span></div>
+  <div class="copy"><h1 id="h1"></h1><p id="sub"></p></div>
+  <div class="keys" id="keys"></div>
+  <div class="shot" id="shot"><img id="img" alt=""></div>
+  <div class="callout" id="callout"></div>
+  <div class="fade"></div>
+
+<script>
+  const q = new URLSearchParams(location.search);
+  const lang = q.get("lang") || "ko";
+  const v = q.get("v") || "multi";
+  const ROOT = "file:///C:/Users/pc241/Documents/Dev/HyperDesk/";
+
+  const T = {
+    ko: {
+      multi: {
+        h1: "원격 세션 4개,<br><em>키 하나로 전환</em>",
+        sub: "Alt+1~4를 누르면 해당 세션이 즉시 화면을 채웁니다. 떠나온 세션은 뒤에서 계속 돌아갑니다.",
+        callout: "<span>RDP · Hyper-V · Horizon 세션을 한곳에</span><span class='arrow'>→</span>",
+      },
+      full: {
+        h1: "세션에<br><em>모니터를 통째로</em>",
+        sub: "VM 전체화면은 앱 화면까지 숨깁니다. 떠 있는 헤더에서 1~4 슬롯을 바로 전환합니다.",
+        callout: "<span class='arrow'>↑</span><span>떠 있는 헤더에서 슬롯 전환</span>",
+      },
+      dashboard: {
+        h1: "Hyper-V 전체를<br><em>한 화면에서</em>",
+        sub: "VM 상태, CPU·메모리 사용량, 스냅샷, 원격 호스트 지연 시간을 대시보드에서 바로 봅니다.",
+      },
+      vms: {
+        h1: "VM 관리도<br><em>같은 앱에서</em>",
+        sub: "시작·중지·저장·일시정지, 메모리와 프로세서 조정, 가상 스위치 구성까지 한곳에서 다룹니다.",
+      },
+      snapshots: {
+        h1: "스냅샷은<br><em>VM별로 한눈에</em>",
+        sub: "VM마다 체크포인트를 만들고, 되돌리고, 지웁니다.",
+      },
+      remote: {
+        h1: "흩어진 원격 PC를<br><em>한 목록으로</em>",
+        sub: "PC에 남은 원격 데스크톱 접속 기록을 자동으로 찾아 직접 추가한 호스트와 함께 보여 줍니다.",
+      },
+      palette: {
+        h1: "찾고, 옮기고, 실행하고<br><em>Ctrl+K 하나로</em>",
+        sub: "VM·호스트·페이지·명령을 검색창 하나에서 찾아 바로 실행합니다.",
+      },
+      settings: {
+        h1: "가볍고<br><em>조용하게</em>",
+        sub: "사용 통계를 수집하지 않고 비밀번호도 저장하지 않습니다. 업데이트 확인까지 끌 수 있습니다.",
+      },
+    },
+    en: {
+      multi: {
+        h1: "Four remote sessions,<br><em>one keystroke apart</em>",
+        sub: "Press Alt+1 to 4 and that session fills the view. The others keep running in the background.",
+        callout: "<span>RDP, Hyper-V and Horizon in one place</span><span class='arrow'>→</span>",
+      },
+      full: {
+        h1: "Give a session<br><em>the whole monitor</em>",
+        sub: "VM full screen hides the app too. The floating header still switches slots 1 to 4.",
+        callout: "<span class='arrow'>↑</span><span>Switch slots from the floating header</span>",
+      },
+      dashboard: {
+        h1: "Your whole Hyper-V host,<br><em>on one screen</em>",
+        sub: "VM state, CPU and memory use, snapshots and remote host latency, right on the dashboard.",
+      },
+      vms: {
+        h1: "Manage your VMs<br><em>in the same app</em>",
+        sub: "Start, stop, save and pause VMs, change memory and processors, and see how virtual switches are wired.",
+      },
+      snapshots: {
+        h1: "Snapshots,<br><em>VM by VM</em>",
+        sub: "Create, restore and delete checkpoints for each VM.",
+      },
+      remote: {
+        h1: "Every remote PC<br><em>in one list</em>",
+        sub: "HyperDesk finds the Remote Desktop history already on your PC and lists it next to the hosts you add yourself.",
+      },
+      palette: {
+        h1: "Find it, open it, run it<br><em>with Ctrl+K</em>",
+        sub: "Search VMs, hosts, pages and commands from one box and act on them right there.",
+      },
+      settings: {
+        h1: "Light and<br><em>private</em>",
+        sub: "No usage tracking and no stored passwords. You can even turn off the update check.",
+      },
+    },
+  };
+  const t = T[lang][v];
+  document.getElementById("h1").innerHTML = t.h1;
+  document.getElementById("sub").textContent = t.sub;
+  const c = document.getElementById("callout");
+  if (t.callout) c.innerHTML = t.callout; else c.remove();
+
+  // 키캡: 멀티뷰 계열은 Alt + 1 2 3 4, 팔레트는 Ctrl + K, 나머지는 없음
+  const keys = document.getElementById("keys");
+  if (v === "multi" || v === "full") {
+    keys.innerHTML = '<div class="key">Alt</div><div class="plus">+</div>' +
+      [1, 2, 3, 4].map((n, i) => `<div class="key${i === 0 ? " on" : ""}">${n}</div>`).join("");
+  } else if (v === "palette") {
+    keys.innerHTML = '<div class="key">Ctrl</div><div class="plus">+</div><div class="key on">K</div>';
+  } else {
+    keys.remove();
+  }
+
+  // 원본 스크린샷(1920x1080 기준 픽셀)과 가릴 영역
+  const SHOTS = {
+    multi: {
+      // 영어판은 앱을 영어로 둔 상태의 캡처(레이아웃이 같아 가림 좌표도 같다)
+      src: lang === "en" ? "MutiViewEng.png" : "MultiView.png",
+      redact: [
+        [770, 48, 52, 18],    // 헤더 필 연결 이름
+        [1766, 94, 40, 18],   // 세션 카드 1 이름
+        [1818, 156, 86, 18],  // 세션 카드 1 IP
+        [1766, 319, 48, 18],  // 세션 카드 3 이름
+        [1776, 383, 128, 18], // 세션 카드 3 도메인
+      ],
+      callout: { right: 300, top: 640 }, // 세션 목록(오른쪽 레일) 앞에서 끝나게 오른쪽 기준
+    },
+    full: {
+      src: "MultiViewFullScreen.png",
+      redact: [
+        [1238, 5, 44, 18],    // 떠 있는 헤더 연결 이름
+      ],
+      callout: { left: 1180, top: 486 },
+    },
+  };
+  // 나머지 화면은 브라우저 모드 데모 데이터(가상 이름·사설 IP) 캡처라 가릴 것이 없다.
+  const RAW = "file:///C:/Users/pc241/AppData/Local/Temp/claude/c--Users-pc241-Documents-Dev-HyperDesk/0315aa9d-fa52-4afc-9827-46afda9d9a4c/scratchpad/store/raw/";
+  const s = SHOTS[v] ?? { url: `${RAW}${lang}-${v}.png`, redact: [] };
+  document.getElementById("img").src = s.url ?? ROOT + s.src;
+  const shot = document.getElementById("shot");
+  for (const [x, y, w, h] of s.redact) {
+    const d = document.createElement("div");
+    d.className = "redact";
+    d.style.left = (x / 1920 * 100) + "%";
+    d.style.top = (y / 1080 * 100) + "%";
+    d.style.width = (w / 1920 * 100) + "%";
+    d.style.height = (h / 1080 * 100) + "%";
+    shot.appendChild(d);
+  }
+  if (s.callout && c.isConnected) {
+    if (s.callout.right !== undefined) c.style.right = s.callout.right + "px";
+    else c.style.left = s.callout.left + "px";
+    c.style.top = s.callout.top + "px";
+  }
+</script>
+</body>
+</html>

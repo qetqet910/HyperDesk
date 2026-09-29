@@ -21,7 +21,7 @@ export class ErrorBoundary extends React.Component<React.PropsWithChildren, Stat
           padding: "40px", fontFamily: "monospace"
         }}>
           <div style={{ color: "#f43f5e", fontSize: "18px", marginBottom: "16px" }}>
-            ⛔ 렌더링 에러 (ErrorBoundary 캐치)
+            ⛔ Something went wrong while rendering
           </div>
           <div style={{
             background: "#1a1a2e", border: "1px solid #333",

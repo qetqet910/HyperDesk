@@ -5,6 +5,7 @@ import {
 import type { VmInfo, RemoteHost } from "@/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useVmActions, useHostActions } from "@/hooks/useDashboard";
+import { useT } from "@/lib/i18n";
 
 interface CardWrapperProps {
   name: string;
@@ -117,6 +118,7 @@ interface HyperVCardProps {
 }
 
 export function HyperVCard({ vm, animDelay = 0, onError, onSuccess, onSettings }: HyperVCardProps) {
+  const t = useT();
   const { start, stop, resume, console: connectConsole } = useVmActions();
   const [isBusy, setIsBusy] = useState(false);
 
@@ -190,25 +192,25 @@ export function HyperVCard({ vm, animDelay = 0, onError, onSuccess, onSettings }
         <button
           className="action-btn start vm-row-action"
           disabled={isBusy}
-          onClick={() => run(() => isPaused ? resume.mutateAsync(vm.name) : start.mutateAsync(vm.name), `${vm.name} 가상 머신 시작됨`)}
+          onClick={() => run(() => isPaused ? resume.mutateAsync(vm.name) : start.mutateAsync(vm.name), t("card.vmStarted", { name: vm.name }))}
         >
           START
         </button>
       ) : (
         <button className="action-btn stop vm-row-action" disabled={isBusy}
           style={{ background: 'rgba(244,63,94,0.1)', color: 'var(--accent-red)', border: '1px solid rgba(244,63,94,0.2)' }}
-          onClick={() => run(() => stop.mutateAsync(vm.name), `${vm.name} 중단됨`)}>
+          onClick={() => run(() => stop.mutateAsync(vm.name), t("card.vmStopped", { name: vm.name }))}>
           STOP
         </button>
       )}
 
       <button className="refresh-btn vm-row-icon" disabled={isBusy}
-        onClick={onSettings} title="VM 설정">
+        onClick={onSettings} title={t("card.vmSettings")}>
         <Settings size={15} />
       </button>
 
       <button className="refresh-btn vm-row-icon" disabled={isBusy || isOff}
-        onClick={() => run(() => connectConsole.mutateAsync(vm.name), "콘솔 열기")} title="콘솔 연결">
+        onClick={() => run(() => connectConsole.mutateAsync(vm.name), t("card.consoleOpened"))} title={t("card.console")}>
         <Monitor size={15} />
       </button>
     </>
@@ -240,6 +242,7 @@ interface HorizonCardProps {
 }
 
 export function HorizonCard({ host, animDelay = 0, onEdit, onError, onSuccess }: HorizonCardProps) {
+  const t = useT();
   const { connect, removeHost } = useHostActions();
   const [isBusy, setIsBusy] = useState(false);
 
@@ -296,18 +299,18 @@ export function HorizonCard({ host, animDelay = 0, onEdit, onError, onSuccess }:
         style={{ background: isOffline ? 'rgba(255,255,255,0.03)' : 'rgba(100,100,255,0.1)', color: isOffline ? 'var(--text-muted)' : '#fff', border: isOffline ? '1px solid var(--border)' : 'none' }}
         onClick={() => run(
           () => connect.mutateAsync({ host: host.host, protocol: host.protocol, username: host.username }),
-          "VDI 연결 시도"
+          t("card.vdiConnecting")
         )}
       >
         CONNECT
       </button>
 
-      <button className="refresh-btn vm-row-icon" disabled={isBusy} onClick={() => onEdit?.(host)} title="자산 수정">
+      <button className="refresh-btn vm-row-icon" disabled={isBusy} onClick={() => onEdit?.(host)} title={t("card.editAsset")}>
         <Settings size={15} />
       </button>
 
       {/* Hyper-V 행의 두 번째 아이콘 버튼과 같은 크기·모양 — 색만 위험색이다. */}
-      <button className="refresh-btn vm-row-icon vm-row-icon--danger" disabled={isBusy} onClick={() => run(() => removeHost.mutateAsync(host.id), "자산 삭제됨")} title="자산 삭제">
+      <button className="refresh-btn vm-row-icon vm-row-icon--danger" disabled={isBusy} onClick={() => run(() => removeHost.mutateAsync(host.id), t("card.assetDeleted"))} title={t("card.deleteAsset")}>
         <Trash2 size={15} />
       </button>
     </>

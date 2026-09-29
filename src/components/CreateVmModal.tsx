@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Server, Loader2, HardDrive, Cpu, MemoryStick, Disc, Network } from "lucide-react";
 import { api } from "@/lib/tauri-api";
+import { useT } from "@/lib/i18n";
 import type { VmSwitch } from "@/types";
 
 interface CreateVmModalProps {
@@ -13,6 +14,7 @@ interface CreateVmModalProps {
  *  ISO. Kept to the fields that actually matter to get a bootable VM; anything
  *  else is tunable afterward in VM settings / Hyper-V. */
 export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProps) {
+  const t = useT();
   const [name, setName] = useState("");
   const [generation, setGeneration] = useState<1 | 2>(2);
   const [memoryGb, setMemoryGb] = useState(4);
@@ -63,7 +65,7 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
           <div className="header-title">
             <div className="neon-text-blue" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <Server size={20} />
-              <h3 style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.5px' }}>새 가상 머신 생성</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.5px' }}>{t("newvm.title")}</h3>
             </div>
           </div>
           <button className="btn-icon" onClick={onClose} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}><X size={18} /></button>
@@ -72,14 +74,14 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
         <div style={{ padding: '0 20px 18px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* Name */}
           <div style={cardStyle}>
-            <div style={labelStyle}><Server size={12} /> 이름</div>
-            <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="예: WinServer-01" autoFocus />
-            {name.length > 0 && !nameValid && <div style={{ fontSize: '10.5px', color: 'var(--accent-red)', marginTop: '6px' }}>{`\\ / : * ? " < > | 는 사용할 수 없습니다.`}</div>}
+            <div style={labelStyle}><Server size={12} /> {t("newvm.name")}</div>
+            <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("newvm.namePlaceholder")} autoFocus />
+            {name.length > 0 && !nameValid && <div style={{ fontSize: '10.5px', color: 'var(--accent-red)', marginTop: '6px' }}>{t("newvm.nameInvalid")}</div>}
           </div>
 
           {/* Generation */}
           <div style={cardStyle}>
-            <div style={labelStyle}>세대 (Generation)</div>
+            <div style={labelStyle}>{t("newvm.generation")}</div>
             <div style={{ display: 'flex', gap: '8px' }}>
               {([2, 1] as const).map((g) => (
                 <button key={g} onClick={() => setGeneration(g)} style={{
@@ -108,7 +110,7 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
               <input type="number" min={1} max={64} style={{ ...inputStyle, padding: '8px 10px', fontFamily: 'var(--font-num)' }} value={cpuCount} onChange={(e) => setCpuCount(Number(e.target.value))} />
             </div>
             <div style={cardStyle}>
-              <div style={labelStyle}><HardDrive size={12} /> 디스크</div>
+              <div style={labelStyle}><HardDrive size={12} /> {t("newvm.disk")}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
                 <input type="number" min={1} max={4096} style={{ ...inputStyle, padding: '8px 10px', fontFamily: 'var(--font-num)' }} value={diskGb} onChange={(e) => setDiskGb(Number(e.target.value))} />
                 <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700 }}>GB</span>
@@ -118,29 +120,29 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
 
           {/* Switch */}
           <div style={cardStyle}>
-            <div style={labelStyle}><Network size={12} /> 네트워크 스위치 (선택)</div>
+            <div style={labelStyle}><Network size={12} /> {t("newvm.switch")}</div>
             <select style={{ ...inputStyle, cursor: 'pointer' }} value={switchName} onChange={(e) => setSwitchName(e.target.value)}>
-              <option value="">연결 안 함</option>
+              <option value="">{t("newvm.noSwitch")}</option>
               {switches.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.switch_type})</option>)}
             </select>
           </div>
 
           {/* ISO */}
           <div style={cardStyle}>
-            <div style={labelStyle}><Disc size={12} /> 부팅 ISO 경로 (선택)</div>
-            <input style={inputStyle} value={isoPath} onChange={(e) => setIsoPath(e.target.value)} placeholder="예: C:\ISO\windows.iso" />
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>OS 설치 미디어를 DVD로 연결하고 부팅 순서를 맞춥니다.</div>
+            <div style={labelStyle}><Disc size={12} /> {t("newvm.iso")}</div>
+            <input style={inputStyle} value={isoPath} onChange={(e) => setIsoPath(e.target.value)} placeholder={t("newvm.isoPlaceholder")} />
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>{t("newvm.isoHint")}</div>
           </div>
         </div>
 
         <div className="modal-actions" style={{ padding: '14px 20px', background: 'rgba(0,0,0,0.2)', display: 'flex', gap: '12px' }}>
-          <button onClick={onClose} style={{ flex: 1, height: '38px', borderRadius: '12px', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-secondary)', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}>취소</button>
+          <button onClick={onClose} style={{ flex: 1, height: '38px', borderRadius: '12px', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-secondary)', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}>{t("common.cancel")}</button>
           <button onClick={submit} disabled={!canSubmit} style={{
             flex: 2, height: '38px', borderRadius: '12px', border: 'none', color: '#fff', fontWeight: 800, fontSize: '14px',
             background: canSubmit ? 'linear-gradient(135deg, var(--neon-blue), #4f8ef7)' : 'rgba(255,255,255,0.05)',
             cursor: canSubmit ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
           }}>
-            {busy ? <><Loader2 size={16} className="spinning" /> 생성 중...</> : <><Server size={16} /> 가상 머신 생성</>}
+            {busy ? <><Loader2 size={16} className="spinning" /> {t("newvm.creating")}</> : <><Server size={16} /> {t("newvm.create")}</>}
           </button>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { X, Package, Type } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 // In-app mirror of THIRD-PARTY-NOTICES.md (repo root). Kept as a hand-maintained
 // list of DIRECT dependencies — same caveat as the notices file: transitive deps
@@ -41,7 +42,6 @@ const JS_DEPS: LicenseEntry[] = [
 
 const FONT_DEPS: LicenseEntry[] = [
   { name: "펴진고딕 (Pyeojin Gothic) — 서지환 (엔파피)", license: "SIL OFL 1.1" },
-  { name: "로딩 애니메이션 — LottieFiles", license: "Lottie Simple License" },
 ];
 
 interface LicenseModalProps {
@@ -63,6 +63,9 @@ function LicenseSection({ title, icon, entries }: { title: string; icon: React.R
 }
 
 export function LicenseModal({ onClose }: LicenseModalProps) {
+  const t = useT();
+  // 로딩 애니메이션 항목만 번역이 필요해서 렌더 때 붙인다(폰트 이름은 고유명사).
+  const fontDeps = [...FONT_DEPS, { name: t("lic.loadingAnim"), license: "Lottie Simple License" }];
   return (
     <div className="modal-overlay" onClick={onClose} style={{ backdropFilter: "blur(12px)", background: "rgba(0,0,0,0.7)", zIndex: 1000 }}>
       <div className="modal-content glass-modal" onClick={(e) => e.stopPropagation()} style={{ width: "420px", maxHeight: "80vh", padding: 0, overflow: "hidden", border: "none", display: "flex", flexDirection: "column" }}>
@@ -73,7 +76,7 @@ export function LicenseModal({ onClose }: LicenseModalProps) {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "40px", height: "40px", borderRadius: "10px", background: "rgba(255,255,255,0.03)" }}>
               <Package size={22} style={{ color: "var(--accent-blue)" }} />
             </div>
-            <h3 style={{ fontSize: "16px", fontWeight: 900, color: "#fff", letterSpacing: "-0.3px" }}>오픈소스 라이선스</h3>
+            <h3 style={{ fontSize: "16px", fontWeight: 900, color: "#fff", letterSpacing: "-0.3px" }}>{t("lic.title")}</h3>
           </div>
           <button className="btn-icon" onClick={onClose} style={{ background: "rgba(255,255,255,0.05)", borderRadius: "8px" }}>
             <X size={18} />
@@ -82,11 +85,11 @@ export function LicenseModal({ onClose }: LicenseModalProps) {
 
         <div className="modal-body license-body" style={{ padding: "0 20px 8px", overflowY: "auto" }}>
           <p style={{ fontSize: "12px", color: "var(--text-muted)", lineHeight: 1.6, wordBreak: "keep-all", marginBottom: "16px" }}>
-            HyperDesk는 아래 오픈소스 구성요소를 사용합니다. 모두 permissive 라이선스(MIT / Apache-2.0 / ISC / OFL)이며, 각 라이선스의 저작권 고지 의무를 유지합니다. 직접 의존성 기준 목록입니다.
+            {t("lic.body")}
           </p>
-          <LicenseSection title="Rust (백엔드)" icon={<Package size={13} />} entries={RUST_DEPS} />
+          <LicenseSection title={t("lic.rust")} icon={<Package size={13} />} entries={RUST_DEPS} />
           <LicenseSection title="JavaScript / TypeScript" icon={<Package size={13} />} entries={JS_DEPS} />
-          <LicenseSection title="폰트 · 애니메이션" icon={<Type size={13} />} entries={FONT_DEPS} />
+          <LicenseSection title={t("lic.fonts")} icon={<Type size={13} />} entries={fontDeps} />
         </div>
 
         <div style={{ padding: "12px 20px 16px", background: "rgba(0,0,0,0.2)" }}>
@@ -95,7 +98,7 @@ export function LicenseModal({ onClose }: LicenseModalProps) {
             onClick={onClose}
             style={{ width: "100%", height: "38px", borderRadius: "9px", background: "linear-gradient(135deg, var(--accent-blue), #4f8ef7)", color: "#fff", border: "none", fontWeight: 800, cursor: "pointer", fontSize: "14px" }}
           >
-            닫기
+            {t("common.close")}
           </button>
         </div>
       </div>

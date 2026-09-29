@@ -1,6 +1,7 @@
 import { X, Globe, User, Terminal, Save, Check, Wifi, WifiOff, Loader, AlertCircle } from "lucide-react";
 import { useState, useRef } from "react";
 import { api } from "@/lib/tauri-api";
+import { useT } from "@/lib/i18n";
 import { TagEditor } from "@/components/TagEditor";
 
 interface NewHost {
@@ -25,6 +26,7 @@ interface AssetModalProps {
 type VerifyState = 'idle' | 'checking' | 'ok' | 'fail';
 
 export function AssetModal({ initialData, isEditing = false, isPending = false, onClose, onSubmit }: AssetModalProps) {
+  const t = useT();
   const [hostData, setHostData] = useState<NewHost>(
     initialData || {
       id: "",
@@ -65,8 +67,8 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const nextErrors: { name?: string; host?: string } = {};
-    if (!hostData.name.trim()) nextErrors.name = "자산 별칭을 입력하세요.";
-    if (!hostData.host.trim()) nextErrors.host = "접속 엔드포인트를 입력하세요.";
+    if (!hostData.name.trim()) nextErrors.name = t("asset.errName");
+    if (!hostData.host.trim()) nextErrors.host = t("asset.errHost");
     setErrors(nextErrors);
     if (nextErrors.name) { nameRef.current?.focus(); return; }
     if (nextErrors.host) { hostRef.current?.focus(); return; }
@@ -84,7 +86,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
             <div className="neon-text-blue" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <Globe size={17} />
               <h3 style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.5px', textTransform: 'uppercase' }}>
-                {isEditing ? '원격 자산 명세 수정' : '신규 원격 자산 등록'}
+                {isEditing ? t("asset.titleEdit") : t("asset.titleNew")}
               </h3>
             </div>
           </div>
@@ -99,7 +101,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
             {/* Protocol Selector */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Terminal size={12} /> 프로토콜 인터페이스
+                <Terminal size={12} /> {t("asset.protocol")}
               </label>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
@@ -136,11 +138,11 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
               background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '10px'
             }}>
-              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>자산 별칭 (Alias)</label>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>{t("asset.alias")}</label>
               <input
                 ref={nameRef}
                 type="text"
-                placeholder="예: IDC-STORAGE-01"
+                placeholder={t("asset.aliasPlaceholder")}
                 value={hostData.name}
                 onChange={(e) => { setHostData({ ...hostData, name: e.target.value }); if (errors.name) setErrors({ ...errors, name: undefined }); }}
                 style={{
@@ -159,11 +161,11 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
               background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '10px'
             }}>
-              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>접속 엔드포인트 (IP/FQDN)</label>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>{t("asset.endpoint")}</label>
               <input
                 ref={hostRef}
                 type="text"
-                placeholder="10.20.30.1 또는 horizon.vdi.com"
+                placeholder={t("asset.endpointPlaceholder")}
                 value={hostData.host}
                 onChange={(e) => { setHostData({ ...hostData, host: e.target.value }); setVerifyState('idle'); if (errors.host) setErrors({ ...errors, host: undefined }); }}
                 style={{
@@ -191,16 +193,16 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                   {verifyState === 'checking' ? <Loader size={12} className="spinning" /> :
                    verifyState === 'ok' ? <Wifi size={12} /> :
                    verifyState === 'fail' ? <WifiOff size={12} /> : <Wifi size={12} />}
-                  연결 검증
+                  {t("asset.verify")}
                 </button>
                 {verifyState === 'ok' && (
                   <span style={{ fontSize: '11px', color: 'var(--accent-green)', fontWeight: 700 }}>
-                    ✓ 응답 {verifyLatency}ms
+                    {t("asset.verifyOk", { ms: verifyLatency ?? 0 })}
                   </span>
                 )}
                 {verifyState === 'fail' && (
                   <span style={{ fontSize: '11px', color: 'var(--accent-red)', fontWeight: 700 }}>
-                    ✗ 연결 실패 (TIMEOUT)
+                    {t("asset.verifyFail")}
                   </span>
                 )}
               </div>
@@ -214,8 +216,8 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
               {/* Username */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>사용자 계정</label>
-                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({hostData.protocol === 'HORIZON' ? 'OMNISSA 로그인' : 'RDP 세션 전용'})</span>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>{t("asset.user")}</label>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{hostData.protocol === 'HORIZON' ? t("asset.userHorizon") : t("asset.userRdp")}</span>
                 </div>
                 <div style={{ position: 'relative' }}>
                   <input
@@ -240,7 +242,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
               background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '10px',
               border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '10px'
             }}>
-              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>태그</label>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>{t("asset.tags")}</label>
               <TagEditor tags={tags} onChange={setTags} />
             </div>
 
@@ -260,7 +262,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                   fontWeight: 700, cursor: 'pointer', fontSize: '13px'
                 }}
               >
-                취소
+                {t("common.cancel")}
               </button>
               <button 
                 type="submit" 
@@ -274,8 +276,8 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px'
                 }}
               >
-                {isPending ? '최적화 중...' : (isEditing ? <Save size={18} /> : < Globe size={18} />)}
-                {isPending ? '통신 중...' : (isEditing ? '수정 완료' : '자산 등록')}
+                {isPending ? t("asset.working") : (isEditing ? <Save size={18} /> : < Globe size={18} />)}
+                {isPending ? t("asset.sending") : (isEditing ? t("asset.saveEdit") : t("asset.saveNew"))}
               </button>
             </div>
           </form>

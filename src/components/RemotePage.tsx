@@ -2,6 +2,7 @@ import { Globe, Plus, Play, Notebook, Pencil, X} from "lucide-react";
 import type { RemoteHost } from "@/types";
 import { useSettings } from "@/contexts/SettingsContext";
 import { ColumnToggle } from "@/components/ColumnToggle";
+import { useT } from "@/lib/i18n";
 
 interface RemotePageProps {
   remoteHosts: RemoteHost[];
@@ -21,6 +22,7 @@ export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
   onMemo: (host: RemoteHost) => void;
   onDelete: (id: string) => void;
 }) {
+  const t = useT();
   const isOffline = host.status === "TIMEOUT" || host.status === "Offline";
   const proto = host.protocol === "HORIZON" ? "horizon" : "rdp";
   return (
@@ -45,7 +47,7 @@ export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
         <button
           className={`mst-rack-connect ${isOffline ? "disabled" : ""}`}
           disabled={isOffline}
-          title={isOffline ? "오프라인" : "연결"}
+          title={isOffline ? t("remote.offline") : t("remote.connect")}
           onClick={() => !isOffline && onConnect(host.host, host.protocol, host.username)}
         >
           <Play size={13} />
@@ -54,9 +56,9 @@ export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
             the backend promotes a detected id to a manual entry on save.
             Delete stays for all — detected hosts are hidden, not purged,
             so they don't zombie-regenerate from the registry. */}
-        <button className="mst-rack-icon-btn" title="메모장 (접속정보/메모)" onClick={() => onMemo(host)}><Notebook size={14} /></button>
-        <button className="mst-rack-icon-btn" title="편집" onClick={() => onEdit(host)}><Pencil size={14} /></button>
-        <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? "숨기기" : "삭제"} onClick={() => onDelete(host.id)}><X size={14} /></button>
+        <button className="mst-rack-icon-btn" title={t("remote.memo")} onClick={() => onMemo(host)}><Notebook size={14} /></button>
+        <button className="mst-rack-icon-btn" title={t("remote.edit")} onClick={() => onEdit(host)}><Pencil size={14} /></button>
+        <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? t("remote.hide") : t("remote.delete")} onClick={() => onDelete(host.id)}><X size={14} /></button>
       </div>
     </div>
   );
@@ -64,11 +66,12 @@ export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
 
 export function RemotePage({ remoteHosts, onConnect, onEdit, onMemo, onDelete, onAdd }: RemotePageProps) {
   const { settings, updateSettings } = useSettings();
+  const t = useT();
   return (
     <div className="dashboard-grid">
       <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-muted)" }}>
-          <span style={{ color: "var(--accent-blue)" }}>→</span> 원격 자산 관리
+          <span style={{ color: "var(--accent-blue)" }}>→</span> {t("remote.heading")}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ fontSize: "9px", fontWeight: 900, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 10px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
@@ -76,7 +79,7 @@ export function RemotePage({ remoteHosts, onConnect, onEdit, onMemo, onDelete, o
           </span>
           <ColumnToggle value={settings.remoteAssetColumns} onChange={(v) => updateSettings({ remoteAssetColumns: v })} />
           <button className="hd-segment-btn" onClick={onAdd}>
-            <Plus size={13} /> 원격 자산 등록
+            <Plus size={13} /> {t("remote.add")}
           </button>
         </div>
       </div>
@@ -93,9 +96,9 @@ export function RemotePage({ remoteHosts, onConnect, onEdit, onMemo, onDelete, o
         )) : (
           <div style={{ padding: "60px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
             <Globe size={32} style={{ marginBottom: "12px" }} />
-            <div style={{ fontSize: "13px", fontWeight: 700 }}>원격 자산 없음</div>
+            <div style={{ fontSize: "13px", fontWeight: 700 }}>{t("remote.empty")}</div>
             {/* Omnissa(VDI)는 가상 머신 탭에서 관리한다 — 여기엔 RDP만 남는다. */}
-            <div style={{ fontSize: "11px", marginTop: "6px" }}>"원격 자산 등록" 버튼으로 RDP 호스트를 추가하세요.</div>
+            <div style={{ fontSize: "11px", marginTop: "6px" }}>{t("remote.emptyHint")}</div>
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { RefreshCw } from "lucide-react";
 import { api } from "@/lib/tauri-api";
+import { useT } from "@/lib/i18n";
 import { VmInfo, VmSwitch, VmNetworkAdapter, SystemStats } from "@/types";
 import { BentoCell } from "@/components/BentoCell";
 import { Sparkline } from "@/components/Sparkline";
@@ -12,6 +13,7 @@ interface NetworkPageProps {
 }
 
 export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
+  const t = useT();
   const [switches, setSwitches] = useState<VmSwitch[]>([]);
   const [adapters, setAdapters] = useState<VmNetworkAdapter[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,10 +49,10 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
   return (
     <div className="dashboard-grid">
       <div className="section-label" style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: "10px" }}>
-        <h3>네트워크 인터페이스 및 트래픽</h3>
+        <h3>{t("net.heading")}</h3>
         <div className="section-line" style={{ flex: 1 }} />
         <button className="hd-btn hd-btn--small" onClick={fetchNetworkInfo} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-          <RefreshCw size={11} className={loading ? "spinning" : ""} /> 새로고침
+          <RefreshCw size={11} className={loading ? "spinning" : ""} /> {t("common.refresh")}
         </button>
       </div>
 
@@ -58,12 +60,12 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
         {/* KPI row */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "20px" }}>
           <div className="stat-card">
-            <div className="stat-label">실시간 I/O</div>
+            <div className="stat-label">{t("net.liveIo")}</div>
             <div className="stat-value" style={{ color: "var(--accent-green)" }}>{netIo.toFixed(1)} KB/s</div>
             <Sparkline data={netHistory} color="var(--accent-green)" height={40} suffix=" KB/s" />
           </div>
           <div className="stat-card">
-            <div className="stat-label">vSwitch 수</div>
+            <div className="stat-label">{t("net.switchCount")}</div>
             <div className="stat-value">{loading ? "..." : switches.length}</div>
             <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "4px" }}>
               {switches.filter(s => s.switch_type === "External").length} External ·{" "}
@@ -72,9 +74,9 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">활성 커넥션</div>
+            <div className="stat-label">{t("net.activeConn")}</div>
             <div className="stat-value">{vms.filter(v => (v.ip_addresses?.length ?? 0) > 0).length}</div>
-            <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "4px" }}>IP 할당된 VM</div>
+            <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "4px" }}>{t("net.vmsWithIp")}</div>
           </div>
         </div>
 
@@ -82,7 +84,7 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
         {switches.length > 0 && (
           <div>
             <div style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--text-muted)", marginBottom: "10px", paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>
-              Virtual Switch 목록
+              {t("net.switchList")}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {switches.map(sw => (
@@ -108,20 +110,20 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
         {/* VM network table */}
         <div>
           <div style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--text-muted)", marginBottom: "10px", paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>
-            VM IP 할당 목록
+            {t("net.ipList")}
           </div>
           {loading ? (
             <div style={{ textAlign: "center", padding: "20px", opacity: 0.4, fontSize: "11px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-              <RefreshCw size={13} className="spinning" /> vSwitch 정보 로딩 중...
+              <RefreshCw size={13} className="spinning" /> {t("net.loading")}
             </div>
           ) : (
             <table className="hd-table">
               <thead>
                 <tr>
-                  <th>가상 머신</th>
-                  <th>IP 주소</th>
+                  <th>{t("net.colVm")}</th>
+                  <th>{t("net.colIp")}</th>
                   <th>vSwitch</th>
-                  <th>타입</th>
+                  <th>{t("net.colType")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -148,7 +150,7 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
                   );
                 })}
                 {vms.length === 0 && (
-                  <tr><td colSpan={4} style={{ textAlign: "center", opacity: 0.3 }}>VM 없음</td></tr>
+                  <tr><td colSpan={4} style={{ textAlign: "center", opacity: 0.3 }}>{t("net.noVms")}</td></tr>
                 )}
               </tbody>
             </table>

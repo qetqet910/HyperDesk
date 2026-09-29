@@ -1,4 +1,5 @@
 import { List, LayoutGrid } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 interface ColumnToggleProps {
   value: 1 | 2;
@@ -9,14 +10,15 @@ interface ColumnToggleProps {
     asset list. Shared between the Dashboard's remote-assets section and the
     Remote Assets page — same underlying list, same layout preference. */
 export function ColumnToggle({ value, onChange }: ColumnToggleProps) {
+  const t = useT();
   return (
-    <div className="col-toggle" role="radiogroup" aria-label="목록 레이아웃">
+    <div className="col-toggle" role="radiogroup" aria-label={t("cols.label")}>
       <div className={`col-toggle__thumb ${value === 2 ? "col-toggle__thumb--right" : ""}`} />
       <button
         type="button"
         className={`col-toggle__btn ${value === 1 ? "active" : ""}`}
         onClick={() => onChange(1)}
-        title="한 줄에 1개"
+        title={t("cols.one")}
         aria-pressed={value === 1}
       >
         <List size={13} />
@@ -25,7 +27,7 @@ export function ColumnToggle({ value, onChange }: ColumnToggleProps) {
         type="button"
         className={`col-toggle__btn ${value === 2 ? "active" : ""}`}
         onClick={() => onChange(2)}
-        title="한 줄에 2개"
+        title={t("cols.two")}
         aria-pressed={value === 2}
       >
         <LayoutGrid size={13} />

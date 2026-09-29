@@ -284,7 +284,7 @@ export default function App() {
     if (isLoading || startupLogFiredRef.current) return;
     startupLogFiredRef.current = true;
     const seq = [
-      { msg: "[SYSTEM] Booting HyperDesk Core Engine v1.0.3...", type: "info" },
+      { msg: "[SYSTEM] Booting HyperDesk Core Engine...", type: "info" },
       { msg: "[SCAN] Searching for Virtual Machines (Hyper-V)...", type: "info" },
       { msg: `[SUCCESS] ${vms.length} Hyper-V Units Online.`, type: "success" },
       { msg: "[SCAN] Mapping Remote Assets (RDP / Registry)...", type: "info" },

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { render } from "./render";
 import { SnapshotsPage } from "@/components/SnapshotsPage";
 import * as tauriApi from "@/lib/tauri-api";
 import type { VmInfo, VmSnapshot } from "@/types";

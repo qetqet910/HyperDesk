@@ -3,6 +3,7 @@ import { Server, Plus, RotateCcw, Trash2, RefreshCw, Camera } from "lucide-react
 import type { VmInfo, VmSnapshot } from "@/types";
 import { api } from "@/lib/tauri-api";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { useT } from "@/lib/i18n";
 
 interface SnapshotsPageProps {
   vms: VmInfo[];
@@ -15,6 +16,7 @@ interface SnapshotsByVm {
 }
 
 export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
+  const t = useT();
   const [snapsByVm, setSnapsByVm] = useState<SnapshotsByVm>({});
   const [loading, setLoading] = useState(false);
   const [loadingVm, setLoadingVm] = useState<string | null>(null);
@@ -48,7 +50,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
     setLoadingVm(vmName);
     try {
       await api.createSnapshot(vmName, newSnapName.trim());
-      onSuccess?.(`[스냅샷] ${vmName}: "${newSnapName || "자동 이름"}" 스냅샷 생성 완료`);
+      onSuccess?.(t("snap.created", { vm: vmName, name: newSnapName || t("snap.autoName") }));
       setCreating(null);
       setNewSnapName("");
       const snaps = await api.listSnapshots(vmName);
@@ -67,7 +69,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
     setConfirmRestore(null);
     try {
       await api.restoreSnapshot(vmName, snap.name);
-      onSuccess?.(`[스냅샷] ${vmName}: "${snap.name}" 복원 완료`);
+      onSuccess?.(t("snap.restored", { vm: vmName, name: snap.name }));
       const snaps = await api.listSnapshots(vmName);
       setSnapsByVm(prev => ({ ...prev, [vmName]: snaps }));
     } catch (e) {
@@ -84,7 +86,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
     setConfirmDelete(null);
     try {
       await api.deleteSnapshot(vmName, snap.name);
-      onSuccess?.(`[스냅샷] ${vmName}: "${snap.name}" 삭제 완료`);
+      onSuccess?.(t("snap.deleted", { vm: vmName, name: snap.name }));
       const snaps = await api.listSnapshots(vmName);
       setSnapsByVm(prev => ({ ...prev, [vmName]: snaps }));
     } catch (e) {
@@ -103,7 +105,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
         <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-muted)" }}>
             <Camera size={14} color="var(--accent-blue)" />
-            Hyper-V 체크포인트 관리
+            {t("snap.heading")}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <span style={{ fontSize: "9px", fontWeight: 900, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 10px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
@@ -115,7 +117,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
               disabled={loading}
               style={{ display: "flex", alignItems: "center", gap: "6px" }}
             >
-              <RefreshCw size={11} className={loading ? "spinning" : ""} /> 새로고침
+              <RefreshCw size={11} className={loading ? "spinning" : ""} /> {t("common.refresh")}
             </button>
           </div>
         </div>
@@ -126,7 +128,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
             className={`hd-segment-btn ${selectedVm === null ? "active" : ""}`}
             onClick={() => setSelectedVm(null)}
           >
-            전체 VM
+            {t("snap.allVms")}
           </button>
           {vms.map(vm => (
             <button
@@ -177,7 +179,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                           value={newSnapName}
                           onChange={e => setNewSnapName(e.target.value)}
                           onKeyDown={e => { if (e.key === "Enter") handleCreate(vm.name); if (e.key === "Escape") { setCreating(null); setNewSnapName(""); } }}
-                          placeholder="스냅샷 이름 (선택)"
+                          placeholder={t("snap.namePlaceholder")}
                           style={{
                             background: "rgba(0,0,0,0.3)", border: "1px solid var(--border-focus)",
                             borderRadius: "6px", padding: "5px 10px", fontSize: "11px",
@@ -185,9 +187,9 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                           }}
                         />
                         <button className="hd-btn hd-btn--small" disabled={isBusy} onClick={() => handleCreate(vm.name)}>
-                          {isBusy ? <RefreshCw size={11} className="spinning" /> : "생성"}
+                          {isBusy ? <RefreshCw size={11} className="spinning" /> : t("snap.create")}
                         </button>
-                        <button className="hd-btn hd-btn--small" onClick={() => { setCreating(null); setNewSnapName(""); }}>취소</button>
+                        <button className="hd-btn hd-btn--small" onClick={() => { setCreating(null); setNewSnapName(""); }}>{t("common.cancel")}</button>
                       </>
                     ) : (
                       <button
@@ -196,7 +198,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                         onClick={() => { setCreating(vm.name); setNewSnapName(""); }}
                         style={{ display: "flex", alignItems: "center", gap: "5px" }}
                       >
-                        <Plus size={11} /> 스냅샷 생성
+                        <Plus size={11} /> {t("snap.createSnapshot")}
                       </button>
                     )}
                   </div>
@@ -211,16 +213,16 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                 }}>
                   {snaps.length === 0 ? (
                     <div style={{ padding: "28px", textAlign: "center", opacity: 0.35, fontSize: "12px" }}>
-                      스냅샷 없음
+                      {t("snap.none")}
                     </div>
                   ) : (
                     <table className="hd-table" style={{ margin: 0 }}>
                       <thead>
                         <tr>
-                          <th>이름</th>
-                          <th>유형</th>
-                          <th>생성 시각</th>
-                          <th style={{ textAlign: "right" }}>액션</th>
+                          <th>{t("snap.colName")}</th>
+                          <th>{t("snap.colType")}</th>
+                          <th>{t("snap.colCreated")}</th>
+                          <th style={{ textAlign: "right" }}>{t("snap.colActions")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -234,20 +236,20 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                                 <button
                                   className="hd-btn hd-btn--small"
                                   disabled={isBusy}
-                                  title="이 시점으로 복원"
+                                  title={t("snap.restoreHint")}
                                   onClick={() => setConfirmRestore({ vmName: vm.name, snap })}
                                   style={{ display: "flex", alignItems: "center", gap: "4px", color: "var(--accent-blue)" }}
                                 >
-                                  <RotateCcw size={11} /> 복원
+                                  <RotateCcw size={11} /> {t("snap.restore")}
                                 </button>
                                 <button
                                   className="hd-btn hd-btn--small"
                                   disabled={isBusy}
-                                  title="스냅샷 삭제"
+                                  title={t("snap.deleteHint")}
                                   onClick={() => setConfirmDelete({ vmName: vm.name, snap })}
                                   style={{ display: "flex", alignItems: "center", gap: "4px", color: "var(--accent-red)" }}
                                 >
-                                  <Trash2 size={11} /> 삭제
+                                  <Trash2 size={11} /> {t("snap.delete")}
                                 </button>
                               </div>
                             </td>
@@ -264,16 +266,16 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
         {vms.length === 0 && (
           <div style={{ gridColumn: "1 / -1", padding: "60px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
             <Camera size={32} style={{ marginBottom: "12px" }} />
-            <div style={{ fontSize: "13px", fontWeight: 700 }}>가상 머신 없음</div>
+            <div style={{ fontSize: "13px", fontWeight: 700 }}>{t("snap.noVms")}</div>
           </div>
         )}
       </div>
 
       {confirmRestore && (
         <ConfirmModal
-          title="스냅샷 복원"
-          message={`[${confirmRestore.vmName}]을(를) "${confirmRestore.snap.name}" 시점으로 복원하시겠습니까?\nVM이 실행 중이면 강제 종료 후 복원됩니다. 저장되지 않은 데이터가 손실될 수 있습니다.`}
-          confirmText="복원 수행"
+          title={t("snap.restoreTitle")}
+          message={t("snap.restoreBody", { vm: confirmRestore.vmName, name: confirmRestore.snap.name })}
+          confirmText={t("snap.restoreConfirm")}
           type="danger"
           onConfirm={handleRestore}
           onClose={() => setConfirmRestore(null)}
@@ -282,9 +284,9 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
 
       {confirmDelete && (
         <ConfirmModal
-          title="스냅샷 삭제"
-          message={`"${confirmDelete.snap.name}" 스냅샷을 영구 삭제하시겠습니까?`}
-          confirmText="영구 삭제"
+          title={t("snap.deleteTitle")}
+          message={t("snap.deleteBody", { name: confirmDelete.snap.name })}
+          confirmText={t("snap.deleteConfirm")}
           type="danger"
           onConfirm={handleDelete}
           onClose={() => setConfirmDelete(null)}

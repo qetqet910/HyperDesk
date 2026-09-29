@@ -4,6 +4,7 @@ import { HyperVCard } from "@/components/RackAsset";
 import { RemoteAssetRow } from "@/components/RemotePage";
 import { ColumnToggle } from "@/components/ColumnToggle";
 import { NetworkPage } from "@/components/NetworkPage";
+import { useT } from "@/lib/i18n";
 import { useSettings } from "@/contexts/SettingsContext";
 import type { VmInfo, RemoteHost, SystemStats } from "@/types";
 
@@ -29,6 +30,7 @@ type VmFilter = "all" | "running" | "paused" | "off";
 
 export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSettings, onCreate, onHostConnect, onHostEdit, onHostMemo, onHostDelete, onHostAdd }: VmsPageProps) {
   const { settings, updateSettings } = useSettings();
+  const t = useT();
   const [vmFilter, setVmFilter] = useState<VmFilter>("all");
 
   const filteredVms = useMemo(() => {
@@ -41,10 +43,10 @@ export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSe
   }, [vms, vmFilter]);
 
   const segments = [
-    { id: "all"     as VmFilter, label: "전체",     icon: "■", iconColor: "var(--accent-blue)",   count: vms.length },
-    { id: "running" as VmFilter, label: "실행 중",  icon: "●", iconColor: "var(--accent-green)",  count: vms.filter(v => v.state === "Running").length },
-    { id: "paused"  as VmFilter, label: "일시정지", icon: "▪", iconColor: "var(--accent-orange)", count: vms.filter(v => v.state === "Paused" || v.state === "Saved").length },
-    { id: "off"     as VmFilter, label: "종료",     icon: "○", iconColor: "var(--text-muted)",    count: vms.filter(v => v.state === "Off").length },
+    { id: "all"     as VmFilter, label: t("vms.all"),     icon: "■", iconColor: "var(--accent-blue)",   count: vms.length },
+    { id: "running" as VmFilter, label: t("vms.running"),  icon: "●", iconColor: "var(--accent-green)",  count: vms.filter(v => v.state === "Running").length },
+    { id: "paused"  as VmFilter, label: t("vms.paused"), icon: "▪", iconColor: "var(--accent-orange)", count: vms.filter(v => v.state === "Paused" || v.state === "Saved").length },
+    { id: "off"     as VmFilter, label: t("vms.off"),     icon: "○", iconColor: "var(--text-muted)",    count: vms.filter(v => v.state === "Off").length },
   ];
 
   return (
@@ -65,15 +67,15 @@ export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSe
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <ColumnToggle value={settings.vmColumns} onChange={(v) => updateSettings({ vmColumns: v })} />
-          <button className="hd-segment-btn" onClick={onCreate} style={{ fontWeight: 800 }} title="새 가상 머신 생성">
-            <Plus size={13} /> 새 VM
+          <button className="hd-segment-btn" onClick={onCreate} style={{ fontWeight: 800 }} title={t("vms.newVmHint")}>
+            <Plus size={13} /> {t("vms.newVm")}
           </button>
         </div>
       </div>
 
       <div className="section-label" style={{ gridColumn: "1 / -1" }}>
         <Server size={14} color="var(--accent-blue)" />
-        <h3>가상 머신 관리</h3>
+        <h3>{t("vms.heading")}</h3>
         <div className="section-line" />
       </div>
 
@@ -95,7 +97,7 @@ export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSe
         )) : (
           <div style={{ padding: "48px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
             <Server size={28} style={{ marginBottom: "10px" }} />
-            <div style={{ fontSize: "12px", fontWeight: 700 }}>해당 조건의 가상 머신이 없습니다.</div>
+            <div style={{ fontSize: "12px", fontWeight: 700 }}>{t("vms.noneForFilter")}</div>
           </div>
         )}
       </div>
@@ -106,8 +108,8 @@ export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSe
         <MonitorPlay size={14} color="var(--accent-purple)" />
         <h3>OMNISSA · VDI</h3>
         <div className="section-line" />
-        <button className="hd-segment-btn" onClick={onHostAdd} title="Omnissa 데스크톱 등록">
-          <Plus size={13} /> 등록
+        <button className="hd-segment-btn" onClick={onHostAdd} title={t("vms.addOmnissaHint")}>
+          <Plus size={13} /> {t("vms.addOmnissa")}
         </button>
       </div>
 
@@ -123,7 +125,7 @@ export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSe
           />
         )) : (
           <div style={{ padding: "28px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
-            <div style={{ fontSize: "12px", fontWeight: 700 }}>등록된 Omnissa 데스크톱이 없습니다.</div>
+            <div style={{ fontSize: "12px", fontWeight: 700 }}>{t("vms.noOmnissa")}</div>
           </div>
         )}
       </div>

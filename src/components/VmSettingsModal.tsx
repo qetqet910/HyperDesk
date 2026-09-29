@@ -5,6 +5,7 @@ import { useVmActions } from "@/hooks/useDashboard";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { TagEditor } from "@/components/TagEditor";
 import { api } from "@/lib/tauri-api";
+import { useT } from "@/lib/i18n";
 
 const fmtGB = (bytes: number) => {
   const gb = bytes / 1024 / 1024 / 1024;
@@ -14,6 +15,7 @@ const fmtGB = (bytes: number) => {
 /** Disk usage + compaction panel. Read-only info loads on mount; compaction is
  *  gated on the VM being Off (Optimize-VHD needs the disk mounted read-only). */
 function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean; onLog?: (m: string, t: "info" | "success" | "error" | "warn") => void }) {
+  const t = useT();
   const [disks, setDisks] = useState<VmDiskEntry[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [compacting, setCompacting] = useState(false);
@@ -40,14 +42,14 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
 
   const runCompact = async () => {
     setCompacting(true);
-    onLog?.(`[DISK] ${vm.name} 디스크 압축 시작 (수 분 소요될 수 있음)...`, "info");
+    onLog?.(t("vmset.log.compactStart", { name: vm.name }), "info");
     try {
       const freed = await api.compactVmDisk(vm.name);
       const gb = (freed / 1024 / 1024 / 1024).toFixed(1);
-      onLog?.(`[SUCCESS] 디스크 압축 완료 — ${gb}GB 회수됨`, "success");
+      onLog?.(t("vmset.log.compactDone", { gb }), "success");
       await load();
     } catch (e) {
-      onLog?.(`[ERROR] 디스크 압축 실패: ${e}`, "error");
+      onLog?.(t("vmset.log.compactFail", { err: String(e) }), "error");
     } finally {
       setCompacting(false);
     }
@@ -55,14 +57,14 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
 
   const runConvert = async () => {
     setConverting(true);
-    onLog?.(`[DISK] ${vm.name} 고정→동적 디스크 변환 시작 (디스크 전체 복사, 수 분~수십 분)...`, "info");
+    onLog?.(t("vmset.log.convertStart", { name: vm.name }), "info");
     try {
       const freed = await api.convertVmDiskToDynamic(vm.name);
       const gb = (freed / 1024 / 1024 / 1024).toFixed(1);
-      onLog?.(`[SUCCESS] 동적 디스크 변환 완료 — ${gb}GB 회수됨`, "success");
+      onLog?.(t("vmset.log.convertDone", { gb }), "success");
       await load();
     } catch (e) {
-      onLog?.(`[ERROR] 디스크 변환 실패: ${e}`, "error");
+      onLog?.(t("vmset.log.convertFail", { err: String(e) }), "error");
     } finally {
       setConverting(false);
     }
@@ -76,13 +78,13 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <HardDrive size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
-          <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>디스크 사용량</label>
+          <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.diskUsage")}</label>
         </div>
         {disks && <div style={{ fontSize: '13px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>{fmtGB(total)}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '3px' }}>GB</span></div>}
       </div>
 
-      {loadErr && <div style={{ fontSize: '11px', color: 'var(--accent-orange)' }}>디스크 정보를 불러오지 못했습니다.</div>}
-      {!disks && !loadErr && <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}><Loader2 size={12} className="spinning" /> 분석 중...</div>}
+      {loadErr && <div style={{ fontSize: '11px', color: 'var(--accent-orange)' }}>{t("vmset.diskLoadFail")}</div>}
+      {!disks && !loadErr && <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}><Loader2 size={12} className="spinning" /> {t("vmset.analyzing")}</div>}
 
       {disks && disks.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -97,7 +99,7 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
                   {fname}
                 </span>
                 <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', flexShrink: 0 }}>
-                  {d.is_checkpoint ? '체크포인트' : d.disk_type}
+                  {d.is_checkpoint ? t("vmset.checkpoint") : d.disk_type}
                 </span>
                 <span style={{ fontFamily: 'var(--font-num)', fontWeight: 800, flexShrink: 0, minWidth: '54px', textAlign: 'right' }}>{fmtGB(d.file_size)} GB</span>
               </div>
@@ -110,13 +112,13 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
       {disks && disks.length > 0 && (
         <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', lineHeight: 1.6, borderTop: '1px solid var(--glass-border)', paddingTop: '12px' }}>
           {checkpointBytes > 0 && (
-            <div>• 체크포인트 삭제 시 <b style={{ color: 'var(--accent-orange)' }}>{fmtGB(checkpointBytes)}GB</b> 회수 가능 (스냅샷 페이지에서 삭제)</div>
+            <div>{t("vmset.hintCkptPre")}<b style={{ color: 'var(--accent-orange)' }}>{fmtGB(checkpointBytes)}GB</b>{t("vmset.hintCkptPost")}</div>
           )}
           {hasDynamic && (
-            <div>• 동적 디스크 압축으로 게스트가 비운 공간을 회수할 수 있습니다{isRunning ? ' (VM을 먼저 종료해야 함)' : ''}.</div>
+            <div>{t("vmset.hintDynamic")}{isRunning ? t("vmset.hintDynamicOff") : ''}.</div>
           )}
           {hasFixed && (
-            <div>• 이 VM은 <b>고정(Fixed) 디스크</b>라 압축으론 안 줄어듭니다 — <b>동적 디스크로 변환</b>하면 실사용만큼 줄어듭니다{isRunning ? ' (VM 종료 필요)' : ''}.</div>
+            <div>{t("vmset.hintFixed")}{isRunning ? t("vmset.hintFixedOff") : ''}.</div>
           )}
         </div>
       )}
@@ -135,9 +137,9 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
                 cursor: isRunning || compacting ? 'not-allowed' : 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
               }}
-              title={isRunning ? 'VM을 먼저 종료하세요' : undefined}
+              title={isRunning ? t("vmset.stopFirst") : undefined}
             >
-              {compacting ? <><Loader2 size={13} className="spinning" /> 압축 중...</> : <><HardDrive size={13} /> 압축</>}
+              {compacting ? <><Loader2 size={13} className="spinning" /> {t("vmset.compacting")}</> : <><HardDrive size={13} /> {t("vmset.compact")}</>}
             </button>
           )}
           {hasFixed && (
@@ -152,9 +154,9 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
                 cursor: isRunning || converting || hasCheckpoint ? 'not-allowed' : 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
               }}
-              title={hasCheckpoint ? '체크포인트를 먼저 삭제하세요' : isRunning ? 'VM을 먼저 종료하세요' : undefined}
+              title={hasCheckpoint ? t("vmset.deleteCkptFirst") : isRunning ? t("vmset.stopFirst") : undefined}
             >
-              {converting ? <><Loader2 size={13} className="spinning" /> 변환 중...</> : <><HardDrive size={13} /> 동적으로 변환</>}
+              {converting ? <><Loader2 size={13} className="spinning" /> {t("vmset.converting")}</> : <><HardDrive size={13} /> {t("vmset.convert")}</>}
             </button>
           )}
         </div>
@@ -162,9 +164,9 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
 
       {confirmCompact && (
         <ConfirmModal
-          title="디스크 압축"
-          message={`[${vm.name}]의 동적 디스크를 압축합니다. 게스트가 비운 블록을 회수하며, 디스크 크기에 따라 수 분이 걸릴 수 있습니다. 계속하시겠습니까?`}
-          confirmText="압축 시작"
+          title={t("vmset.compactTitle")}
+          message={t("vmset.compactBody", { name: vm.name })}
+          confirmText={t("vmset.compactConfirm")}
           onConfirm={() => { setConfirmCompact(false); runCompact(); }}
           onClose={() => setConfirmCompact(false)}
         />
@@ -172,9 +174,9 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
 
       {confirmConvert && (
         <ConfirmModal
-          title="동적 디스크로 변환"
-          message={`[${vm.name}]의 고정 디스크를 동적 디스크로 변환합니다. 디스크 전체를 복사한 뒤 원본을 교체하므로 (1) 실사용량만큼의 여유 공간이 필요하고 (2) 수 분~수십 분 걸릴 수 있습니다. 중요 데이터는 백업을 권장합니다. 계속하시겠습니까?`}
-          confirmText="변환 시작"
+          title={t("vmset.convertTitle")}
+          message={t("vmset.convertBody", { name: vm.name })}
+          confirmText={t("vmset.convertConfirm")}
           type="danger"
           onConfirm={() => { setConfirmConvert(false); runConvert(); }}
           onClose={() => setConfirmConvert(false)}
@@ -191,6 +193,7 @@ interface VmSettingsModalProps {
 }
 
 export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
+  const t = useT();
   const { setMemory, setProcessors, start, stop } = useVmActions();
   const parseMemory = (raw: any): number => {
     const val = Number(raw);
@@ -208,7 +211,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
 
   const handleSave = async () => {
     if (isRunning) {
-      onLog?.("가동 중인 VM의 자원은 변경할 수 없습니다.", "warn");
+      onLog?.(t("vmset.log.runningNoChange"), "warn");
       return;
     }
 
@@ -216,20 +219,20 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
     try {
       const currentMemGb = parseMemory(vm.memory_startup);
       if (newMemory !== currentMemGb) {
-        onLog?.(`[VM] 메모리 최적화 시도: ${newMemory}GB`, "info");
+        onLog?.(t("vmset.log.memory", { gb: newMemory }), "info");
         await setMemory.mutateAsync({ name: vm.name, memoryGb: newMemory });
       }
       
       if (newProcessors !== vm.processor_count) {
-        onLog?.(`[VM] 프로세서 코어 조정: ${newProcessors} Cores`, "info");
+        onLog?.(t("vmset.log.cpu", { n: newProcessors }), "info");
         await setProcessors.mutateAsync({ name: vm.name, processors: newProcessors });
       }
 
       await api.setVmTags(vm.name, tags);
-      onLog?.(`[SUCCESS] ${vm.name} 설정 저장 완료`, "success");
+      onLog?.(t("vmset.log.saved", { name: vm.name }), "success");
       onClose();
     } catch (e) {
-      onLog?.(`[ERROR] 자원 할당 실패: ${e}`, "error");
+      onLog?.(t("vmset.log.saveFail", { err: String(e) }), "error");
     } finally {
       setIsBusy(false);
     }
@@ -240,13 +243,13 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
     try {
       if (action === 'start') {
         await start.mutateAsync(vm.name);
-        onLog?.(`[VM] ${vm.name} 부팅 시퀀스 시작`, "success");
+        onLog?.(t("vmset.log.starting", { name: vm.name }), "success");
       } else {
         await stop.mutateAsync(vm.name);
-        onLog?.(`[VM] ${vm.name} 시스템 종료 요청됨`, "info");
+        onLog?.(t("vmset.log.stopping", { name: vm.name }), "info");
       }
     } catch (e) {
-      onLog?.(`[ERROR] 전원 제어 실패: ${e}`, "error");
+      onLog?.(t("vmset.log.powerFail", { err: String(e) }), "error");
     } finally {
       setIsBusy(false);
     }
@@ -263,7 +266,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
           <div className="header-title">
             <div className="neon-text-blue" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <Cpu size={20} />
-              <h3 style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.5px' }}>{vm.name === 'DefaultVM' ? '리소스 임계치 조정' : `${vm.name} 자원 고도화`}</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.5px' }}>{vm.name === 'DefaultVM' ? t("vmset.titleDefault") : t("vmset.title", { name: vm.name })}</h3>
             </div>
           </div>
           <button className="btn-icon" onClick={onClose} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
@@ -284,9 +287,9 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
             }}>
               <AlertTriangle size={20} style={{ color: '#fbbf24', flexShrink: 0 }} />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#fbbf24', marginBottom: '4px' }}>실시간 자원 변경 제한됨</div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#fbbf24', marginBottom: '4px' }}>{t("vmset.runningTitle")}</div>
                 <div style={{ fontSize: '11px', color: 'rgba(251, 191, 36, 0.7)', lineHeight: '1.6' }}>
-                  현재 VM이 가동 중입니다. 하드웨어 구성을 수정하려면 전원을 먼저 꺼야 합니다.
+                  {t("vmset.runningBody")}
                 </div>
                 <button 
                   onClick={() => setShowConfirmStop(true)}
@@ -307,7 +310,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
                     transition: 'all 0.2s'
                   }}
                 >
-                  <Square size={12} fill="currentColor" /> 강제 시스템 종료
+                  <Square size={12} fill="currentColor" /> {t("vmset.forceStop")}
                 </button>
               </div>
             </div>
@@ -380,7 +383,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
 
           {/* Tags */}
           <div style={{ marginTop: '12px', background: 'rgba(0,0,0,0.2)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--glass-border)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '10px' }}>태그</div>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '10px' }}>{t("vmset.tags")}</div>
             <TagEditor tags={tags} onChange={setTags} />
           </div>
         </div>
@@ -402,7 +405,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
               transition: 'all 0.2s'
             }}
           >
-            취소
+            {t("common.cancel")}
           </button>
           <button 
             className="confirm-btn" 
@@ -426,7 +429,7 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
               transition: 'all 0.2s'
             }}
           >
-            <Save size={18} /> 적용 및 동기화
+            <Save size={18} /> {t("vmset.apply")}
           </button>
         </div>
       </div>
@@ -434,9 +437,9 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
 
     {showConfirmStop && (
       <ConfirmModal 
-        title="가상머신 강제 종료"
-        message={`[${vm.name}]을(를) 강제로 종료하시겠습니까? 저장되지 않은 모든 데이터가 손실될 수 있습니다.`}
-        confirmText="강제 종료 수행"
+        title={t("vmset.forceStopTitle")}
+        message={t("vmset.forceStopBody", { name: vm.name })}
+        confirmText={t("vmset.forceStopConfirm")}
         type="danger"
         onConfirm={() => handlePowerAction('stop')}
         onClose={() => setShowConfirmStop(false)}

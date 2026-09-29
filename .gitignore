@@ -71,3 +71,8 @@ src-tauri/*.key.pub
 
 # Scratch drafts (GeekNews posts, notes) — not part of the app
 _workspace/
+
+# 스토어 이미지용 원본 캡처 — 실제 IP·사내 도메인이 그대로 보인다. 흐림 처리된
+# 결과물(docs/store-assets/*.png)만 커밋하고 원본은 절대 커밋하지 말 것.
+/MultiView*.png
+/MutiView*.png

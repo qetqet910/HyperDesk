@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api } from "@/lib/tauri-api";
+import { useT } from "@/lib/i18n";
 import type { HyperVEvent } from "@/types";
 
 interface EventsPageProps {
@@ -9,6 +10,7 @@ interface EventsPageProps {
 }
 
 export function EventsPage({ logs, onClear }: EventsPageProps) {
+  const t = useT();
   const [hyperVEvents, setHyperVEvents] = useState<HyperVEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [eventError, setEventError] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export function EventsPage({ logs, onClear }: EventsPageProps) {
   return (
     <div className="dashboard-grid">
       <div className="section-label" style={{ gridColumn: "1 / -1" }}>
-        <h3>전체 이벤트 로그</h3>
+        <h3>{t("events.heading")}</h3>
         <div className="section-line" />
       </div>
 
@@ -44,13 +46,13 @@ export function EventsPage({ logs, onClear }: EventsPageProps) {
             style={{ display: "flex", alignItems: "center", gap: "4px" }}
           >
             <RefreshCw size={11} className={loadingEvents ? "spinning" : ""} />
-            Hyper-V 이벤트 로드
+            {t("events.load")}
           </button>
         </div>
         <div style={{ padding: "16px", minHeight: "80px" }}>
           {loadingEvents && (
             <div style={{ textAlign: "center", opacity: 0.5, fontSize: "11px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-              <RefreshCw size={13} className="spinning" /> 이벤트 로딩 중...
+              <RefreshCw size={13} className="spinning" /> {t("events.loading")}
             </div>
           )}
           {eventError && (
@@ -58,7 +60,7 @@ export function EventsPage({ logs, onClear }: EventsPageProps) {
           )}
           {!loadingEvents && !eventError && hyperVEvents.length === 0 && (
             <div style={{ textAlign: "center", opacity: 0.3, fontSize: "11px" }}>
-              'Hyper-V 이벤트 로드' 버튼으로 시스템 이벤트를 가져옵니다.
+              {t("events.empty")}
             </div>
           )}
           {hyperVEvents.length > 0 && (

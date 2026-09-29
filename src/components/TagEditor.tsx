@@ -1,5 +1,6 @@
 import { useState, useRef, KeyboardEvent } from "react";
 import { X } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 interface TagEditorProps {
   tags: string[];
@@ -15,7 +16,9 @@ const SUGGESTIONS = [
   "region:seoul", "region:tokyo", "region:us-east",
 ];
 
-export function TagEditor({ tags, onChange, placeholder = "태그 추가...", maxTags = 10 }: TagEditorProps) {
+export function TagEditor({ tags, onChange, placeholder: placeholderProp, maxTags = 10 }: TagEditorProps) {
+  const t = useT();
+  const placeholder = placeholderProp ?? t("tags.placeholder");
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -115,7 +118,7 @@ export function TagEditor({ tags, onChange, placeholder = "태그 추가...", ma
       )}
 
       <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "5px" }}>
-        Enter · , · Space로 추가 &nbsp;·&nbsp; Backspace로 삭제 &nbsp;·&nbsp; env:, role:, region: 접두사 권장
+        {t("tags.hint")}
       </div>
     </div>
   );
