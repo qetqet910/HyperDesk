@@ -30,7 +30,7 @@
 <br />
 
 <div align="center">
-  <img width="930" alt="HyperDesk dashboard" src="https://github.com/user-attachments/assets/55b4536e-b19a-480e-9d1c-b72467904955" />
+  <img width="930" alt="HyperDesk tour: dashboard, virtual machines, remote assets, snapshots and the Ctrl+K palette" src="docs/demo-en.gif" />
 </div>
 
 ## What it does

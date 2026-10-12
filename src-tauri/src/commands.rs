@@ -2,7 +2,7 @@ use std::process::{Command, Stdio};
 use std::os::windows::process::CommandExt;
 use crate::models::VmInfo;
 use crate::hosts::{RemoteHost, load_hosts, save_hosts};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use serde::Serialize;
 use uuid::Uuid;
 use winreg::enums::*;
@@ -603,8 +603,45 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
     Ok(child.id())
 }
 
+/// vmconnect 키보드 옵션을 `Remote`("가상 컴퓨터에서 사용")로 바꾼 XML을 돌려준다.
+/// 이미 Remote면 `Ok(None)`. 설정 노드를 못 찾으면 `Err` — 문서화 안 된 파일이라
+/// 아는 모양이 아니면 건드리지 않는다(값은 실측: `FullScreen` / `Remote` / `Local`).
+fn vmconnect_keyboard_remote(xml: &str) -> Result<Option<String>, ()> {
+    let at = xml.find("name=\"VMConnectKeyboardOption\"").ok_or(())?;
+    let open = at + xml[at..].find("<value>").ok_or(())? + "<value>".len();
+    // 그 사이에 태그가 닫혔으면(`</setting>` 또는 자기 닫힘 `/>`) 이건 다른 설정의 <value>다.
+    if xml[at..open].contains("</setting>") || xml[at..open].contains("/>") { return Err(()); }
+    let close = open + xml[open..].find("</value>").ok_or(())?;
+    if xml[open..close].trim() == "Remote" { return Ok(None); }
+    Ok(Some(format!("{}Remote{}", &xml[..open], &xml[close..])))
+}
+
+/// 콘솔을 띄우기 직전에 부른다(이 설정은 **새 vmconnect 인스턴스에만** 적용된다).
+/// true = Remote임(원래 그랬거나 방금 바꿈). false = 파일이 없거나 모르는 모양 → 사용자 안내.
+/// 파일을 새로 만들지는 않는다 — 다른 PC에서 Hyper-V 관리자가 그 파일을 읽는지 검증 못 했다.
+fn ensure_vmconnect_keyboard_remote() -> bool {
+    let Some(appdata) = std::env::var_os("APPDATA") else { return false };
+    let path = std::path::PathBuf::from(appdata).join(r"Microsoft\Windows\Hyper-V\Client\1.0\clientsettings.config");
+    let Ok(xml) = std::fs::read_to_string(&path) else { return false };
+    match vmconnect_keyboard_remote(&xml) {
+        Ok(None) => true,
+        // 임시 파일에 쓰고 바꿔치기한다 — 쓰는 도중 죽어도 남의 설정 파일이 빈 채로 남지 않는다.
+        Ok(Some(new_xml)) => {
+            let tmp = path.with_extension("config.hyperdesk-tmp");
+            std::fs::write(&tmp, new_xml).is_ok() && std::fs::rename(&tmp, &path).is_ok()
+        }
+        Err(()) => false,
+    }
+}
+
 #[tauri::command]
-pub async fn connect_console(name: String) -> Result<u32, String> {
+pub async fn connect_console(app: AppHandle, name: String) -> Result<u32, String> {
+    // Win/Alt+Tab을 VM으로 보내려면 vmconnect가 키를 가져가도록 설정돼 있어야 한다.
+    // 못 바꿨으면 실행당 한 번만 안내한다(MultiView가 받아 토스트로 띄운다).
+    static HINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !ensure_vmconnect_keyboard_remote() && !HINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        let _ = app.emit("vmconnect-keyboard-hint", ());
+    }
     let child = Command::new("C:\\Windows\\System32\\vmconnect.exe")
         .args(["localhost", &name])
         .spawn()
@@ -1544,7 +1581,13 @@ static LAST_MINIMIZED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 pub(crate) fn sync_restore_from_minimize(window: &tauri::Window) {
     let now_min = window.is_minimized().unwrap_or(false);
     if LAST_MINIMIZED.swap(now_min, std::sync::atomic::Ordering::Relaxed) == now_min { return; }
-    if now_min { return; } // only act on minimized -> restored
+    if now_min {
+        // 세션 창은 소유된 최상위 창이다. 시스템이 숨겨주길 기다리지 않고 직접 숨긴다
+        // (vmconnect는 최소화 후에도 화면에 남았다 — 실기기 2026-10-12). 복원 시
+        // refresh_after_restore의 SWP_SHOWWINDOW가 다시 보여준다. WM_SIZE 콜스택 밖에서.
+        std::thread::spawn(crate::swallow::hide_for_minimize);
+        return;
+    }
     // Same rule as sync_fullscreen_mark_for_maximize: this runs INSIDE Windows'
     // WM_SIZE dispatch, and refresh_after_restore ends in an ITaskbarList2 call
     // (cross-process COM into explorer.exe). Never from this call stack.
@@ -2229,6 +2272,20 @@ mod tests {
         assert_eq!(rdp_sanitize("user\r\nx"), "userx");
         assert_eq!(rdp_sanitize("\tadmin"), "admin");
         assert_eq!(rdp_sanitize("clean-host.local"), "clean-host.local");
+    }
+
+    #[test]
+    fn vmconnect_keyboard_option_is_switched_to_remote() {
+        // 실제 파일 모양(2026-10-12 실측) 그대로.
+        let xml = "<configuration>\n    <Microsoft.Virtualization.Client.ClientVirtualizationSettings>\n        <setting name=\"VMConnectKeyboardOption\" type=\"Microsoft.Virtualization.Client.VMConnectKeyboardOption\">\n            <value>FullScreen</value>\n        </setting>\n        <setting name=\"VMConnectReleaseKey\" type=\"Microsoft.Virtualization.Client.VMConnectReleaseKey\">\n            <value>Left</value>\n        </setting>\n    </Microsoft.Virtualization.Client.ClientVirtualizationSettings>\n</configuration>";
+        let out = vmconnect_keyboard_remote(xml).unwrap().expect("should change");
+        assert_eq!(out, xml.replace("FullScreen", "Remote"), "다른 설정은 한 글자도 안 바뀌어야 한다");
+        assert_eq!(vmconnect_keyboard_remote(&out), Ok(None), "이미 Remote면 안 쓴다");
+        // 설정 노드가 없거나 값이 비어 있는 모르는 모양은 건드리지 않는다.
+        assert_eq!(vmconnect_keyboard_remote("<configuration />"), Err(()));
+        // 자기 닫힘 노드 뒤에 오는 **다른 설정의 값**을 덮어쓰면 안 된다.
+        let no_value = "<setting name=\"VMConnectKeyboardOption\" type=\"T\" /><setting name=\"X\"><value>Left</value></setting>";
+        assert_eq!(vmconnect_keyboard_remote(no_value), Err(()));
     }
 
     #[test]

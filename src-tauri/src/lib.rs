@@ -201,6 +201,8 @@ pub fn run() {
                     // 중이었다면 작업표시줄도 다시 올라온다. 둘 다 여기서 복구한다.
                     commands::sync_restore_from_minimize(window);
                 }
+                // 세션 창은 메인 창이 소유한 최상위 창이라 스스로 따라오지 않는다.
+                tauri::WindowEvent::Moved(_) => swallow::resync_positions(),
                 _ => {}
             }
         })

@@ -259,6 +259,7 @@ export const ko: Record<keyof typeof en, string> = {
   "slot.connecting": "{name} 분석 중...",
   "slot.cancel": "연결 취소",
   "slot.lost": "(신호 유실)",
+  "slot.vmKeyboardHint": "Win 키와 Alt+Tab을 VM으로 보내려면 Hyper-V 관리자 → Hyper-V 설정 → 키보드에서 '가상 컴퓨터에서 사용'을 선택한 뒤 다시 연결하세요.",
   "slot.disconnected": "(연결 끊김)",
   "slot.reconnect": "다시 연결",
   "slot.connect": "연결 시작",

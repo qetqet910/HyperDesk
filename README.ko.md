@@ -29,7 +29,7 @@
 <br />
 
 <div align="center">
-  <img width="930" alt="HyperDesk 대시보드" src="https://github.com/user-attachments/assets/55b4536e-b19a-480e-9d1c-b72467904955" />
+  <img width="930" alt="HyperDesk 둘러보기: 대시보드, 가상 머신, 원격 자산, 스냅샷, Ctrl+K 팔레트" src="docs/demo-ko.gif" />
 </div>
 
 ## 무엇을 하나

@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<!-- 스토어 9:16 포스터 아트 / 1:1 박스 아트. 언어 중립(글자는 제품명뿐)이라 한·영 공용.
+     렌더: msedge --headless=new --window-size=W,H --screenshot=OUT "file:///.../boxart.html?w=W&h=H" -->
+<style>
+  @font-face { font-family: "Pyeojin"; font-weight: 700; src: url("file:///C:/Users/pc241/Documents/Dev/HyperDesk/src/fonts/PyeojinGothic-Bold.woff2") format("woff2"); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: var(--w); height: var(--h); overflow: hidden; }
+  body {
+    /* --u = 캔버스 폭의 1% — 두 규격에서 같은 비율로 그려지게 */
+    font-family: "Pyeojin", "Segoe UI", sans-serif; color: #eef2ff;
+    background:
+      radial-gradient(calc(var(--w) * 0.9) calc(var(--h) * 0.6) at 10% 0%, rgba(34,184,207,0.40), transparent 70%),
+      radial-gradient(calc(var(--w) * 0.9) calc(var(--h) * 0.6) at 100% 100%, rgba(124,77,255,0.45), transparent 70%),
+      linear-gradient(160deg, #0a1022 0%, #0c1230 55%, #140f33 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: calc(var(--u) * 4);
+    position: relative;
+  }
+  body::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: calc(var(--u) * 3.4) calc(var(--u) * 3.4);
+    mask-image: radial-gradient(circle at 50% 45%, rgba(0,0,0,0.9), transparent 70%);
+  }
+  .logo { position: relative; height: calc(var(--u) * 30); filter: drop-shadow(0 0 calc(var(--u) * 6) rgba(90,140,255,0.45)); }
+  .name { position: relative; font-size: calc(var(--u) * 10); font-weight: 700; letter-spacing: -0.02em; }
+  .keys { position: relative; display: flex; align-items: center; gap: calc(var(--u) * 1.4); margin-top: calc(var(--u) * 2); }
+  .key {
+    min-width: calc(var(--u) * 8.5); height: calc(var(--u) * 8.5); padding: 0 calc(var(--u) * 2);
+    border-radius: calc(var(--u) * 1.6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--u) * 3.6); font-weight: 700; color: #f2f5ff;
+    background: linear-gradient(180deg, #2a3358, #1a2140);
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 calc(var(--u) * 0.6) 0 #0d1128, 0 calc(var(--u) * 1.2) calc(var(--u) * 3) rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.18);
+  }
+  .key.on { background: linear-gradient(180deg, #3aa9d8, #6b53e8); border-color: rgba(255,255,255,0.35); }
+  .plus { font-size: calc(var(--u) * 3.4); color: #8d98c4; font-weight: 700; }
+</style>
+</head>
+<body>
+  <img class="logo" src="file:///C:/Users/pc241/Documents/Dev/HyperDesk/src/assets/logo.png" alt="">
+  <div class="name">HyperDesk</div>
+  <div class="keys">
+    <div class="key">Alt</div><div class="plus">+</div>
+    <div class="key on">1</div><div class="key">2</div><div class="key">3</div><div class="key">4</div>
+  </div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const w = +q.get("w") || 2160, h = +q.get("h") || 2160;
+  const s = document.documentElement.style;
+  s.setProperty("--w", w + "px"); s.setProperty("--h", h + "px"); s.setProperty("--u", w / 100 + "px");
+</script>
+</body>
+</html>

@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM, BOOL};
 use windows::Win32::UI::WindowsAndMessaging::{
-    SetParent, SetWindowLongPtrW, GetWindowLongPtrW, SetWindowPos, GetClassNameW,
-    GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_THICKFRAME, WS_BORDER, WS_CHILD, WS_POPUP,
-    WS_CLIPSIBLINGS, WS_EX_TOPMOST, WS_EX_APPWINDOW, WS_EX_MDICHILD,
+    SetWindowLongPtrW, GetWindowLongPtrW, SetWindowPos, GetClassNameW,
+    GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_THICKFRAME, WS_BORDER, WS_POPUP,
+    WS_CLIPSIBLINGS, WS_EX_TOPMOST, WS_EX_APPWINDOW,
+    GetWindow, GW_OWNER, GWLP_HWNDPARENT, GetAncestor, GA_ROOT,
     SWP_SHOWWINDOW, SWP_FRAMECHANGED, SWP_ASYNCWINDOWPOS, SWP_NOCOPYBITS,
     SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE,
     EnumWindows, GetWindowThreadProcessId, IsWindowVisible, GetWindowTextW,
-    EnumChildWindows, IsWindow, HWND_TOP, GetWindowRect, IsIconic, ShowWindow, SW_SHOWNOACTIVATE,
+    EnumChildWindows, IsWindow, GetWindowRect, IsIconic, ShowWindow, SW_SHOWNOACTIVATE,
     SetForegroundWindow, BringWindowToTop, SetMenu, PostMessageW, WM_CLOSE,
 };
 use windows::Win32::Graphics::Gdi::{ScreenToClient, ClientToScreen, CreateRectRgn, CreateRoundRectRgn, SetWindowRgn, CombineRgn, DeleteObject, RGN_DIFF, HRGN, RedrawWindow, RDW_INVALIDATE, RDW_ERASE, RDW_ALLCHILDREN, RDW_UPDATENOW};
@@ -63,6 +64,17 @@ fn swallow_state() -> &'static Arc<Mutex<HashMap<String, SwallowInfo>>> {
 /// swallow/unswallow/focus call permanently failing (poisoned mutex).
 pub fn lock_state() -> std::sync::MutexGuard<'static, HashMap<String, SwallowInfo>> {
     swallow_state().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `lock_state`의 기다리지 않는 판 — 메인 스레드(WM_MOVE)나 이벤트 콜백처럼 **락을 기다리면
+/// 안 되는 자리**에서 쓴다. 다른 스레드가 쥐고 있으면 None. poison은 `lock_state`와 똑같이
+/// 복구한다(그냥 `try_lock().ok()`를 쓰면 한 번 패닉한 뒤로 영원히 None이 된다).
+fn try_lock_state() -> Option<std::sync::MutexGuard<'static, HashMap<String, SwallowInfo>>> {
+    match swallow_state().try_lock() {
+        Ok(g) => Some(g),
+        Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
 }
 
 /// hwnds a hunt loop has picked as ITS candidate but not yet committed to
@@ -360,6 +372,26 @@ fn cutout_in_window(
     (l, t, l + rw, t + rh)
 }
 
+/// 세션 창을 슬롯 좌표(`container` 클라이언트 기준)에 놓는다 — **모든 배치는 여기를 거친다.**
+///
+/// 세션 창은 WS_CHILD가 아니라 HyperDesk 메인 창이 **소유한 최상위 팝업**이다
+/// (2026-10-12 전환). 자식 창은 진짜 포그라운드가 될 수 없어서 mstsc/vmconnect/Horizon이
+/// Win·Alt+Tab을 반쯤만 처리했다(원격에도 보내고 로컬 셸에도 흘림). 소유 팝업은 클릭하면
+/// 진짜 포그라운드가 되므로 클라이언트가 단독 실행 때처럼 키를 스스로 가져간다
+/// (실측: scratch/owned-probe.ps1, vmconnect에서 Win/Alt+Tab 10/10 원격).
+///
+/// 그래서 (1) SetWindowPos는 **화면 좌표**다 — 여기서 변환한다. 호출부에서 슬롯 좌표를
+/// 그대로 SetWindowPos에 넘기지 말 것. (2) z-order는 건드리지 않는다 — 소유된 창은
+/// 시스템이 항상 소유자 위에 두므로 HWND_TOP이 필요 없고, 쓰면 HyperDesk가 뒤에 있을 때
+/// 세션 창만 **다른 앱 위로** 튀어나온다. (3) 메인 창이 최소화돼 있으면 아무것도 안 한다 —
+/// 시스템이 소유된 창을 숨겨둔 상태라 SWP_SHOWWINDOW로 다시 꺼내면 안 된다.
+unsafe fn place(hwnd: HWND, container: HWND, x: i32, y: i32, w: i32, h: i32, flags: windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS) {
+    if IsIconic(GetAncestor(container, GA_ROOT)).as_bool() { return; }
+    let mut p = POINT { x, y };
+    let _ = ClientToScreen(container, &mut p);
+    let _ = SetWindowPos(hwnd, HWND(std::ptr::null_mut()), p.x, p.y, w, h, flags | SWP_NOZORDER);
+}
+
 /// Window rect (x, y, w, h) that makes the swallowed content's video area exactly
 /// fill the slot. offset_x/offset are the LEFT/TOP chrome (frame non-client border
 /// + top ribbon). The frame's non-client border is symmetric, so the RIGHT and
@@ -376,6 +408,12 @@ fn framed_rect(x: i32, y: i32, w: i32, h: i32, offset_x: i32, offset: i32) -> Cu
         w + (HORIZONTAL_BUFFER * 2) + offset_x * 2,
         h + offset + offset_x + BOTTOM_BIAS,
     )
+}
+
+/// Horizon(Omnissa) 프레임인가 — 클래스가 `HwndWrapper[Horizon.Client.UI;;GUID]` 꼴이다.
+fn is_horizon_class(class_name: &str) -> bool {
+    let c = class_name.to_lowercase();
+    c.contains("horizon") || c.contains("omnissa") || c.contains("vmware")
 }
 
 fn get_offset(class_name: &str) -> i32 {
@@ -1043,7 +1081,7 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
                         // inside the container behind the newer session.
                         None if swallow_result.is_ok() => unsafe {
                             if IsWindow(h).as_bool() {
-                                let _ = SetParent(h, HWND(std::ptr::null_mut()));
+                                let _ = SetWindowLongPtrW(h, GWLP_HWNDPARENT, 0);
                                 let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
                             }
                         },
@@ -1327,19 +1365,29 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
         (s, ex, p)
     };
 
+    // 최대화 상태면 먼저 푼다. 최상위 창인 mstsc는 최대화 상태에서 자기 모니터의
+    // 최대화 자리로 스스로 되돌아간다(실측 2026-10-12: HyperDesk가 2번 모니터에 있는데
+    // mstsc가 100ms마다 1번 모니터 (-4,-4)로 복귀, [stabilize] POS 100회 연속). WS_CHILD
+    // 시절엔 최대화가 의미 없어 안 드러났다. 포커스를 뺏지 않으려고 SW_SHOWNOACTIVATE.
+    let was_zoomed = unsafe { windows::Win32::UI::WindowsAndMessaging::IsZoomed(child_hwnd).as_bool() };
+    dlog!("[swallow] slot={} child={:?} zoomed={} style={:#x}", slot_id, child_hwnd.0, was_zoomed, original_style);
+    if was_zoomed {
+        unsafe { let _ = ShowWindow(child_hwnd, SW_SHOWNOACTIVATE); }
+    }
+
     let mut style = original_style;
-    style &= !(WS_POPUP.0 as isize);
+    style &= !(windows::Win32::UI::WindowsAndMessaging::WS_MAXIMIZE.0 as isize);
     let mut ex_style = original_ex_style;
     ex_style &= !(WS_EX_TOPMOST.0 as isize);
     ex_style &= !(WS_EX_APPWINDOW.0 as isize);
     ex_style &= !(WS_BORDER.0 as isize); 
-    ex_style |= (WS_EX_MDICHILD.0) as isize;
 
     // Strip thick frame and caption to ensure the window fits the slot precisely
     style &= !(WS_CAPTION.0 as isize);
     style &= !(WS_THICKFRAME.0 as isize);
     style &= !(WS_BORDER.0 as isize);
-    style |= WS_CHILD.0 as isize;
+    // 자식이 아니라 소유된 최상위 팝업 — place()의 주석 참고. WS_CHILD를 다시 걸지 말 것.
+    style |= WS_POPUP.0 as isize;
     style |= WS_CLIPSIBLINGS.0 as isize;
 
     unsafe {
@@ -1361,7 +1409,8 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
         p_style |= 0x02000000_isize; // WS_CLIPCHILDREN
         let _ = SetWindowLongPtrW(actual_parent, GWL_STYLE, p_style);
 
-        let _ = SetParent(child_hwnd, actual_parent);
+        // 부모(SetParent)가 아니라 **소유자**. 소유자는 최상위 창이어야 하므로 컨테이너의 루트(메인 창).
+        let _ = SetWindowLongPtrW(child_hwnd, GWLP_HWNDPARENT, GetAncestor(actual_parent, GA_ROOT).0 as isize);
 
         // REVERTED (2026-07): a GetParent()-based post-check used to live here,
         // rejecting the swallow if GetParent didn't immediately report
@@ -1401,12 +1450,8 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
         });
 
         let (fx, fy, fw, fh) = framed_rect(x, y, width, height, offset_x, offset);
-        let _ = SetWindowPos(
-            // 최초 배치도 최상단으로 — 웹뷰 표면 위에 있어야 보인다(위 set_visibility 주석 참고).
-            child_hwnd, HWND_TOP,
-            fx, fy, fw, fh,
-            SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOCOPYBITS
-        );
+        place(child_hwnd, actual_parent, fx, fy, fw, fh,
+            SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOCOPYBITS);
 
         // Clip the non-removable chrome (e.g. VMConnect ribbon + left inset),
         // composed with any currently-active immersive reveal band.
@@ -1430,10 +1475,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     let vmconnect_pid_cap = vmconnect_pid; // re-check the BBar each poll; it can reopen on focus/unmaximize
     // Horizon 데스크톱 프레임인지 — 클래스에 Horizon/Omnissa/VMware가 들어간다
     // (`HwndWrapper[Horizon.Client.UI;;GUID]`). 여기서 한 번만 판정해 루프로 넘긴다.
-    let is_horizon_cap = {
-        let c = class_str.to_lowercase();
-        c.contains("horizon") || c.contains("omnissa") || c.contains("vmware")
-    };
+    let is_horizon_cap = is_horizon_class(&class_str);
     dlog!("[horizon] frame class='{}' is_horizon={}", class_str, is_horizon_cap);
     // Horizon은 자체 연결 바(핀 / Ctrl+Alt+Del / USB / 전체 화면 종료)를 화면 상단
     // 정중앙에 띄우는데, 그 자리가 우리 헤더 필과 정확히 겹친다 — 필을 못 잡고
@@ -1483,6 +1525,8 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
         let mut was_collapsed = false;
         // Horizon 서피스 탐색 결과를 한 번만 로그하기 위한 플래그.
         let mut horizon_probed = false;
+        // region이 "없음"으로 읽힌 연속 폴 수 — 한 번 비어 보였다고 창을 내리지 않는다.
+        let mut rgn_missing_polls = 0u32;
         loop {
             std::thread::sleep(std::time::Duration::from_millis(interval_ms));
 
@@ -1507,7 +1551,29 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                 }
             };
             if !is_active { break; }
-            if !is_visible { continue; }
+            if !is_visible {
+                // Horizon 전체 화면 프레임은 화면 밖(-10000)에 세워둬도 자기 모니터
+                // 원점으로 스스로 돌아온다. 최상위 창이라 그러면 다른 슬롯을 보는 내내
+                // HyperDesk를 덮는다(실기기 2026-10-12). 숨은 슬롯의 Horizon은 진짜로 숨긴다.
+                let h = HWND(h_child_raw as *mut _);
+                unsafe {
+                    if is_horizon_cap {
+                        if IsWindowVisible(h).as_bool() {
+                            let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(h, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                        }
+                    } else {
+                        // 숨은 슬롯의 창이 화면에 나와 있으면 다시 세워둔다. 아래 위치 보정이
+                        // set_visibility(false)와 엇갈려 방금 세워둔 창을 도로 끌어낼 수 있고,
+                        // 최상위 창이라 그러면 지금 보는 슬롯 위에 그대로 남는다.
+                        let mut wr = RECT::default();
+                        if GetWindowRect(h, &mut wr).is_ok() && wr.left > -5000 {
+                            let _ = SetWindowPos(h, HWND(std::ptr::null_mut()), -10000, -10000, 0, 0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                        }
+                    }
+                }
+                continue;
+            }
 
             if let Some(pid) = vmconnect_pid_cap {
                 hide_vmconnect_bbar(pid);
@@ -1530,9 +1596,16 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                     break;
                 }
                 
+                // 메인 창이 최소화된 동안엔 아무것도 강제하지 않는다. Windows가 소유된
+                // 창을 숨기면서 WS_VISIBLE을 내리는데, 아래 스타일 대조가 그걸 "스타일이
+                // 바뀌었다"로 보고 WS_VISIBLE을 도로 세워 세션 창이 화면에 그대로 남았다
+                // (실기기 2026-10-12, Hyper-V). 복원되면 시스템이 다시 보여준다.
+                let h_owner = GetAncestor(h_parent, GA_ROOT);
+                if IsIconic(h_owner).as_bool() { continue; }
+
                 let cur_style = GetWindowLongPtrW(h_child, GWL_STYLE);
                 let cur_ex_style = GetWindowLongPtrW(h_child, GWL_EXSTYLE);
-                let cur_parent = windows::Win32::UI::WindowsAndMessaging::GetParent(h_child).unwrap_or(HWND(std::ptr::null_mut()));
+                let cur_owner = GetWindow(h_child, GW_OWNER).unwrap_or(HWND(std::ptr::null_mut()));
 
                 let mut needs_refresh = false;
 
@@ -1584,8 +1657,8 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                     let _ = SetWindowLongPtrW(h_child, GWL_EXSTYLE, target_ex_style);
                     needs_refresh = true;
                 }
-                if cur_parent.0 != h_parent.0 {
-                    let _ = SetParent(h_child, h_parent);
+                if cur_owner.0 != h_owner.0 {
+                    let _ = SetWindowLongPtrW(h_child, GWLP_HWNDPARENT, h_owner.0 as isize);
                     needs_refresh = true;
                 }
 
@@ -1605,10 +1678,14 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                     if GetWindowRect(h_child, &mut wr).is_ok() {
                         let mut tl = POINT { x: wr.left, y: wr.top };
                         let _ = ScreenToClient(h_parent, &mut tl);
-                        if (tl.x - want_x).abs() > 2 || (tl.y - want_y).abs() > 2 {
-                            dlog!("[stabilize] slot={} child={:?} POS ({},{}) -> ({},{})",
-                                s_id, h_child_raw, tl.x, tl.y, want_x, want_y);
-                            let _ = SetWindowPos(h_child, HWND_TOP, want_x, want_y, 0, 0,
+                        // 틱 처음에 읽은 is_visible은 낡았을 수 있다 — 그 사이 슬롯이 숨겨져
+                        // 창이 화면 밖에 세워졌다면 그건 어긋남이 아니다. 지금 값으로 다시 본다.
+                        let still_visible = lock_state().get(&s_id).map(|i| i.is_visible).unwrap_or(false);
+                        if still_visible && ((tl.x - want_x).abs() > 2 || (tl.y - want_y).abs() > 2) {
+                            dlog!("[stabilize] slot={} child={:?} POS ({},{}) -> ({},{}) zoomed={} style={:#x}",
+                                s_id, h_child_raw, tl.x, tl.y, want_x, want_y,
+                                windows::Win32::UI::WindowsAndMessaging::IsZoomed(h_child).as_bool(), cur_style);
+                            place(h_child, h_parent, want_x, want_y, 0, 0,
                                 SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
                         }
                     }
@@ -1629,6 +1706,31 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                 // Horizon: 렌더 서피스가 프레임을 안 따라오므로 따로 붙여준다.
                 // 프레임의 클라이언트 영역을 화면 좌표로 바꿔 그대로 목표로 준다.
                 if is_horizon_cap {
+                    HORIZON_FRAME.store(h_child_raw, std::sync::atomic::Ordering::Relaxed);
+                    // Horizon 로그인 창(WPF)은 region을 받아주지 않는다 — 구멍 요청이 155번
+                    // 들어가도 GetWindowRgnBox는 계속 "없음"이었다(실측 2026-10-12, 데스크톱
+                    // 프레임은 정상). 구멍을 못 뚫으면 헤더 필이 통째로 가려지므로, 그런
+                    // 창은 필 높이만큼 **아래로 내려** 놓는다. offset을 음수로 주면
+                    // framed_rect를 쓰는 모든 배치 경로가 같이 따라온다.
+                    if offset_cap == 0 {
+                        if let Some((_, py, _, ph)) = cutout {
+                            let mut rb = RECT::default();
+                            // 3폴 연속으로 없을 때만. 데스크톱 프레임도 적용 직전 한순간은
+                            // region이 비어 보일 수 있는데, 한 번 내리면 되돌리지 않기 때문이다.
+                            if windows::Win32::Graphics::Gdi::GetWindowRgnBox(h_child, &mut rb).0 == 0 {
+                                rgn_missing_polls += 1;
+                            } else {
+                                rgn_missing_polls = 0;
+                            }
+                            if rgn_missing_polls >= 3 {
+                                // +4px: 필 바로 밑에 붙으면 답답하다(사용자 요청 2026-10-12).
+                                offset_cap = -(py + ph + 4);
+                                dlog!("[horizon] slot={} child={:?} refuses region -> drop below pill by {}px", s_id, h_child_raw, py + ph + 4);
+                                if let Some(i) = lock_state().get_mut(&s_id) { i.offset = offset_cap; }
+                                needs_refresh = true;
+                            }
+                        }
+                    }
                     // 연결 바는 포커스/전환 때마다 되살아나므로 매 폴 숨긴다
                     // (vmconnect BBar와 같은 이유).
                     {
@@ -1650,15 +1752,19 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                             dlog!("[horizon] MKSEmbedded FOUND {:?}", _sfc.0);
                         }
                     }
-                    let mut cr = RECT::default();
-                    if windows::Win32::UI::WindowsAndMessaging::GetClientRect(h_child, &mut cr).is_ok() {
-                        let mut origin = POINT { x: 0, y: 0 };
-                        let _ = ClientToScreen(h_child, &mut origin);
+                    // 목표는 프레임의 클라이언트 영역이 아니라 **슬롯 사각형**이다. 최상위
+                    // 창이 된 전체 화면 프레임은 크기 요청을 안 받아 1920x1080에 머문다
+                    // (실측 2026-10-12: want 1476x1037인데 at은 계속 1920x1080) — 프레임
+                    // 클라이언트에 맞추면 서피스도 1920x1080이라 슬롯엔 좌상단만 잘려 보인다.
+                    // 자식 창 시절엔 프레임이 슬롯 크기를 받아줘서 둘이 같은 값이었다.
+                    {
+                        let mut origin = POINT { x: target_rect.0, y: target_rect.1 };
+                        let _ = ClientToScreen(h_parent, &mut origin);
                         let target = RECT {
                             left: origin.x,
                             top: origin.y,
-                            right: origin.x + (cr.right - cr.left),
-                            bottom: origin.y + (cr.bottom - cr.top),
+                            right: origin.x + target_rect.2,
+                            bottom: origin.y + target_rect.3,
                         };
                         if sync_horizon_surface(h_child, target) {
                             interval_ms = FAST_MS; // 방금 옮겼으면 잠시 촘촘히 지켜본다
@@ -1682,19 +1788,14 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                         let (fx, fy, fw, fh) = framed_rect(
                             target_rect.0, target_rect.1, target_rect.2, target_rect.3,
                             offset_x_cap, offset_cap);
-                        dlog!("[health] slot={} child={:?} at=({},{} {}x{}) want=({},{} {}x{}) vis={} iconic={} collapsed={} parent_ok={} top={} rgn={:?}({},{} {}x{}) chrome=({},{}) client={}x{} child={:?}",
+                        dlog!("[health] slot={} child={:?} at=({},{} {}x{}) want=({},{} {}x{}) vis={} iconic={} collapsed={} owner_ok={} rgn={:?}({},{} {}x{}) chrome=({},{}) client={}x{} child={:?}",
                             s_id, h_child_raw,
                             tl.x, tl.y, wr.right - wr.left, wr.bottom - wr.top,
                             fx, fy, fw, fh,
                             IsWindowVisible(h_child).as_bool(),
                             IsIconic(h_child).as_bool(),
                             child_surface_collapsed(h_child),
-                            cur_parent.0 == h_parent.0,
-                            // 부모의 z-order 최상단 자식이 우리인가 — 아니면 웹뷰가 위를
-                            // 덮고 있다는 뜻이고, 그게 곧 검은 화면이다.
-                            windows::Win32::UI::WindowsAndMessaging::GetWindow(
-                                h_parent, windows::Win32::UI::WindowsAndMessaging::GW_CHILD)
-                                .map(|w| w.0 == h_child.0).unwrap_or(false),
+                            cur_owner.0 == h_owner.0,
                             rgn.0, rb.left, rb.top, rb.right - rb.left, rb.bottom - rb.top,
                             offset_x_cap, offset_cap,
                             {
@@ -1720,13 +1821,13 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                 if now_collapsed && !was_collapsed {
                     dlog!("[stabilize] slot={} child={:?} collapsed -> one-shot recover", s_id, h_child_raw);
                     let framed = framed_rect(target_rect.0, target_rect.1, target_rect.2, target_rect.3, offset_x_cap, offset_cap);
-                    recover_collapsed_surface(h_child_raw, framed, (offset_x_cap, offset_cap, target_rect.2, target_rect.3), cutout);
+                    recover_collapsed_surface(h_child_raw, h_parent, framed, (offset_x_cap, offset_cap, target_rect.2, target_rect.3), cutout);
                     // 넛지: 크기를 실제로 한 번 바꿔야 WM_SIZE가 나가 재레이아웃된다.
                     {
                         let (fx, fy, fw, fh) = framed;
-                        let _ = SetWindowPos(h_child, HWND_TOP, fx, fy, (fw - 1).max(1), (fh - 1).max(1),
+                        place(h_child, h_parent, fx, fy, (fw - 1).max(1), (fh - 1).max(1),
                             SWP_SHOWWINDOW | SWP_NOACTIVATE);
-                        let _ = SetWindowPos(h_child, HWND_TOP, fx, fy, fw, fh,
+                        place(h_child, h_parent, fx, fy, fw, fh,
                             SWP_SHOWWINDOW | SWP_NOACTIVATE);
                     }
                     apply_chrome_region(h_child, offset_x_cap, offset_cap, target_rect.2, target_rect.3, cutout);
@@ -1742,19 +1843,22 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
 
                 if needs_refresh {
                     let (fx, fy, fw, fh) = framed_rect(target_rect.0, target_rect.1, target_rect.2, target_rect.3, offset_x_cap, offset_cap);
-                    let _ = SetWindowPos(
-                        h_child,
-                        HWND_TOP,
-                        fx, fy, fw, fh,
-                        SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE
-                    );
+                    place(h_child, h_parent, fx, fy, fw, fh,
+                        SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE);
                     // Re-apply chrome clip region in case the app reset it — composed
                     // with any active immersive reveal band via apply_chrome_region,
                     // so this can never stomp a reveal the top-edge poller just made.
                     apply_chrome_region(h_child, offset_x_cap, offset_cap, target_rect.2, target_rect.3, cutout);
                     interval_ms = FAST_MS; // app fought back — watch closely again
                 } else {
-                    interval_ms = (interval_ms * 2).min(SLOW_MS); // stable — ease off
+                    // Horizon은 느려지지 않는다. 전체 화면 데스크톱 프레임이 활성화될 때마다
+                    // 자기 모니터 원점으로 되돌아가는데(실측 2026-10-12: POS (0,0) -> (223,40)이
+                    // 30초에 5회), 최상위 창이라 그동안 HyperDesk의 사이드바·상단바·헤더 필을
+                    // 통째로 덮는다. 1초 폴이면 최대 1초 덮인다.
+                    // ponytail: 100ms 폴링이라 최대 100ms는 여전히 덮인다. 그게 눈에 띄면
+                    // SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE)로 즉시 되돌리게 바꿀 것.
+                    let slow = if is_horizon_cap { FAST_MS } else { SLOW_MS };
+                    interval_ms = (interval_ms * 2).min(slow); // stable — ease off
                 }
             }
         }
@@ -1780,13 +1884,11 @@ fn restore_and_close(info: &SwallowInfo) {
     let child_hwnd = HWND(info.child_hwnd as *mut _);
     unsafe {
         if IsWindow(child_hwnd).as_bool() {
-            let _ = SetParent(child_hwnd, HWND(std::ptr::null_mut()));
+            // 소유 관계부터 끊는다 — 소유자(메인 창)가 파괴되면 Windows가 소유된 창도 같이 파괴한다.
+            let _ = SetWindowLongPtrW(child_hwnd, GWLP_HWNDPARENT, info.original_parent);
             let _ = SetWindowLongPtrW(child_hwnd, GWL_STYLE, info.original_style);
             let _ = SetWindowLongPtrW(child_hwnd, GWL_EXSTYLE, info.original_ex_style);
             let _ = SetWindowRgn(child_hwnd, HRGN::default(), BOOL::from(true));
-            if info.original_parent != 0 {
-                 let _ = SetParent(child_hwnd, HWND(info.original_parent as *mut _));
-            }
             let _ = SetWindowPos(child_hwnd, HWND(std::ptr::null_mut()), 120, 120, 900, 650,
                 SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER);
             let _ = PostMessageW(child_hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
@@ -1827,18 +1929,20 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
     // recover_collapsed_surface를 불러 최대 6*250ms 슬립했었는데, 그 근거였던
     // "슬롯 전환만으로도 8x8 붕괴" 실측이 이후 실기기로 반증되어 그 호출은 철회됐다
     // — 락을 짧게 쥐는 습관 자체는 계속 유효하므로 유지한다.)
-    struct Snap { hwnd: isize, x: i32, y: i32, w: i32, h: i32, ox: i32, oy: i32, cut: Option<CutoutRect> }
+    struct Snap { hwnd: isize, parent: isize, horizon: bool, x: i32, y: i32, w: i32, h: i32, ox: i32, oy: i32, cut: Option<CutoutRect> }
     let snap = {
         let mut state = lock_state();
         let Some(info) = state.get_mut(slot_id) else { return Ok(()) };
         info.is_visible = visible;
         Snap {
-            hwnd: info.child_hwnd, x: info.x, y: info.y, w: info.width, h: info.height,
+            hwnd: info.child_hwnd, parent: info.parent_hwnd, horizon: is_horizon_class(&info.class_name),
+            x: info.x, y: info.y, w: info.width, h: info.height,
             ox: info.offset_x, oy: info.offset, cut: info.header_cutout,
         }
     };
 
     let hwnd = HWND(snap.hwnd as *mut _);
+    let container = HWND(snap.parent as *mut _);
     if !unsafe { IsWindow(hwnd) }.as_bool() {
         return Ok(());
     }
@@ -1849,17 +1953,9 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
         // vmconnect chrome and would misplace the frame on re-show.
         let (fx, fy, fw, fh) = framed_rect(snap.x, snap.y, snap.w, snap.h, snap.ox, snap.oy);
         unsafe {
-            let _ = SetWindowPos(
-                // **HWND_TOP으로 끌어올린다.** SwallowGrid는 Win32 자식이 WebView2
-                // 표면 **위**에 있다는 전제로 동작하는데, 예전엔 여기서 SWP_NOZORDER를
-                // 써서 z-order를 손대지 않았다 — 자식이 어떤 이유로든 웹뷰 아래로
-                // 내려가 있으면 슬롯을 다시 보여줘도 웹뷰가 칠하는 배경(#000)만 보인다.
-                // 실측(2026-09-02 [health]): 위치·크기·region·가시성·부모가 전부 정답인데
-                // 화면만 검은 상태가 나왔고, 남은 변수가 z-order뿐이었다.
-                hwnd, HWND_TOP,
-                fx, fy, fw, fh,
-                SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE
-            );
+            // z-order는 place()가 안 건드린다 — 소유된 창은 시스템이 항상 소유자(웹뷰 포함) 위에 둔다.
+            place(hwnd, container, fx, fy, fw, fh,
+                SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE);
         }
         // 반드시 region도 같이 다시 적용한다. 숨어 있는 동안 update_position은
         // `is_visible` 가드에 걸려 SetWindowPos/region을 건너뛰지만 저장된
@@ -1884,16 +1980,18 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
         if child_surface_collapsed(hwnd) {
             dlog!("[show] slot={} child={:?} surface collapsed -> one-shot resize nudge", slot_id, snap.hwnd);
             unsafe {
-                let _ = SetWindowPos(
-                    hwnd, HWND_TOP, fx, fy, (fw - 1).max(1), (fh - 1).max(1),
-                    SWP_SHOWWINDOW | SWP_NOACTIVATE,
-                );
-                let _ = SetWindowPos(
-                    hwnd, HWND_TOP, fx, fy, fw, fh,
-                    SWP_SHOWWINDOW | SWP_NOACTIVATE,
-                );
+                place(hwnd, container, fx, fy, (fw - 1).max(1), (fh - 1).max(1), SWP_SHOWWINDOW | SWP_NOACTIVATE);
+                place(hwnd, container, fx, fy, fw, fh, SWP_SHOWWINDOW | SWP_NOACTIVATE);
             }
             apply_chrome_region(hwnd, snap.ox, snap.oy, snap.w, snap.h, snap.cut);
+        }
+
+        // Horizon은 숨은 동안 SW_HIDE 상태다. Alt+1~4의 focus_window는 슬롯이 보이기 **전에**
+        // 불리는데 숨은 창에는 SetForegroundWindow가 안 먹고, 위 place는 NOACTIVATE라 그 뒤로
+        // 아무도 포커스를 안 준다 — 클릭 한 번 하기 전까지 키가 세션으로 안 갔다
+        // (실기기 2026-10-12). 보여준 뒤 한 번 더 준다. 앱이 앞에 있을 때만.
+        if snap.horizon && app_is_foreground() {
+            focus_window(slot_id);
         }
 
     } else {
@@ -1913,6 +2011,11 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
                 -10000, -10000, fw, fh,
                 SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE
             );
+            // Horizon만: 세워두는 것으로는 안 숨는다(안정화 루프의 같은 주석 참고).
+            // mstsc/vmconnect는 숨기지 않는다 — 숨김/표시가 표면 접힘을 부른 이력이 있다.
+            if snap.horizon {
+                let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+            }
         }
     }
     Ok(())
@@ -2084,6 +2187,7 @@ fn child_surface_collapsed(frame: HWND) -> bool {
 /// 원인이 특정되기 전까지는 위치/region/재도색만 한 번 다시 적용한다(무해).
 fn recover_collapsed_surface(
     hwnd_raw: isize,
+    container: HWND,
     framed: (i32, i32, i32, i32),
     chrome: (i32, i32, i32, i32),
     cutout: Option<CutoutRect>,
@@ -2100,23 +2204,37 @@ fn recover_collapsed_surface(
             dlog!("[restore] child={:?} is ICONIC -> ShowWindow(SW_SHOWNOACTIVATE)", hwnd_raw);
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
-        let _ = SetWindowPos(
-            hwnd, HWND(std::ptr::null_mut()), fx, fy, fw, fh,
-            SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE,
-        );
+        place(hwnd, container, fx, fy, fw, fh, SWP_SHOWWINDOW | SWP_NOACTIVATE);
         apply_chrome_region(hwnd, offset_x, offset, width, height, cutout);
         let _ = RedrawWindow(hwnd, None, None,
             RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
     }
     dlog!("[restore] slot child={:?} -> ({},{} {}x{})", hwnd_raw, fx, fy, fw, fh);
 }
+/// 메인 창이 최소화된 순간 보이는 세션 창을 숨긴다(commands::sync_restore_from_minimize).
+/// 락은 hwnd만 뜨고 바로 놓는다. ShowWindowAsync — 세션 프로세스가 느려도 안 기다린다.
+pub fn hide_for_minimize() {
+    // 별도 스레드에서 돌므로 그새 복원됐을 수 있다. 복원 뒤에 숨기면 다시 보여줄 주체가 없다.
+    let main = HWND(MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed) as *mut _);
+    if main.0.is_null() || !unsafe { IsIconic(main) }.as_bool() { return; }
+    let hwnds: Vec<isize> = lock_state().values().filter(|i| i.is_visible).map(|i| i.child_hwnd).collect();
+    for raw in hwnds {
+        let hwnd = HWND(raw as *mut _);
+        unsafe {
+            // 시스템이 이미 숨겼는지 남긴다 — false가 찍히면 그 클라이언트는 스스로 숨는다.
+            dlog!("[minimize] child={:?} still_visible={}", raw, IsWindowVisible(hwnd).as_bool());
+            let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+        }
+    }
+}
+
 pub fn refresh_after_restore() {
-    struct Item { hwnd: isize, x: i32, y: i32, w: i32, h: i32, ox: i32, oy: i32, cut: Option<CutoutRect> }
+    struct Item { hwnd: isize, parent: isize, x: i32, y: i32, w: i32, h: i32, ox: i32, oy: i32, cut: Option<CutoutRect> }
     let items: Vec<Item> = {
         lock_state().values()
             .filter(|i| i.is_visible)
             .map(|i| Item {
-                hwnd: i.child_hwnd, x: i.x, y: i.y, w: i.width, h: i.height,
+                hwnd: i.child_hwnd, parent: i.parent_hwnd, x: i.x, y: i.y, w: i.width, h: i.height,
                 ox: i.offset_x, oy: i.offset, cut: i.header_cutout,
             })
             .collect()
@@ -2124,7 +2242,7 @@ pub fn refresh_after_restore() {
 
     for it in items {
         let framed = framed_rect(it.x, it.y, it.w, it.h, it.ox, it.oy);
-        recover_collapsed_surface(it.hwnd, framed, (it.ox, it.oy, it.w, it.h), it.cut);
+        recover_collapsed_surface(it.hwnd, HWND(it.parent as *mut _), framed, (it.ox, it.oy, it.w, it.h), it.cut);
     }
 
     // 최소화/복원도 Alt+Tab·슬롯 전환과 같은 셸 재평가 트리거다 — 전체화면 중이었다면
@@ -2229,12 +2347,8 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
                     // half/full axes) could be in flight and the last POSTED one won, not
                     // the last CORRECT one — leaving mstsc parked off-slot. Synchronous
                     // makes the final call the authoritative geometry.
-                    let _ = SetWindowPos(
-                        hwnd,
-                        HWND_TOP,
-                        tx, ty, tw, th,
-                        SWP_NOCOPYBITS | SWP_NOACTIVATE | SWP_NOOWNERZORDER
-                    );
+                    place(hwnd, p_hwnd, tx, ty, tw, th,
+                        SWP_NOCOPYBITS | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
 
                     // Re-apply window region clipping to prevent child window from overflowing slot bounds
                     apply_chrome_region(hwnd, info.offset_x, info.offset, width, height, info.header_cutout);
@@ -2244,20 +2358,86 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
     }
 }
 
-// ─── Global keyboard hook: route Win-key / Alt+Tab into the focused VM ───────
+/// 메인 창이 **움직였을 때** 보이는 세션 창을 따라 옮긴다(lib.rs `WindowEvent::Moved`).
+/// 소유된 창은 자식과 달리 소유자를 따라 움직이지 않고, 슬롯 좌표는 그대로라
+/// 프론트의 `update_position`은 델타 필터에 걸려 아무것도 안 한다.
+///
+/// WM_MOVE 콜스택 안(메인 스레드)에서 불린다. 그래서 (1) 락은 `try_lock` — 다른
+/// 스레드가 락을 쥔 채 세션 창에 동기 Win32 호출 중이면 건너뛴다(안정화 루프의 위치
+/// 대조가 1초 안에 따라잡는다). (2) SWP_ASYNCWINDOWPOS — 세션 프로세스가 느려도 우리
+/// UI 스레드가 드래그 도중 멈추지 않는다. 크기는 안 건드린다(SWP_NOSIZE).
+pub fn resync_positions() {
+    let Some(state) = try_lock_state() else { return };
+    for info in state.values().filter(|i| i.is_visible) {
+        let (fx, fy, _, _) = framed_rect(info.x, info.y, info.width, info.height, info.offset_x, info.offset);
+        unsafe {
+            place(HWND(info.child_hwnd as *mut _), HWND(info.parent_hwnd as *mut _), fx, fy, 0, 0,
+                SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        }
+    }
+}
+
+// ─── Global keyboard hook: Alt+1~4 slot switching ────────────────────────────
 //
-// mstsc's own keyboardhook:i:1 forwarding half-works once the window is
-// reparented: its foreground check compares against ITS top-level window, but
-// after SetParent the foreground window is HyperDesk's — so mstsc forwards the
-// key to the remote yet never suppresses the LOCAL shell → Win key opened the
-// start menu on BOTH sides. This low-level hook closes that gap: while
-// HyperDesk is foreground AND keyboard focus lives inside a swallowed child,
-// Win/Alt+Tab events are eaten locally and posted straight to the focused
-// child window instead. Any other focus state passes through untouched.
-// (WH_KEYBOARD_LL is a message-based hook — this is NOT AttachThreadInput.)
+// Win / Alt+Tab은 여기서 **건드리지 않는다.** 세션 창이 소유된 최상위 팝업이라
+// (place() 주석) 클릭하면 진짜 포그라운드가 되고, 클라이언트(mstsc keyboardhook:i:1 /
+// vmconnect "가상 컴퓨터에서 사용" / Horizon)가 단독 실행 때처럼 스스로 원격에 보낸다.
+// 예전의 "먹고 세션 포커스 창에 WM_KEY*를 post" 전달은 삭제했다 — 되살리지 말 것
+// (CLAUDE.md "Alt+Tab 회귀" 항목: 훅/메시지 수준으로는 로컬 탈출을 못 막는다).
+// 이 훅의 일은 Alt+1~4 슬롯 전환뿐이다.
 
 static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+/// 지금 보이는 Horizon 데스크톱 프레임(없으면 0). horizon_moved가 볼 유일한 창.
+static HORIZON_FRAME: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+static LAST_SNAPBACK_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Horizon 프레임이 **움직인 순간** 슬롯으로 되돌린다. 전체 화면 프레임은 활성화될
+/// 때마다 자기 모니터 원점으로 튀는데(안정화 루프의 Horizon 주석), 100ms 폴링으로는
+/// 그 사이 다른 모니터에서 깜빡이는 게 보였다(실기기 2026-10-12). 루프는 안전망으로 남는다.
+///
+/// 전역 LOCATIONCHANGE는 커서가 움직일 때마다도 오므로 전용 스레드에서 받고, 콜백은
+/// 첫 두 줄에서 거의 전부 걸러낸다. 락은 try_lock, 배치는 비동기 — 여기서 기다리지 않는다.
+/// 20ms 안에 다시 튀면 건너뛴다(Horizon과 이벤트 속도로 핑퐁하지 않도록, 나머지는 루프가 잡는다).
+fn spawn_horizon_watch() {
+    use windows::Win32::UI::Accessibility::SetWinEventHook;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetMessageW, MSG, EVENT_OBJECT_LOCATIONCHANGE, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    };
+    std::thread::spawn(|| unsafe {
+        let hook = SetWinEventHook(
+            EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, None, Some(horizon_moved),
+            0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        if hook.is_invalid() { dlog!("[horizon] SetWinEventHook FAILED"); return; }
+        // OUTOFCONTEXT 콜백은 이 스레드의 메시지 펌프로 배달된다.
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+    });
+}
+
+unsafe extern "system" fn horizon_moved(
+    _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK, _event: u32, hwnd: HWND,
+    id_object: i32, id_child: i32, _thread: u32, _time: u32,
+) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if id_object != 0 || id_child != 0 { return; } // OBJID_WINDOW 자신만 (커서·캐럿 제외)
+    let raw = hwnd.0 as isize;
+    if raw == 0 || raw != HORIZON_FRAME.load(Relaxed) { return; }
+    let Some(state) = try_lock_state() else { return };
+    let Some(info) = state.values().find(|i| i.child_hwnd == raw && i.is_visible) else { return };
+    let (fx, fy, _, _) = framed_rect(info.x, info.y, info.width, info.height, info.offset_x, info.offset);
+    let container = HWND(info.parent_hwnd as *mut _);
+    let mut wr = RECT::default();
+    if GetWindowRect(hwnd, &mut wr).is_err() { return; }
+    let mut tl = POINT { x: wr.left, y: wr.top };
+    let _ = ScreenToClient(container, &mut tl);
+    if (tl.x - fx).abs() <= 2 && (tl.y - fy).abs() <= 2 { return; }
+    let now = DLOG_START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64;
+    if now.saturating_sub(LAST_SNAPBACK_MS.swap(now, Relaxed)) < 20 { return; }
+    place(hwnd, container, fx, fy, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+}
+/// 훅 펌프 스레드 — focus_window가 "지금 다시 걸어라"를 보낼 대상.
+static HOOK_TID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -2265,6 +2445,7 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
     };
     let _ = APP_HANDLE.set(app);
     MAIN_HWND.store(main_hwnd, std::sync::atomic::Ordering::Relaxed);
+    spawn_horizon_watch();
     std::thread::spawn(|| unsafe {
         // LL hooks need a message pump on the installing thread.
         let mut hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0) {
@@ -2281,15 +2462,21 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
         //      말없이 제거한다. 이후 모든 키 가로채기가 조용히 죽는다.
         // 둘 다 unhook → 재설치 한 방으로 복구되고, 재설치는 우리를 체인 맨 앞에 놓는다.
         // NULL hwnd로 건 타이머는 이 스레드 큐로 WM_TIMER를 보내므로 GetMessageW가 받는다.
-        SetTimer(HWND(std::ptr::null_mut()), 1, 3000, None);
+        //
+        // 주기 250ms + 새 훅을 먼저 걸고 옛 훅을 푼다(훅이 없는 틈 없음). 세션 창이 진짜
+        // 포그라운드가 되면서 클라이언트가 활성화될 때마다 자기 훅을 우리 앞에 다시 건다 —
+        // 3초 주기에선 슬롯 전환 직후 Alt+1~4가 1~2번 씹혔다(실기기 2026-10-12).
+        // 예전에 500ms가 "더 나빠졌던" 건 우리가 Win/Alt+Tab을 가로채던 시절 얘기다:
+        // 지금은 그 키들을 그대로 다음 훅(클라이언트)에 넘기므로 앞에 서도 해가 없다.
+        HOOK_TID.store(windows::Win32::System::Threading::GetCurrentThreadId(), std::sync::atomic::Ordering::Relaxed);
+        SetTimer(HWND(std::ptr::null_mut()), 1, 250, None);
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             if msg.message == WM_TIMER {
-                let _ = UnhookWindowsHookEx(hook);
                 match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0) {
-                    Ok(h) => hook = h,
-                    // 재설치 실패는 되돌릴 방법이 없다 — 훅 없이 도는 것보다 로그를 남긴다.
-                    Err(_e) => { dlog!("[keyhook] REINSTALL FAILED: {_e}"); return; }
+                    Ok(h) => { let _ = UnhookWindowsHookEx(hook); hook = h; }
+                    // 실패하면 옛 훅을 그대로 둔다 — 훅 없이 도는 것보다 낫다.
+                    Err(_e) => { dlog!("[keyhook] REINSTALL FAILED: {_e}"); }
                 }
             }
         }
@@ -2308,28 +2495,6 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
 // 같은 region을 두고 싸운다. 몰입모드의 전체화면 전환은 commands::apply_fullscreen이
 // 그대로 담당한다.
 
-/// Every distinct thread that owns a window in `frame`'s tree. mstsc keeps its
-/// input window on a different thread than the shell frame, so checking only
-/// the frame's thread misses the real focus holder.
-fn tree_thread_ids(frame: HWND) -> Vec<u32> {
-    struct P { tids: Vec<u32> }
-    extern "system" fn cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let p = unsafe { &mut *(lparam.0 as *mut P) };
-        let tid = unsafe { GetWindowThreadProcessId(hwnd, None) };
-        if tid != 0 && !p.tids.contains(&tid) { p.tids.push(tid); }
-        BOOL::from(true)
-    }
-    let mut p = P { tids: Vec::new() };
-    let ftid = unsafe { GetWindowThreadProcessId(frame, None) };
-    if ftid != 0 { p.tids.push(ftid); }
-    unsafe {
-        let _ = EnumChildWindows(frame, Some(cb), LPARAM(&mut p as *mut P as isize));
-    }
-    p.tids
-}
-
-/// The window that should receive VM-bound system keys: a focus window inside a
-/// visible swallowed child's tree — but only while HyperDesk itself is foreground.
 /// HyperDesk 본체가 포그라운드인가. 슬롯 전환 키를 가로챌지 판단하는 기준이다 —
 /// 포커스가 swallow된 자식 어디에 있든(또는 자식 트리 밖의 별도 스레드에 있든)
 /// 창 자체가 앞에 있으면 Alt+1~4는 우리 것이다.
@@ -2341,63 +2506,23 @@ fn app_is_foreground() -> bool {
     let main_h = HWND(main as *mut _);
     unsafe {
         let fg = GetForegroundWindow();
-        // 포그라운드가 본체이거나, 본체 안에 들어앉은 창(swallow된 자식 포함)이면 참.
+        // 포그라운드가 본체이거나, 본체의 자식이거나, 본체가 **소유한** 창(세션 창)이면 참.
+        // 세션을 클릭하면 세션 창 자신이 포그라운드가 되므로 소유자 검사가 핵심이다.
         fg.0 as isize == main || IsChild(main_h, fg).as_bool()
+            || GetWindow(fg, GW_OWNER).map(|o| o.0 as isize == main).unwrap_or(false)
     }
-}
-
-fn vm_key_target() -> Option<HWND> {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetGUIThreadInfo, GUITHREADINFO, IsChild};
-    let main = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
-    if main == 0 { return None; }
-    unsafe {
-        if GetForegroundWindow().0 as isize != main {
-            return None;
-        }
-        let children: Vec<isize> = lock_state().values()
-            .filter(|i| i.is_visible)
-            .map(|i| i.child_hwnd)
-            .collect();
-        for raw in children {
-            let child = HWND(raw as *mut _);
-            if !IsWindow(child).as_bool() { continue; }
-            for tid in tree_thread_ids(child) {
-                let mut gui = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
-                if GetGUIThreadInfo(tid, &mut gui).is_err() || gui.hwndFocus.is_invalid() {
-                    continue;
-                }
-                // The focus must actually live inside THIS swallowed tree —
-                // GetGUIThreadInfo reports a thread's focus even when that
-                // thread isn't the active one, so an unguarded match could
-                // route keys to a stale window.
-                if gui.hwndFocus.0 == child.0 || IsChild(child, gui.hwndFocus).as_bool() {
-                    #[cfg(debug_assertions)]
-                    dlog!("[keyhook] target hwnd={:?} (tid {}) in child {:?}", gui.hwndFocus.0, tid, child.0);
-                    return Some(gui.hwndFocus);
-                }
-            }
-        }
-        #[cfg(debug_assertions)]
-        dlog!("[keyhook] foreground OK but no swallowed tree holds focus");
-    }
-    None
 }
 
 unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: windows::Win32::Foundation::WPARAM, lparam: LPARAM) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, PostMessageW, KBDLLHOOKSTRUCT, HC_ACTION,
-        LLKHF_INJECTED, LLKHF_UP, LLKHF_EXTENDED, LLKHF_ALTDOWN,
-        WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+        CallNextHookEx, KBDLLHOOKSTRUCT, HC_ACTION, LLKHF_INJECTED, LLKHF_UP, LLKHF_ALTDOWN,
     };
-    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LWIN, VK_RWIN, VK_TAB};
 
     if code == HC_ACTION as i32 {
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
         let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
         let alt_down = kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
-        let is_win = kb.vkCode == VK_LWIN.0 as u32 || kb.vkCode == VK_RWIN.0 as u32;
-        let is_alt_tab = kb.vkCode == VK_TAB.0 as u32 && alt_down;
         // Alt+1..4 (slot switching) must keep working while a VM holds focus —
         // with keyboardhook:i:1 the remote would otherwise swallow them.
         let is_slot_key = alt_down && (0x31..=0x34).contains(&kb.vkCode);
@@ -2433,24 +2558,6 @@ unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: windows::Win32::Fo
                 return LRESULT(1); // keep it away from both the remote and RegisterHotKey
             }
         }
-
-        if !injected && (is_win || is_alt_tab) {
-            if let Some(target) = vm_key_target() {
-                let up = kb.flags.0 & LLKHF_UP.0 != 0;
-                // Rebuild the WM_KEY* lparam: repeat=1, scancode, extended,
-                // and for keyup the previous-state + transition bits.
-                let mut l: isize = 1 | (((kb.scanCode & 0xFF) as isize) << 16);
-                if kb.flags.0 & LLKHF_EXTENDED.0 != 0 { l |= 1 << 24; }
-                if up { l |= (1 << 30) | (1 << 31); }
-                let msg = if is_alt_tab {
-                    l |= 1 << 29; // context bit: Alt is held
-                    if up { WM_SYSKEYUP } else { WM_SYSKEYDOWN }
-                } else if up { WM_KEYUP } else { WM_KEYDOWN };
-                let _ = PostMessageW(target, msg,
-                    windows::Win32::Foundation::WPARAM(kb.vkCode as usize), LPARAM(l));
-                return LRESULT(1); // eaten locally — host shell never reacts
-            }
-        }
     }
     CallNextHookEx(None, code, wparam, lparam)
 }
@@ -2469,8 +2576,29 @@ pub fn focus_window(slot_id: &str) {
         let hwnd = HWND(raw as *mut _);
         unsafe {
             if IsWindow(hwnd).as_bool() {
+                // 다른 세션 창(= 다른 프로세스)이 포그라운드일 때 우리는 포그라운드
+                // 프로세스가 아니라서 SetForegroundWindow가 거부될 수 있다. 빈 입력을
+                // 한 번 보내면 "마지막 입력을 받은 프로세스"가 되어 허용된다(PowerToys와
+                // 같은 방법 — AttachThreadInput 금지 규칙을 안 건드린다). 아무 플래그 없는
+                // 마우스 입력이라 커서도 버튼도 안 움직인다.
+                use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_MOUSE};
+                let _ = SendInput(&[INPUT { r#type: INPUT_MOUSE, ..Default::default() }], std::mem::size_of::<INPUT>() as i32);
                 let _ = SetForegroundWindow(hwnd);
                 let _ = BringWindowToTop(hwnd);
+                // 방금 활성화된 클라이언트가 자기 훅을 우리 앞에 건다. 그 직후 한 번 더
+                // 걸어 다음 Alt+1~4를 놓치지 않는다(펌프는 WM_TIMER면 무조건 재설치).
+                let tid = HOOK_TID.load(std::sync::atomic::Ordering::Relaxed);
+                if tid != 0 {
+                    // 클라이언트가 활성화 후 언제 훅을 거는지는 제각각이라 세 번에 걸쳐 건다
+                    // (50/150/350ms). 한 번(150ms)만 걸었을 땐 빠른 연타가 가끔 씹혔다.
+                    std::thread::spawn(move || {
+                        for wait_ms in [50u64, 100, 200] {
+                            std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+                            let _ = windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW(
+                                tid, windows::Win32::UI::WindowsAndMessaging::WM_TIMER, WPARAM(0), LPARAM(0));
+                        }
+                    });
+                }
             }
         }
         // vmconnect re-creates its connect-bar on focus; the stabilization loop
@@ -2744,6 +2872,43 @@ mod tests {
                 (r.right - r.left, r.bottom - r.top), (640, 480),
                 "SWP_NOSIZE인데 크기가 바뀌면 위치 보정이 리사이즈 폭풍으로 되돌아간다"
             );
+        }
+    }
+
+    /// 세션 창은 소유된 최상위 팝업이라 SetWindowPos가 화면 좌표다. `place`가 슬롯
+    /// 좌표(컨테이너 클라이언트 기준)를 화면 좌표로 바꿔 놓는지 실제 창으로 고정한다 —
+    /// 변환이 빠지면 세션이 메인 창 위치만큼 어긋난 자리에 뜬다.
+    #[test]
+    fn place_puts_an_owned_popup_at_the_slot_in_screen_coords() {
+        use windows::core::w;
+        use windows::Win32::Foundation::{HINSTANCE, HWND, POINT, RECT};
+        use windows::Win32::Graphics::Gdi::ClientToScreen;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, GetWindowRect, HMENU, SWP_NOACTIVATE,
+            WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_POPUP,
+        };
+        unsafe {
+            let main = CreateWindowExW(
+                WINDOW_EX_STYLE(0), w!("STATIC"), w!("main"), WS_OVERLAPPEDWINDOW,
+                300, 200, 1200, 900, HWND::default(), HMENU::default(), HINSTANCE::default(), None,
+            ).expect("main");
+            // 팝업 생성 시 hWndParent는 소유자가 된다.
+            let session = CreateWindowExW(
+                WINDOW_EX_STYLE(0), w!("STATIC"), w!("session"), WS_POPUP,
+                0, 0, 640, 480, main, HMENU::default(), HINSTANCE::default(), None,
+            ).expect("session");
+
+            super::place(session, main, 50, 60, 800, 600, SWP_NOACTIVATE);
+
+            let mut want = POINT { x: 50, y: 60 };
+            let _ = ClientToScreen(main, &mut want);
+            let mut r = RECT::default();
+            GetWindowRect(session, &mut r).expect("rect");
+            let _ = DestroyWindow(session);
+            let _ = DestroyWindow(main);
+
+            assert_eq!((r.left, r.top, r.right - r.left, r.bottom - r.top), (want.x, want.y, 800, 600));
+            assert_ne!((want.x, want.y), (50, 60), "메인 창이 원점에 있으면 이 테스트는 아무것도 증명 못 한다");
         }
     }
 

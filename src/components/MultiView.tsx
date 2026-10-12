@@ -172,6 +172,13 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
     return () => { unlisten.then(f => f()); };
   }, []);
 
+  // Hyper-V 키보드 설정을 앱이 못 바꿨을 때(설정 파일이 없음) 한 번 안내한다.
+  useEffect(() => {
+    const unlisten = listen("vmconnect-keyboard-hint", () => onError(t("slot.vmKeyboardHint")));
+    return () => { unlisten.then(f => f()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 바깥에서 온 연결 요청(`rdp:` 링크): 대상 슬롯을 보이게 하고, 배정한 뒤, 그 슬롯에
   // 연결을 맡긴다. 실제 연결(크기 측정 → mstsc → swallow)은 SwallowSlot의 기존
   // handleConnect가 한다 — 슬롯이 보이고 레이아웃이 잡혀야 크기를 잴 수 있기 때문이다.

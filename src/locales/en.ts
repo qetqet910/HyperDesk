@@ -271,6 +271,7 @@ export const en = {
   "slot.connecting": "Connecting to {name}...",
   "slot.cancel": "Cancel connection",
   "slot.lost": "(signal lost)",
+  "slot.vmKeyboardHint": "To send the Windows key and Alt+Tab to the VM, open Hyper-V Manager → Hyper-V Settings → Keyboard, choose 'Use on the virtual machine', then reconnect.",
   "slot.disconnected": "(disconnected)",
   "slot.reconnect": "Reconnect",
   "slot.connect": "Connect",
