@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { AreaChart, Area, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
+import { useT } from "@/lib/i18n";
+import { useSettings } from "@/contexts/SettingsContext";
 
 interface SparklineProps {
   data: number[];
@@ -9,10 +11,13 @@ interface SparklineProps {
 }
 
 export function Sparkline({ data, color = "var(--accent-blue)", height = 30, suffix = "" }: SparklineProps) {
+  const t = useT();
+  const { settings } = useSettings();
   const chartData = useMemo(() => data.map((v, i) => ({ value: v, id: i })), [data]);
+  // 점이 둘 이상 쌓여야 선이 된다. 자동 새로고침이 꺼져 있으면 영원히 안 쌓이므로 그 이유를 말한다.
   if (data.length < 2) return (
-    <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "9px", color: "var(--text-muted)", opacity: 0.5, letterSpacing: "1px" }}>
-      GATHERING TELEMETRY...
+    <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", color: "var(--text-muted)", opacity: 0.7 }}>
+      {t(settings.autoRefresh ? "spark.gathering" : "spark.paused")}
     </div>
   );
   const gradId = `grad-${color.replace(/[(),#\s]/g, "")}`;

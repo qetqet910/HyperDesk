@@ -176,8 +176,8 @@ it updated.
 
 HyperDesk has no telemetry, analytics or accounts, and sends nothing to the developer.
 It stores no passwords; logins are handled by the Remote Desktop and Horizon clients.
-The only internet request is the optional update check in Settings, which you can turn
-off for air-gapped networks. The full list of what it reads, stores and connects to is in
+It makes no internet requests at all (updates come through the Microsoft Store), so it
+works on air-gapped networks. The full list of what it reads, stores and connects to is in
 [PRIVACY.md](PRIVACY.md).
 
 ## Troubleshooting
@@ -224,9 +224,10 @@ Architecture notes, Win32 constraints and the troubleshooting history are in
 
 ### Release
 
-Pushing a `v*` tag builds and publishes the release through GitHub Actions
-(`.github/workflows/release.yml`). Keep the version identical in `package.json`,
-`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/hyperdesk.exe.manifest`.
+Pushing a `v*` tag runs `.github/workflows/store-submit.yml`, which builds the MSIX
+bundle, submits it to the Microsoft Store and creates the GitHub release. Keep the version
+identical in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and
+`src-tauri/hyperdesk.exe.manifest`.
 
 ## Tech stack
 

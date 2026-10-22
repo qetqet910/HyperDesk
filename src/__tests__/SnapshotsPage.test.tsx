@@ -102,7 +102,7 @@ describe("SnapshotsPage", () => {
     render(<SnapshotsPage vms={mockVms} onSuccess={vi.fn()} onError={vi.fn()} />);
     const restore = await screen.findAllByTitle("이 시점으로 복원", {}, WAIT);
     fireEvent.click(restore[0]);
-    fireEvent.click(screen.getByText("복원 수행"));
+    fireEvent.click(screen.getByText("이 시점으로 복원"));
     await waitFor(() => {
       expect(tauriApi.api.restoreSnapshot).toHaveBeenCalledWith("SRV-TEST-01", "Before-Update");
     }, WAIT);

@@ -65,10 +65,13 @@ async function invoke<T>(command: string, args: any = {}): Promise<T> {
         net_history: d.net_history
       } as any;
     }
-    if (command === "is_window_valid") return true as any;
+    // 데모엔 실제 세션 창이 없다 — true로 두면 빈 슬롯까지 "연결됨"(레일 4/4, 초록 점)으로 보였다.
+    if (command === "is_window_valid") return false as any;
     // 기본값 `[]`는 truthy라 "링크가 왔다"로 오인된다 — 명시적으로 null.
     if (command === "take_rdp_link") return null as any;
     if (command === "rdp_link_registered") return false as any;
+    // 기본값 `[]`는 truthy라 데모 화면 전체가 "연결 중 잠금"으로 보인다.
+    if (command === "get_switch_lock") return false as any;
     if (command === "get_vm_switches") return [
       { name: "External-LAN", switch_type: "External", net_adapter_name: "Intel(R) Ethernet Controller I225-V" },
       { name: "Internal-Lab", switch_type: "Internal", net_adapter_name: "" },
@@ -95,13 +98,13 @@ async function invoke<T>(command: string, args: any = {}): Promise<T> {
       }) as any;
     }
     if (command === "get_hyper_v_events") return [
-      { time_created: "2026-09-29 09:24:11", level: "Information", event_id: 18500, message: "'WEB-PROD-01' started successfully." },
-      { time_created: "2026-09-29 09:10:42", level: "Information", event_id: 18596, message: "'WIN11-TEST' was paused." },
-      { time_created: "2026-09-29 08:55:03", level: "Warning", event_id: 12030, message: "'LAB-PC-07' did not respond to the heartbeat check." },
-      { time_created: "2026-09-29 08:31:27", level: "Information", event_id: 18304, message: "Checkpoint created for 'APP-STAGING'." },
-      { time_created: "2026-09-28 23:02:15", level: "Information", event_id: 18510, message: "'BUILD-AGENT-02' was saved." },
-      { time_created: "2026-09-28 22:47:50", level: "Error", event_id: 14070, message: "'LEGACY-ERP' could not start: not enough memory." },
-      { time_created: "2026-09-28 18:12:09", level: "Information", event_id: 18500, message: "'DB-PROD-01' started successfully." },
+      { time_created: "2026-09-29 09:24:11", level: "info", event_id: 18500, message: "'WEB-PROD-01' started successfully." },
+      { time_created: "2026-09-29 09:10:42", level: "info", event_id: 18596, message: "'WIN11-TEST' was paused." },
+      { time_created: "2026-09-29 08:55:03", level: "warn", event_id: 12030, message: "'LAB-PC-07' did not respond to the heartbeat check." },
+      { time_created: "2026-09-29 08:31:27", level: "info", event_id: 18304, message: "Checkpoint created for 'APP-STAGING'." },
+      { time_created: "2026-09-28 23:02:15", level: "info", event_id: 18510, message: "'BUILD-AGENT-02' was saved." },
+      { time_created: "2026-09-28 22:47:50", level: "error", event_id: 14070, message: "'LEGACY-ERP' could not start: not enough memory." },
+      { time_created: "2026-09-28 18:12:09", level: "info", event_id: 18500, message: "'DB-PROD-01' started successfully." },
     ] as any;
 
     return [] as any; 
@@ -140,8 +143,9 @@ export const api = {
     invoke<number>("connect_vm", { host, protocol, username, slotWidth, slotHeight, colorDepth, quality }),
   focusSlotWindow: (slotId: string) => invoke<void>("focus_slot_window", { slotId }),
   setConnectLock: (locked: boolean) => invoke<void>("set_connect_lock", { locked }),
+  /** 백엔드 연결 잠금의 현재 값(이후 변화는 `switch-lock` 이벤트). */
+  getSwitchLock: () => invoke<boolean>("get_switch_lock"),
   setFullscreen: (on: boolean) => invoke<void>("set_fullscreen", { on }),
-  /** 슬롯 전환 단축키 수정자. 전역 단축키 재등록 + LL 훅이 볼 값을 한 번에 바꾼다. */
   quitApp: () => invoke<void>("quit_app"),
   connectConsole: (name: string) => invoke<number>("connect_console", { name }),
   setVmMemory: (name: string, memoryGb: number) => invoke<void>("set_vm_memory", { name, memoryGb }),

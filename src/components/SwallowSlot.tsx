@@ -63,6 +63,19 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
   useEffect(() => { isSwallowedRef.current = isSwallowed; }, [isSwallowed]);
   useEffect(() => { onConnectedChange?.(id, isSwallowed); }, [id, isSwallowed, onConnectedChange]);
   const [showSelector, setShowSelector] = useState(false);
+  // 선택 창이 열려 있으면 Esc로 닫는다. 캡처 단계에서 먼저 받아 멈춘다 — 안 그러면 멀티뷰의
+  // "Esc = 전체화면 해제"까지 같이 돈다.
+  useEffect(() => {
+    if (!showSelector) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setShowSelector(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [showSelector]);
   const [isGlitched, setIsGlitched] = useState(false);
   const [isActuallyHidden, setIsActuallyHidden] = useState(!isVisible);
 

@@ -32,7 +32,7 @@ VM 시작·중지·저장·일시정지, 메모리와 프로세서 조정, 새 V
 PC에 남아 있는 원격 데스크톱 접속 기록과 Horizon 서버를 자동으로 찾아 목록으로 보여 주고 직접 추가한 호스트와 합쳐 관리합니다. 호스트마다 메모와 태그를 붙이고, Ctrl+K 팔레트에서 이름이나 태그로 바로 찾아 연결합니다.
 
 가볍고 조용하게
-설치 파일이 10MB도 되지 않습니다. Windows에 내장된 WebView2로 화면을 그리고, 핵심 기능은 Rust로 Windows API에 직접 붙여 만들었습니다. 사용 통계를 수집하지 않고 개발자 서버로 아무것도 보내지 않습니다. 비밀번호도 저장하지 않습니다. 인터넷 연결이 필요한 기능은 업데이트 확인 하나뿐이고 설정에서 끌 수 있습니다.
+설치 파일이 10MB도 되지 않습니다. Windows에 내장된 WebView2로 화면을 그리고, 핵심 기능은 Rust로 Windows API에 직접 붙여 만들었습니다. 사용 통계를 수집하지 않고 개발자 서버로 아무것도 보내지 않습니다. 비밀번호도 저장하지 않습니다. 인터넷에는 접속하지 않아 폐쇄망에서도 그대로 쓸 수 있습니다.
 
 무료이며 소스가 공개된 오픈소스(MIT 라이선스)입니다.
 ```
@@ -109,7 +109,7 @@ Your remote hosts, organized
 HyperDesk finds the Remote Desktop history and Horizon servers already on your PC and lists them next to the hosts you add yourself. Add memos and tags to any host, then find and connect from the Ctrl+K palette.
 
 Light and private
-The installer is under 10 MB. The interface runs on the WebView2 engine built into Windows, and the core is written in Rust directly against the Windows API. HyperDesk doesn't collect usage data or send anything to the developer, and it doesn't store passwords. The only feature that uses the internet is the update check, which you can turn off in Settings.
+The installer is under 10 MB. The interface runs on the WebView2 engine built into Windows, and the core is written in Rust directly against the Windows API. HyperDesk doesn't collect usage data or send anything to the developer, and it doesn't store passwords. It doesn't connect to the internet at all, so it works on air-gapped networks.
 
 HyperDesk is free and open source under the MIT license.
 ```

@@ -23,16 +23,19 @@ export interface Settings {
   /** UI 언어. 저장된 설정이 없으면 OS 로케일에서 추론하고, 한국어가 아니면
       영어로 떨어진다 — 해외 사용자가 처음 켰을 때 영어가 보여야 하기 때문. */
   lang: Lang;
-  /** 슬롯 전환 단축키의 수정자. 전역 단축키라 다른 앱과 충돌할 수 있어 바꿀 수 있게 뒀다. */
-  /** 시작 시/설정에서 GitHub 릴리스를 조회할지. 폐쇄망 배포에서는 꺼야 한다 —
-      이 앱에서 인터넷을 타는 곳은 업데이트 확인 둘뿐이고, 이 값이 그 둘을 모두 막는다. */
-  updateCheckEnabled: boolean;
 }
+
+/** 자동 새로고침 간격 범위(초). 설정 화면 입력칸과 저장값 보정이 같이 쓴다. */
+export const POLL_MIN_SEC = 2;
+export const POLL_MAX_SEC = 300;
 
 const DEFAULT_SETTINGS: Settings = {
   pollingInterval: 10000,
   defaultUsername: "Administrator",
-  autoRefresh: false,
+  // 켜짐이 기본이다. 꺼져 있으면 VM 상태·지연 시간이 앱을 다시 볼 때만 바뀌고, CPU/메모리
+  // 그래프는 조회 한 번에 점 하나씩만 쌓여(백엔드 SYSTEM_HISTORY) 사실상 빈 채로 남았다.
+  // 기존 사용자는 아래 AUTO_REFRESH_MIGRATED로 한 번만 켠다.
+  autoRefresh: true,
   viewMode: "dashboard",
   slotAssignments: {},
   theme: "dark",
@@ -41,18 +44,38 @@ const DEFAULT_SETTINGS: Settings = {
   remoteAssetColumns: 1,
   vmColumns: 1,
   lang: navigator.language?.toLowerCase().startsWith("ko") ? "ko" : "en",
-  updateCheckEnabled: true,
 };
 
 const STORAGE_KEY = "hyperdesk_settings";
+// 자동 새로고침 기본값을 켜짐으로 바꾼 1.4.1의 1회 이전 표시. 설정은 첫 실행 때 **전체**가
+// 저장되므로 그 전에 한 번이라도 켠 사용자는 전부 autoRefresh:false가 박혀 있어서, 기본값만
+// 바꿔선 아무도 혜택을 못 받는다. 이 표시가 없을 때 딱 한 번 켜고, 그 뒤 끈 건 존중한다.
+const AUTO_REFRESH_MIGRATED = "hd_autorefresh_on_v141";
 
-function loadSettings(): Settings {
+export function loadSettings(): Settings {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return DEFAULT_SETTINGS;
+    if (!saved) {
+      localStorage.setItem(AUTO_REFRESH_MIGRATED, "1"); // 새 설치는 이미 켜짐 기본값이다
+      return DEFAULT_SETTINGS;
+    }
     const parsed = JSON.parse(saved);
     if (!("theme" in parsed)) parsed.theme = "dark";
     delete parsed.layout; // removed: single-slot view only
+    // 예전 입력칸은 범위를 안 지켜서 0(= 갱신 멈춤)이나 1초가 저장됐을 수 있다. 범위로 맞춘다.
+    if ("pollingInterval" in parsed) {
+      const p = Number(parsed.pollingInterval);
+      parsed.pollingInterval = Number.isFinite(p)
+        ? Math.min(POLL_MAX_SEC * 1000, Math.max(POLL_MIN_SEC * 1000, p))
+        : DEFAULT_SETTINGS.pollingInterval;
+    }
+    if (localStorage.getItem(AUTO_REFRESH_MIGRATED) !== "1") {
+      parsed.autoRefresh = true;
+      // 바로 저장한다 — 개발 모드 StrictMode는 이 초기화 함수를 두 번 부르는데, 두 번째 호출이
+      // 옛 값(false)을 다시 읽으면 이전이 사라진다.
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+      localStorage.setItem(AUTO_REFRESH_MIGRATED, "1");
+    }
     return { ...DEFAULT_SETTINGS, ...parsed };
   } catch {
     return DEFAULT_SETTINGS;

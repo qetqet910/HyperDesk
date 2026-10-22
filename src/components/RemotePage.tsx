@@ -1,4 +1,4 @@
-import { Globe, Plus, Play, Notebook, Pencil, X} from "lucide-react";
+import { Globe, Plus, Play, Notebook, Pencil, Trash2, EyeOff } from "lucide-react";
 import type { RemoteHost } from "@/types";
 import { useSettings } from "@/contexts/SettingsContext";
 import { ColumnToggle } from "@/components/ColumnToggle";
@@ -31,13 +31,13 @@ export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
       <div className="mst-rack-status">
         <span className={`mst-rack-led ${isOffline ? "offline" : "online"}`} />
         <span className={`mst-rack-latency ${isOffline ? "offline" : "online"}`}>
-          {isOffline ? "---" : `${host.latency}MS`}
+          {isOffline ? "---" : `${host.latency}ms`}
         </span>
       </div>
       <div className="mst-rack-name">
         <span className="mst-rack-hostname">{host.name}</span>
         <span className={`mst-proto-tag ${proto}`}>{host.protocol}</span>
-        {host.is_detected && <span className="mst-proto-tag auto">AUTO</span>}
+        {host.is_detected && <span className="mst-proto-tag auto" title={t("remote.autoHint")}>{t("remote.autoTag")}</span>}
       </div>
       {/* 자동 감지 항목은 이름이 곧 주소다 — 같은 값을 두 칸에 찍지 않는다. */}
       <div className={`mst-rack-addr${host.host === host.name ? " is-same" : ""}`}>
@@ -58,7 +58,10 @@ export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
             so they don't zombie-regenerate from the registry. */}
         <button className="mst-rack-icon-btn" title={t("remote.memo")} onClick={() => onMemo(host)}><Notebook size={14} /></button>
         <button className="mst-rack-icon-btn" title={t("remote.edit")} onClick={() => onEdit(host)}><Pencil size={14} /></button>
-        <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? t("remote.hide") : t("remote.delete")} onClick={() => onDelete(host.id)}><X size={14} /></button>
+        {/* ✕는 "닫기"로 읽힌다. 자동 감지 항목은 지우지 않고 숨기므로 아이콘도 그대로 말한다. */}
+        <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? t("remote.hide") : t("remote.delete")} onClick={() => onDelete(host.id)}>
+          {host.is_detected ? <EyeOff size={14} /> : <Trash2 size={14} />}
+        </button>
       </div>
     </div>
   );
@@ -75,7 +78,7 @@ export function RemotePage({ remoteHosts, onConnect, onEdit, onMemo, onDelete, o
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ fontSize: "9px", fontWeight: 900, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 10px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
-            {remoteHosts.length} assets
+            {t("remote.count", { n: remoteHosts.length })}
           </span>
           <ColumnToggle value={settings.remoteAssetColumns} onChange={(v) => updateSettings({ remoteAssetColumns: v })} />
           <button className="hd-segment-btn" onClick={onAdd}>

@@ -52,7 +52,17 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
   // mstsc/vmconnect was still being captured. The slot's own "연결 취소" button
   // stays available as the escape hatch.
   const [connectingSlots, setConnectingSlots] = useState<Record<string, boolean>>({});
-  const anyConnecting = Object.values(connectingSlots).some(Boolean);
+  // 백엔드가 쥔 연결 잠금(세션 창이 붙고 3초 안정될 때까지). 프론트의 connectingSlots는 첫 창이
+  // 붙는 순간 풀려서(Hyper-V는 작은 "연결 중" 팝업) 둘을 합친다.
+  const [backendLocked, setBackendLocked] = useState(false);
+  useEffect(() => {
+    const un = listen<boolean>("switch-lock", e => setBackendLocked(!!e.payload));
+    // 연결 중에 다른 화면에 갔다 돌아오면 이벤트를 놓쳤으므로 지금 값을 읽는다.
+    api.getSwitchLock().then(setBackendLocked).catch(() => {});
+    return () => { un.then(f => f()); };
+  }, []);
+  const connectingOnly = Object.values(connectingSlots).some(Boolean);
+  const anyConnecting = connectingOnly || backendLocked;
   const anyConnectingRef = useRef(false);
   useEffect(() => { anyConnectingRef.current = anyConnecting; }, [anyConnecting]);
   const handleConnectingChange = useCallback((slotId: string, connecting: boolean) => {
@@ -81,11 +91,11 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
   useEffect(() => {
     try { localStorage.setItem("hd_pill_x", String(pillX)); } catch { /* 무시 */ }
   }, [pillX]);
-  // Mirrors `anyConnecting` into Rust (lib.rs's Alt+1~4 handler has no visibility
-  // into React state otherwise, so it kept force-focusing a mid-connect slot's
+  // Mirrors `anyConnecting` into Rust (the Alt+1~4 keyboard hook in swallow.rs has no
+  // visibility into React state otherwise, so it would force-focus a mid-connect slot's
   // native window regardless of this lock). Cleared unconditionally on unmount
   // so navigating away mid-connect can never leave the native side stuck locked.
-  useEffect(() => { api.setConnectLock(anyConnecting).catch(console.error); }, [anyConnecting]);
+  useEffect(() => { api.setConnectLock(connectingOnly).catch(console.error); }, [connectingOnly]);
   useEffect(() => {
     return () => { api.setConnectLock(false).catch(console.error); };
   }, []);
@@ -140,9 +150,35 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
   // already owns the fullscreen state) instead of toggling OS fullscreen under it.
   // ESC always exits fullscreen/immersive (both read the current state via refs).
   useEffect(() => {
+    // Alt+1~4 while HyperDesk's own UI has focus. The Rust LL hook is NOT called then
+    // (measured 2026-10-21: five F11 presses with the app foreground, hook call count
+    // unchanged), so the webview has to handle it. Switch on press, move keyboard focus
+    // to the session on release — focusing while the digit is held lets the session's
+    // client grab the auto-repeat (same reason as the hook's PENDING_FOCUS).
+    const slotDigit = (e: KeyboardEvent) => {
+      const m = /^Digit([1-4])$/.exec(e.code);
+      return m && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey ? Number(m[1]) - 1 : -1;
+    };
+    let pendingFocus = -1;
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const idx = /^Digit([1-4])$/.exec(e.code) ? Number(e.code.slice(5)) - 1 : -1;
+      if (idx >= 0 && idx === pendingFocus) {
+        pendingFocus = -1;
+        api.focusSlotWindow(`slot-${idx}`).catch(console.error);
+      }
+    };
     const handleKeyDown = (e: KeyboardEvent) => {
+      const idx = slotDigit(e);
+      if (idx >= 0) {
+        e.preventDefault();
+        if (e.repeat || anyConnectingRef.current) return;
+        setActiveSlot(idx);
+        pendingFocus = idx;
+        return;
+      }
       if (e.key === "F11") {
         e.preventDefault();
+        if (anyConnectingRef.current) return; // 연결 중엔 전체화면 전환도 막는다
         handleToggleOSFullscreen();
       } else if (e.key === "Escape") {
         if (anyConnectingRef.current) return; // connect-lock: no state changes mid-swallow
@@ -154,7 +190,11 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
       }
     };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
   }, []);
 
   // Alt+1~4 from Rust → switch the visible slot and forward Win32 focus to it.
@@ -165,8 +205,8 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
       const idx = Number(m[1]);
       if (anyConnectingRef.current) return; // connect-lock: no switching mid-swallow
       if (idx >= 0 && idx < SLOT_COUNT) {
+        // 키보드 포커스는 백엔드 훅이 숫자를 뗄 때 옮긴다(누른 채 옮기면 반복 입력이 새 세션으로 샌다).
         setActiveSlot(idx);
-        api.focusSlotWindow(event.payload).catch(console.error);
       }
     });
     return () => { unlisten.then(f => f()); };

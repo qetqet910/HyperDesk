@@ -28,8 +28,6 @@ interface NavItem {
   label: Key;
   icon: React.ReactNode;
   count?: number;
-  badge?: string;
-  badgeColor?: string;
 }
 
 interface SidebarProps {
@@ -38,14 +36,18 @@ interface SidebarProps {
   vmCount?: number;
   remoteCount?: number;
   runningCount?: number;
+  /** Hyper-V 조회가 성공했나(대시보드 `vm_error`가 없음). 하단 상태 줄에 쓴다. */
+  hyperVOk?: boolean;
   /** Number of multiview slots (0–4) currently holding a connection assignment.
       Rendered as an "N/4" pill on the 멀티 뷰 nav item. */
   occupiedSlots?: number;
 }
 
+// 멀티 뷰의 상시 "LIVE" 배지는 뺐다 — 세션이 하나도 없어도 떠 있어서 아무것도 알려 주지
+// 않았다. 실제로 쓰는 슬롯이 있으면 N/4 표시가 그 역할을 한다.
 const WORKSPACE_ITEMS: NavItem[] = [
   { id: "dashboard", label: "nav.dashboard", icon: <LayoutDashboard size={15} /> },
-  { id: "multiview", label: "nav.multiview", icon: <Layers size={15} />, badge: "LIVE", badgeColor: "var(--accent-green)" },
+  { id: "multiview", label: "nav.multiview", icon: <Layers size={15} /> },
   { id: "vms",       label: "nav.vms",       icon: <Server size={15} /> },
   { id: "remote",    label: "nav.remote",    icon: <Globe size={15} /> },
   { id: "snapshots", label: "nav.snapshots", icon: <Camera size={15} /> },
@@ -56,7 +58,7 @@ const SYSTEM_ITEMS: NavItem[] = [
   { id: "settings", label: "nav.settings", icon: <Settings size={15} /> },
 ];
 
-export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningCount = 0, occupiedSlots = 0 }: SidebarProps) {
+export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningCount = 0, hyperVOk = true, occupiedSlots = 0 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(() =>
     localStorage.getItem("hd_sidebar_collapsed") === "true"
   );
@@ -124,14 +126,6 @@ export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningC
             {item.id === "multiview" && occupiedSlots > 0 && (
               <span className="hd-nav-item__slots" title={t("sidebar.slotsConnected", { n: occupiedSlots })}>{occupiedSlots}/4</span>
             )}
-            {item.badge && (
-              <span
-                className="hd-nav-item__badge"
-                style={{ color: item.badgeColor ?? "var(--accent-blue)", borderColor: item.badgeColor ?? "var(--accent-blue)" }}
-              >
-                ● {item.badge}
-              </span>
-            )}
           </button>
         ))}
       </nav>
@@ -155,7 +149,7 @@ export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningC
 
       {/* Footer — button is DOM-first so that when collapsed it stacks ABOVE the
           status (footer is bottom-anchored, grows upward, dot stays put). When
-          expanded the button is absolutely positioned inline with "Core Online". */}
+          expanded the button is absolutely positioned inline with the status row. */}
       <div className="hd-sidebar__footer">
         <button
           className="hd-sidebar__collapse-btn"
@@ -166,9 +160,12 @@ export function Sidebar({ current, onNav, vmCount = 0, remoteCount = 0, runningC
           {collapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
         </button>
 
+        {/* 예전엔 항상 "Core Online"이었다(실제 상태와 무관). 이제 Hyper-V 조회 결과를 보여 준다. */}
         <div className="hd-sidebar__status">
           <div className="hd-sidebar__status-text">
-            <div className="hd-sidebar__status-label">{t("sidebar.coreOnline")}</div>
+            <div className={`hd-sidebar__status-label${hyperVOk ? "" : " hd-sidebar__status-label--error"}`}>
+              {t(hyperVOk ? "sidebar.hypervOk" : "sidebar.hypervErr")}
+            </div>
             <div className="hd-sidebar__status-sub">{t("sidebar.nodesActive", { n: runningCount })}</div>
           </div>
         </div>

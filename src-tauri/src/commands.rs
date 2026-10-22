@@ -514,10 +514,9 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
     let rdp_path = temp_dir.join(rdp_filename);
 
     let host = rdp_sanitize(&host);
-    // Classic mstsc can't renegotiate session resolution mid-session, so connect at the
-    // primary monitor's FULL physical resolution and let smart sizing:i:1 scale the bitmap down
-    // into the slot. Growing the slot then never exceeds the connect-time resolution, so
-    // the surface stays sharp instead of upscaling a small connect-time bitmap.
+    // Connect at the primary monitor's FULL physical resolution; `smart sizing` (below)
+    // scales it into the slot, and a fullscreen slot gets the window at exactly this size
+    // (swallow::rdp_snap_offsets) so the scale is 1.
     let (screen_w, screen_h) = unsafe {
         use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, GetDeviceCaps, DESKTOPHORZRES, DESKTOPVERTRES};
         use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
@@ -549,11 +548,12 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
     // ("파란 바") is a FULLSCREEN-only element; in windowed mode it never exists, so
     // no clipping/masking is needed.
     //
-    // smart sizing:i:1 (NOT dynamic resolution). Classic mstsc.exe CANNOT renegotiate
-    // session resolution mid-session — that's an ActiveX/MSRDC-only feature. With
-    // smart sizing the session stays at its connect-time resolution but the bitmap is
-    // SCALED to fill the host window, so the surface follows the slot when it grows or
-    // shrinks (no off-screen overflow).
+    // smart sizing:i:1 — 세션은 접속 해상도(위: 주 모니터 전체)에 머물고 mstsc가 창 크기에 맞춰
+    // 늘리거나 줄인다. 전체화면처럼 창이 세션 크기에 가까우면 swallow.rs `rdp_snap_offsets`가 창을
+    // 세션 크기와 정확히 같게 놓아 배율 1(선명)로 만든다. `dynamic resolution:i:1`(+ smart sizing
+    // 끔)은 2026-10-15에 시도했다가 되돌렸다 — 실기기에서 원격 해상도가 창을 안 따라오고
+    // 스크롤바만 생겼다(서버 미지원 또는 mstsc 쪽 이유, 미확정). 다시 시도하려면 실서버에서
+    // 슬롯 크기를 바꾼 뒤 mstsc의 UIContainerClass 크기가 따라오는지부터 확인할 것.
     let mut rdp_content = format!(
         "full address:s:{}\n\
          screen mode id:i:1\n\
@@ -593,6 +593,8 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
 
     let child = command.spawn()
         .map_err(|e| format!("Failed to launch mstsc: {}", e))?;
+    // 접속 해상도를 swallow 쪽에 알린다 — 전체화면 슬롯에서 창을 세션 크기에 정확히 맞추는 데 쓴다.
+    crate::swallow::note_rdp_session_size(child.id(), w, h);
 
     let path_clone = rdp_path.clone();
     std::thread::spawn(move || {
@@ -626,6 +628,10 @@ fn ensure_vmconnect_keyboard_remote() -> bool {
     match vmconnect_keyboard_remote(&xml) {
         Ok(None) => true,
         // 임시 파일에 쓰고 바꿔치기한다 — 쓰는 도중 죽어도 남의 설정 파일이 빈 채로 남지 않는다.
+        // Store(MSIX) 설치본에서도 실제 파일에 반영된다(실측 2026-10-20,
+        // Invoke-CommandInDesktopPackage로 패키지 안에서 실행): 이미 있는 실제 폴더
+        // (`Hyper-V\Client\1.0`) 안에 새로 만든 파일과 그 파일로 덮어쓰기는 가상화되지 않는다.
+        // 가상화되는 건 `%APPDATA%` 직속 등 MS 문서 표의 위치에 새로 만드는 파일/폴더다.
         Ok(Some(new_xml)) => {
             let tmp = path.with_extension("config.hyperdesk-tmp");
             std::fs::write(&tmp, new_xml).is_ok() && std::fs::rename(&tmp, &path).is_ok()
@@ -1666,7 +1672,15 @@ fn work_area_saved() -> &'static Mutex<Option<windows::Win32::Foundation::RECT>>
     WORK_AREA_SAVED.get_or_init(|| Mutex::new(None))
 }
 
+/// `apply_fullscreen` 전체와 `reassert_fullscreen_if_displaced` 스레드 본문을 한 줄로 세운다.
+/// 둘 다 창 위치·크기와 작업영역을 바꾸므로, 엇갈리면 F11 해제 직후 스레드가 창을 다시
+/// 전체화면 크기로 돌리고 작업영역을 넓힌 채 남길 수 있다(리뷰 지적 2026-10-20).
+/// **on_window_event 콜백에서는 절대 잡지 말 것** — 이 락은 `window.*` 호출을 걸친 채
+/// 쥐어지므로, 콜백(메인 스레드)이 이걸 기다리면 위 F11 교착과 같은 교착이 된다.
+static FS_OP: Mutex<()> = Mutex::new(());
+
 fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
+    let _op = lock_or_recover(&FS_OP);
     // CRITICAL: never hold the fs_saved() lock across a window.set_size/
     // set_position/maximize/unmaximize call. Those run on the main thread and
     // synchronously fire WindowEvent::Resized (WM_SIZE/WM_WINDOWPOSCHANGED),
@@ -1752,6 +1766,12 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
             // 저장해 둔 크기/위치는 리사이즈 가능 상태에서 잰 값이라, 먼저 되돌린 뒤 복원한다.
             let _ = window.set_resizable(s.resizable);
             if s.maximized {
+                // 일반 크기/위치를 **먼저** 되돌린 뒤 최대화한다. 바로 maximize()하면 창의 복원
+                // 사각형(최대화를 풀 때 돌아갈 크기)이 전체화면 사각형으로 남아, 나중에 최대화를
+                // 풀면 모니터 크기 창이 됐다 — "최대화 전 창 크기를 기억 못 함"(2026-10-20 보고).
+                // 진입 때 저장한 pos/size는 최대화를 푼 뒤 잰 일반 상태 값이다.
+                let _ = window.set_size(s.size);
+                let _ = window.set_position(s.pos);
                 let _ = window.maximize();
             } else {
                 let _ = window.set_size(s.size);
@@ -1760,6 +1780,46 @@ fn apply_fullscreen(window: &tauri::Window, on: bool) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// F11 전체화면 중 **누가 창을 옮기면** 다시 모니터에 맞춘다(lib.rs `WindowEvent::Moved`).
+///
+/// 화면 잠금 → 해제 뒤 앱 전체가 위로 조금 올라가 있었다(사용자 보고 2026-10-15). 전체화면
+/// 창은 최대화가 아니라 모니터보다 **조금 큰 일반 창**이고(바깥 사각형 1936x1089, 보이지
+/// 않는 테두리 포함), 잠금 해제 때 Explorer가 넓혀둔 작업영역을 원래(작업표시줄 제외)대로
+/// 되돌리면서 Windows가 창을 작업영역 안으로 끼워 넣는 것으로 추정한다(아래가 작업영역
+/// 하단에 맞춰지면 위로 수십 px 밀린다). 원인 경로는 확정 못 했으므로 원인 대신 결과를
+/// 고친다: 전체화면인데 클라이언트 원점이 모니터 원점과 다르면 작업영역을 다시 넓히고
+/// 제자리로 돌린다.
+///
+/// WM_MOVE 콜스택 안에서 불리므로 여기서는 플래그만 보고 별도 스레드로 넘긴다. 락은 읽는
+/// 순간만 잡는다 — `apply_fullscreen`의 교착 주석과 같은 규칙. 300ms 뒤에 보는 건 연속으로
+/// 오는 이동을 한 번으로 묶고, apply_fullscreen 자신의 배치가 끝나기를 기다리기 위해서다.
+pub(crate) fn reassert_fullscreen_if_displaced(window: &tauri::Window) {
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    static PENDING: AtomicBool = AtomicBool::new(false);
+    if lock_or_recover(fs_saved()).is_none() || PENDING.swap(true, Relaxed) { return; }
+    let w = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        PENDING.store(false, Relaxed);
+        let _op = lock_or_recover(&FS_OP); // F11 진입/해제와 엇갈리지 않게(FS_OP 주석)
+        if lock_or_recover(fs_saved()).is_none() { return; }
+        let (Ok(Some(mon)), Ok(inner), Ok(outer)) = (w.current_monitor(), w.inner_position(), w.outer_position()) else { return };
+        let mp = *mon.position();
+        if inner.x == mp.x && inner.y == mp.y { return; }
+        // 전체화면에 들어간 그 모니터에서만 되돌린다. 사용자가 Win+Shift+화살표로 다른 모니터로
+        // 옮긴 거라면 여기서 그 모니터의 작업영역까지 넓혀버리고, 해제 때는 처음 모니터 것만
+        // 원복하므로 새 모니터 작업영역이 넓혀진 채 남는다.
+        if let Some(r) = *lock_or_recover(work_area_saved()) {
+            let (w, h) = (mon.size().width as i32, mon.size().height as i32);
+            if !(r.left >= mp.x && r.left < mp.x + w && r.top >= mp.y && r.top < mp.y + h) { return; }
+        }
+        crate::swallow::dlog(&format!("[fs] displaced inner={inner:?} monitor={mp:?} -> reassert"));
+        expand_work_area(mp.x, mp.y, mon.size().width, mon.size().height);
+        let _ = w.set_position(tauri::PhysicalPosition::new(mp.x - (inner.x - outer.x), mp.y - (inner.y - outer.y)));
+        let _ = w.set_size(*mon.size());
+    });
 }
 
 #[tauri::command]
@@ -1813,8 +1873,8 @@ pub async fn focus_slot_window(slot_id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Mirrors MultiView.tsx's `anyConnecting` into Rust so the Alt+1~4 global
-/// hotkey handler (which runs with no visibility into React state) can skip
+/// Mirrors MultiView.tsx's `anyConnecting` into Rust so the Alt+1~4 path (the LL
+/// keyboard hook in swallow.rs, which has no visibility into React state) can skip
 /// its native focus_window call while a connect is in flight.
 #[tauri::command]
 pub async fn set_connect_lock(locked: bool) -> Result<(), String> {
@@ -1822,11 +1882,26 @@ pub async fn set_connect_lock(locked: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// 지금 연결 잠금이 걸려 있나 — `switch-lock` 이벤트보다 늦게 마운트된 화면이 처음 값을 읽는다.
+#[tauri::command]
+pub fn get_switch_lock() -> bool {
+    crate::swallow::any_hunt_locked()
+}
+
 #[tauri::command]
 pub async fn get_hyper_v_events(max_events: Option<u32>) -> Result<Vec<crate::models::HyperVEvent>, String> {
     let count = max_events.unwrap_or(50).min(200);
+    // 2026-10-22까지 이 함수는 실제 PC에서 한 번도 이벤트를 돌려준 적이 없다(첫 릴리스부터).
+    // 세 가지가 겹쳐 있었고, 에러는 아래 unwrap_or_else("[]")가 삼켜 "이벤트 없음"으로 보였다:
+    //  (1) 채널 이름은 하이픈이다 — `…-Hyper-V-VMMS-Admin`. 슬래시(`…-VMMS/Admin`)는
+    //      NoMatchingLogsFound(실측: 하이픈 이름엔 이 PC에 수천 건).
+    //  (2) 파이프 결과를 `| if (…)`로 넘기는 건 PowerShell 문법이 아니다.
+    //  (3) `ConvertTo-Json -AsArray`는 Windows PowerShell 5.1에 없다(우리가 띄우는 건 5.1).
+    // 항상 배열로 내보내려면 `-InputObject @(…)` — 5.1에서 0/1/2개 → [] / [{…}] / […] 실측.
+    // 수준은 숫자 Level(1 위험·2 오류·3 경고·4 정보)로 판별한다. LevelDisplayName은 OS 언어로
+    // 나와서('오류'/'경고') 영어 이름으로 비교하면 한국어 Windows에선 전부 '정보'가 됐다.
     let script = format!(r#"
-        $logs = @('Microsoft-Windows-Hyper-V-Worker/Admin','Microsoft-Windows-Hyper-V-VMMS/Operational','Microsoft-Windows-Hyper-V-VMMS/Admin')
+        $logs = @('Microsoft-Windows-Hyper-V-Worker-Admin','Microsoft-Windows-Hyper-V-VMMS-Operational','Microsoft-Windows-Hyper-V-VMMS-Admin')
         $events = @()
         foreach ($log in $logs) {{
             try {{
@@ -1834,22 +1909,20 @@ pub async fn get_hyper_v_events(max_events: Option<u32>) -> Result<Vec<crate::mo
                     ForEach-Object {{
                         [PSCustomObject]@{{
                             TimeCreated = $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')
-                            Level = switch ($_.LevelDisplayName) {{
-                                'Error'       {{ 'error' }}
-                                'Warning'     {{ 'warn' }}
-                                'Information' {{ 'info' }}
-                                default       {{ 'info' }}
+                            Level = switch ([int]$_.Level) {{
+                                1       {{ 'error' }}
+                                2       {{ 'error' }}
+                                3       {{ 'warn' }}
+                                default {{ 'info' }}
                             }}
-                            Message = $_.Message.Split("`n")[0].Trim()
+                            Message = if ($_.Message) {{ $_.Message.Split("`n")[0].Trim() }} else {{ '' }}
                             EventId = [int]$_.Id
                         }}
                     }}
             }} catch {{}}
         }}
-        if ($events.Count -eq 0) {{ '[]'; return }}
-        $events | Sort-Object {{ $_.TimeCreated }} -Descending | Select-Object -First {} |
-            if (($_ | Measure-Object).Count -eq 1) {{ $_ | ConvertTo-Json -Depth 2 -AsArray }}
-            else {{ $_ | ConvertTo-Json -Depth 2 }}
+        $top = $events | Sort-Object {{ $_.TimeCreated }} -Descending | Select-Object -First {}
+        ConvertTo-Json -InputObject @($top) -Depth 2 -Compress
     "#, count, count);
 
     let json = tokio::task::spawn_blocking(move || run_powershell_warm(&script))
@@ -1901,8 +1974,7 @@ pub async fn get_vm_checkpoints(name: String) -> Result<Vec<crate::models::VmChe
                 ParentCheckpointName = if ($_.ParentSnapshotName) {{ $_.ParentSnapshotName }} else {{ '' }}
             }}
         }}
-        if (@($result).Count -eq 1) {{ $result | ConvertTo-Json -Depth 3 -AsArray }}
-        else {{ $result | ConvertTo-Json -Depth 3 }}
+        ConvertTo-Json -InputObject @($result) -Depth 3 -Compress
     "#, safe);
 
     let json = tokio::task::spawn_blocking(move || run_powershell_warm(&script))
@@ -2007,8 +2079,9 @@ pub async fn get_vm_disk_info(name: String) -> Result<Vec<crate::models::VmDiskE
                 $p = $vhd.ParentPath
             }}
         }}
-        if (@($chain).Count -eq 1) {{ $chain | ConvertTo-Json -Depth 2 -AsArray }}
-        else {{ $chain | ConvertTo-Json -Depth 2 }}
+        # 디스크 1개·체크포인트 없는 VM(가장 흔한 구성)도 배열로 나간다 — 예전 `-AsArray`는
+        # 5.1에 없어서 정확히 1개일 때만 실패했고, 그 VM은 디스크 섹션이 통째로 비었다.
+        ConvertTo-Json -InputObject @($chain) -Depth 2 -Compress
     "#, safe);
 
     let json = tokio::task::spawn_blocking(move || run_powershell_warm(&script))
@@ -2155,8 +2228,9 @@ pub async fn get_vm_switches() -> Result<Vec<crate::models::VmSwitch>, String> {
                 NetAdapterName = if ($_.NetAdapterInterfaceDescription) { $_.NetAdapterInterfaceDescription } else { '' }
             }
         }
-        if (@($result).Count -eq 1) { $result | ConvertTo-Json -Depth 2 -AsArray }
-        else { $result | ConvertTo-Json -Depth 2 }
+        # 스위치가 1개뿐인 호스트(Default Switch만 있는 경우 등)도 배열로 — 예전 `-AsArray`는
+        # 5.1에 없어서 그 경우 목록이 비었고, 새 VM 만들기 창의 스위치 선택지도 비었다.
+        ConvertTo-Json -InputObject @($result) -Depth 2 -Compress
     "#;
 
     let json = tokio::task::spawn_blocking(|| run_powershell_warm(script))
@@ -2198,8 +2272,7 @@ pub async fn get_vm_network_adapters() -> Result<Vec<crate::models::VmNetworkAda
                 SwitchName = if ($_.SwitchName) { $_.SwitchName } else { '' }
             }
         }
-        if (@($result).Count -eq 1) { $result | ConvertTo-Json -Depth 2 -AsArray }
-        else { $result | ConvertTo-Json -Depth 2 }
+        ConvertTo-Json -InputObject @($result) -Depth 2 -Compress
     "#;
 
     let json = tokio::task::spawn_blocking(|| run_powershell_warm(script))
@@ -2210,9 +2283,15 @@ pub async fn get_vm_network_adapters() -> Result<Vec<crate::models::VmNetworkAda
         return Ok(vec![]);
     }
 
+    // PascalCase는 vm_name → "VmName"인데 PowerShell 속성은 "VMName"이다 — 명시하지 않으면
+    // 역직렬화가 실패해 unwrap_or_default가 늘 빈 목록을 돌려줬다(get_vm_checkpoints는 이미 명시).
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "PascalCase")]
-    struct Raw { vm_name: String, switch_name: String }
+    struct Raw {
+        #[serde(rename = "VMName")]
+        vm_name: String,
+        switch_name: String,
+    }
 
     let raw: Vec<Raw> = if json.trim_start().starts_with('[') {
         serde_json::from_str(&json).unwrap_or_default()
@@ -2231,6 +2310,33 @@ pub async fn get_vm_network_adapters() -> Result<Vec<crate::models::VmNetworkAda
 
 #[cfg(test)]
 mod tests {
+    /// 실기기 프로브(수동: `cargo test --lib hyperv_read_queries -- --ignored --nocapture`).
+    /// Hyper-V **읽기 전용** 조회가 Windows PowerShell 5.1에서 실제로 데이터를 돌려주는가.
+    /// 2026-10-22 전엔 이벤트는 채널 이름·문법·`-AsArray` 때문에 늘 비었고, 스위치·NIC·디스크는
+    /// 정확히 1개일 때 비었다 — 둘 다 에러를 "[]"로 삼켜서 화면엔 "없음"으로만 보였다.
+    /// Hyper-V 관리 권한이 있는 계정에서 돌릴 것(없으면 VM/스위치가 0개로 나온다).
+    #[tokio::test]
+    #[ignore]
+    async fn hyperv_read_queries_return_data() {
+        let events = super::get_hyper_v_events(Some(20)).await.unwrap();
+        let switches = super::get_vm_switches().await.unwrap();
+        let adapters = super::get_vm_network_adapters().await.unwrap();
+        let vms = super::get_vms().await.unwrap_or_default();
+        eprintln!("events={} switches={} adapters={} vms={}", events.len(), switches.len(), adapters.len(), vms.len());
+        for e in events.iter().take(3) { eprintln!("  event [{}] {} id={}", e.level, e.time_created, e.event_id); }
+        for vm in vms.iter().take(3) {
+            let disks = super::get_vm_disk_info(vm.name.clone()).await.unwrap();
+            let ckpts = super::get_vm_checkpoints(vm.name.clone()).await.unwrap();
+            eprintln!("  vm {} disks={} checkpoints={}", vm.name, disks.len(), ckpts.len());
+            assert!(!disks.is_empty(), "VM마다 디스크가 최소 1개는 있다 — 비면 JSON 출력이 깨진 것");
+        }
+        // 이 개발 PC의 VM들은 NIC가 있다(Default Switch). NIC 없는 VM만 있는 PC라면 이 줄을 빼고 돌릴 것.
+        assert!(vms.is_empty() || !adapters.is_empty(), "VM이 있는데 NIC가 0개 — VMName 매핑을 확인할 것");
+        assert!(!events.is_empty(), "Hyper-V 이벤트 채널이 비어 있지 않은 PC에서 돌릴 것");
+        assert!(events.iter().all(|e| ["info", "warn", "error"].contains(&e.level.as_str())));
+        assert!(events.windows(2).all(|w| w[0].time_created >= w[1].time_created), "최신순이어야 한다");
+    }
+
     /// 실기기 프로브(수동: `cargo test -- --ignored work_area`): **알림 없이** `SPI_SETWORKAREA`로
     /// 바꾼 작업영역이 `GetMonitorInfo`에 즉시 보이는가. 거짓이면 mstsc도 새 값을 못 보고
     /// `expand_work_area`는 무의미하다. 실제 작업영역을 잠깐 넓혔다 되돌린다(브로드캐스트가

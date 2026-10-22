@@ -1,9 +1,9 @@
-﻿import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Server, Plus, RotateCcw, Trash2, RefreshCw, Camera } from "lucide-react";
 import type { VmInfo, VmSnapshot } from "@/types";
 import { api } from "@/lib/tauri-api";
 import { ConfirmModal } from "@/components/ConfirmModal";
-import { useT } from "@/lib/i18n";
+import { useT, vmStateLabel } from "@/lib/i18n";
 
 interface SnapshotsPageProps {
   vms: VmInfo[];
@@ -109,7 +109,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <span style={{ fontSize: "9px", fontWeight: 900, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 10px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
-              {allTotal} TOTAL
+              {t("snap.total", { n: allTotal })}
             </span>
             <button
               className="hd-btn hd-btn--small"
@@ -169,7 +169,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                     <Server size={13} color="var(--accent-blue)" />
                     <span style={{ fontSize: "12px", fontWeight: 800 }}>{vm.name}</span>
                     <span className={`status-dot ${vm.state === "Running" ? "online" : "offline"}`} />
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{vm.state}</span>
+                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{vmStateLabel(vm.state, t)}</span>
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
                     {isCreatingThis ? (
@@ -181,7 +181,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                           onKeyDown={e => { if (e.key === "Enter") handleCreate(vm.name); if (e.key === "Escape") { setCreating(null); setNewSnapName(""); } }}
                           placeholder={t("snap.namePlaceholder")}
                           style={{
-                            background: "rgba(0,0,0,0.3)", border: "1px solid var(--border-focus)",
+                            background: "var(--sm-input-bg)", border: "1px solid var(--border-focus)",
                             borderRadius: "6px", padding: "5px 10px", fontSize: "11px",
                             color: "var(--text-main)", outline: "none", width: "180px", fontFamily: "var(--font)"
                           }}
@@ -216,7 +216,15 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                       {t("snap.none")}
                     </div>
                   ) : (
-                    <table className="hd-table" style={{ margin: 0 }}>
+                    // 열 폭을 고정한다 — VM마다 표가 따로라 내용 길이에 맞추면 "유형"·"생성 시각"
+                    // 열이 표마다 다른 x에서 시작해 위아래로 안 맞았다.
+                    <table className="hd-table" style={{ margin: 0, tableLayout: "fixed", width: "100%" }}>
+                      <colgroup>
+                        <col />
+                        <col style={{ width: "120px" }} />
+                        <col style={{ width: "170px" }} />
+                        <col style={{ width: "190px" }} />
+                      </colgroup>
                       <thead>
                         <tr>
                           <th>{t("snap.colName")}</th>

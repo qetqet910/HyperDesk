@@ -4,6 +4,8 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import { api } from "@/lib/tauri-api";
 import { useSettings } from "@/contexts/SettingsContext";
 import { applyTheme } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
@@ -27,6 +29,13 @@ function getTauriWindow() {
 
 export function Topbar({ title, subtitle, isRefreshing, onRefresh, actions, onSearch }: TopbarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
+  // 세션 연결 중(백엔드 잠금)엔 최소화/최대화를 막는다 — 창 크기가 바뀌면 붙던 세션이 엉뚱한 자리에 뜬다.
+  const [switchLocked, setSwitchLocked] = useState(false);
+  useEffect(() => {
+    const un = listen<boolean>("switch-lock", e => setSwitchLocked(!!e.payload));
+    api.getSwitchLock().then(setSwitchLocked).catch(() => {});
+    return () => { un.then(f => f()); };
+  }, []);
   const { settings, updateSettings } = useSettings();
   const t = useT();
 
@@ -79,10 +88,10 @@ export function Topbar({ title, subtitle, isRefreshing, onRefresh, actions, onSe
         </div>
 
         <div className="hd-topbar__window-controls" data-tauri-drag-region="false">
-          <button className="window-control-btn" onClick={() => getTauriWindow()?.minimize()} title={t("topbar.minimize")}>
+          <button className="window-control-btn" disabled={switchLocked} onClick={() => getTauriWindow()?.minimize()} title={t("topbar.minimize")}>
             <Minus size={14} />
           </button>
-          <button className="window-control-btn" onClick={() => getTauriWindow()?.toggleMaximize()} title={isMaximized ? t("topbar.restore") : t("topbar.maximize")}>
+          <button className="window-control-btn" disabled={switchLocked} onClick={() => getTauriWindow()?.toggleMaximize()} title={isMaximized ? t("topbar.restore") : t("topbar.maximize")}>
             {isMaximized ? <Copy size={13} /> : <Square size={13} />}
           </button>
           <button className="window-control-btn window-control-btn--close" onClick={() => getTauriWindow()?.close()} title={t("topbar.close")}>

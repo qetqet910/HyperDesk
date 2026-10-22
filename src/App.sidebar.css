@@ -208,14 +208,13 @@
 }
 
 .hd-nav-item__count,
-.hd-nav-item__slots,
-.hd-nav-item__badge {
+.hd-nav-item__slots {
   flex-shrink: 0;
   opacity: 1;
   transition: opacity 0.16s ease;
 }
 
-/* Occupied-slots pill on the 멀티 뷰 item (N/4). Sits just left of the LIVE badge. */
+/* Occupied-slots pill on the 멀티 뷰 item (N/4). */
 .hd-nav-item__slots {
   font-size: var(--fs-micro);
   font-weight: 800;
@@ -230,8 +229,7 @@
    The sidebar's overflow:hidden clips whatever extends past the collapsed width. */
 .hd-sidebar--collapsed .hd-nav-item__label,
 .hd-sidebar--collapsed .hd-nav-item__count,
-.hd-sidebar--collapsed .hd-nav-item__slots,
-.hd-sidebar--collapsed .hd-nav-item__badge {
+.hd-sidebar--collapsed .hd-nav-item__slots {
   opacity: 0;
   pointer-events: none;
 }
@@ -251,21 +249,10 @@
   color: var(--cream);
 }
 
-.hd-nav-item__badge {
-  font-size: var(--fs-micro);
-  font-weight: 900;
-  letter-spacing: 0.5px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  border: 1px solid;
-  background: rgba(34, 197, 94, 0.08);
-  margin-left: auto;
-}
-
 /* Footer — keeps the status row pinned to the very bottom (justify-content:flex-end),
    so the dot's position is identical whether expanded or collapsed:
    - Expanded: the collapse button is absolutely positioned, inline with the
-     "Core Online" row on the right. The status is the only flow child → sits at
+     status row on the right. The status is the only flow child → sits at
      the bottom.
    - Collapsed: the button drops into the flow ABOVE the status (it's DOM-first).
      The footer grows UPWARD (it's bottom-anchored), so the status/dot stay put. */
@@ -318,6 +305,7 @@
   font-weight: 700;
   color: var(--accent-green);
 }
+.hd-sidebar__status-label--error { color: var(--accent-red); }
 
 .hd-sidebar__status-sub {
   font-size: var(--fs-micro);
@@ -326,7 +314,7 @@
 }
 
 .hd-sidebar__collapse-btn {
-  /* Expanded: inline with the "Core Online" row, pinned to the footer's bottom-right. */
+  /* Expanded: inline with the status row, pinned to the footer's bottom-right. */
   position: absolute;
   bottom: 1px;
   right: 6px;
@@ -636,7 +624,10 @@ body::before {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 12px rgba(91, 130, 190, 0.18);
 }
 
-.mst-rack-row.dead {
+/* 응답 없는 호스트는 정보 칸만 흐리게 한다. 줄 전체를 흐리면 메모·편집·삭제 버튼까지
+   비활성처럼 보였다 — 주소를 고치거나 지우는 게 바로 이때 필요한 동작이다.
+   연결 버튼은 자기 disabled 스타일로 따로 흐려진다. */
+.mst-rack-row.dead > :not(.mst-rack-actions) {
   opacity: 0.5;
   filter: saturate(0.2);
 }
@@ -983,19 +974,12 @@ body::before {
   line-height: 1;
 }
 
+/* 보조 설명 줄(변화량 아님) — 그래서 증감 색 없이 muted로 둔다. */
 .hd-kpi-delta {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   font-family: var(--font);
-  opacity: 0.8;
-}
-
-.hd-kpi-delta.up {
-  color: var(--accent-green);
-}
-
-.hd-kpi-delta.dn {
-  color: var(--accent-red);
+  color: var(--text-muted);
 }
 
 /* ─── 가상 머신 페이지 필터 세그먼트 ───────────────────────── */

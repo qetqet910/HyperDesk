@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "HyperDesk",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "identifier": "FAAFE2B2.HyperDesk",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -43,19 +43,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
         "installerHooks": "./windows/installer-hooks.nsh"
       }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI3OTQxQjcwQzdGREIzMEUKUldRT3MvM0hjQnVVdDRlYUFlUWJJNTNHdHEvckZoMW81aGRHdDBINnY4eG9WZitGTy9hb1NCRDYK",
-      "endpoints": [
-        "https://github.com/qetqet910/HyperDesk/releases/latest/download/latest.json"
-      ]
     }
   }
 }

@@ -53,9 +53,8 @@ import "./App.css";
 import "./App.sidebar.css";
 
 // ─── Loading screen copy — one is picked at random per app launch ────────────
-const LOADING_KEYS: Key[] = [
-  "loading.1", "loading.2", "loading.3", "loading.4", "loading.5", "loading.6", "loading.7",
-];
+// 실제로 하는 일만 적는다(가상 머신 조회 · 원격 자산 응답 확인 · 호스트 리소스).
+const LOADING_KEYS: Key[] = ["loading.1", "loading.2", "loading.3"];
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -283,13 +282,11 @@ export default function App() {
   useEffect(() => {
     if (isLoading || startupLogFiredRef.current) return;
     startupLogFiredRef.current = true;
+    // 실제로 찾은 것만 남긴다 — 예전의 "Booting Core Engine…/ALL SYSTEMS GREEN" 같은
+    // 연출 문구는 아무 정보가 없었고 한국어 화면에도 영어로 찍혔다.
     const seq = [
-      { msg: "[SYSTEM] Booting HyperDesk Core Engine...", type: "info" },
-      { msg: "[SCAN] Searching for Virtual Machines (Hyper-V)...", type: "info" },
-      { msg: `[SUCCESS] ${vms.length} Hyper-V Units Online.`, type: "success" },
-      { msg: "[SCAN] Mapping Remote Assets (RDP / Registry)...", type: "info" },
-      { msg: `[SUCCESS] ${remoteHosts.length} Network Assets Indexed.`, type: "success" },
-      { msg: "[SYSTEM] SYMMETRY GRID STABLE. ALL SYSTEMS GREEN.", type: "success" },
+      { msg: t("log.scanVms", { n: vms.length }), type: "success" },
+      { msg: t("log.scanRemote", { n: mstHostsList.length }), type: "success" }, // 원격 자산 탭과 같은 집합(RDP)
     ] as const;
     const timers = seq.map((s, i) => setTimeout(() => addLog(s.msg, s.type), i * 40));
     return () => timers.forEach(clearTimeout);
@@ -306,7 +303,7 @@ export default function App() {
   const handleError = (raw: string) => {
     const err = showError(parseError(raw));
     setErrorModal(err);
-    addLog(`[ERROR] ${err.title}: ${err.body}`, "error");
+    addLog(`${err.title}: ${err.body}`, "error"); // 종류([오류])는 로그의 태그 칸이 이미 보여준다
   };
 
   const handleAssetAction = async (hostData: any) => {
@@ -323,11 +320,14 @@ export default function App() {
     } catch (e) { handleError(String(e)); }
   };
 
+  // 레지스트리에서 자동으로 찾은 항목은 지우지 않고 숨긴다(백엔드 remove_remote_host가 그렇게
+  // 처리한다) — 확인 창과 토스트도 "숨기기"라고 말해야 한다.
+  const deleteIsHide = !!remoteHosts.find(h => h.id === confirmDelete)?.is_detected;
   const handleDeleteHost = async () => {
     if (!confirmDelete) return;
     try {
       await removeHost.mutateAsync(confirmDelete);
-      addToast(t("toast.assetDeleted"), "info");
+      addToast(t(deleteIsHide ? "toast.assetHidden" : "toast.assetDeleted"), "info");
       setConfirmDelete(null);
     } catch (e) { handleError(String(e)); }
   };
@@ -380,22 +380,25 @@ export default function App() {
         }}
       >
         {(() => {
-          const onlineRemote = remoteHosts.filter(h => h.status !== "TIMEOUT" && h.status !== "Offline").length;
+          // "원격 자산"은 사이드바·원격 자산 탭과 같은 집합(RDP)으로 센다. Omnissa는 가상 머신
+          // 탭 소속이라, 예전엔 여기서만 7개(탭은 5개)로 세어 숫자가 서로 안 맞았다.
+          const onlineRemote = mstHostsList.filter(h => h.status !== "TIMEOUT" && h.status !== "Offline").length;
           const latencyHosts = remoteHosts.filter(h => (h.latency ?? 0) > 0);
           const avgLatency = latencyHosts.length ? Math.round(latencyHosts.reduce((s, h) => s + (h.latency ?? 0), 0) / latencyHosts.length) : 0;
           const memUsedGB = ((statsData?.memory_used ?? data?.system_memory_used ?? 0) / 1024 / 1024);
           const memTotalGB = ((statsData?.memory_total ?? data?.system_memory_total ?? 1) / 1024 / 1024);
           const memPct = memTotalGB > 0 ? ((memUsedGB / memTotalGB) * 100).toFixed(1) : "0";
+          // 보조 줄은 변화량이 아니라 설명이다 — ▲/▼를 붙이면 "늘었다/줄었다"로 읽혔다.
           return [
-            { label: t("dash.kpi.activeVms"), value: `${runningVms}/${vms.length}`, delta: t("dash.kpi.activeVmsDelta", { n: runningVms }), up: runningVms > 0, color: "var(--accent-green)" },
-            { label: t("dash.kpi.memory"), value: `${memUsedGB.toFixed(1)} GB`, delta: `${memPct}%`, up: true, color: "var(--accent-blue)" },
-            { label: t("dash.kpi.remote"), value: t("dash.kpi.remoteValue", { n: onlineRemote }), delta: t("dash.kpi.remoteDelta", { n: remoteHosts.length }), up: true, color: "var(--accent-blue)" },
-            { label: t("dash.kpi.latency"), value: `${avgLatency} ms`, delta: t("dash.kpi.latencyDelta", { n: latencyHosts.length }), up: avgLatency < 50, color: avgLatency < 50 ? "var(--accent-green)" : "var(--accent-orange)" },
+            { label: t("dash.kpi.activeVms"), value: `${runningVms}/${vms.length}`, delta: t("dash.kpi.activeVmsDelta", { n: runningVms }), color: "var(--accent-green)" },
+            { label: t("dash.kpi.memory"), value: `${memUsedGB.toFixed(1)} GB`, delta: `${memPct}%`, color: "var(--accent-blue)" },
+            { label: t("dash.kpi.remote"), value: t("dash.kpi.remoteValue", { n: onlineRemote }), delta: t("dash.kpi.remoteDelta", { n: mstHostsList.length }), color: "var(--accent-blue)" },
+            { label: t("dash.kpi.latency"), value: `${avgLatency} ms`, delta: t("dash.kpi.latencyDelta", { n: latencyHosts.length }), color: avgLatency < 50 ? "var(--accent-green)" : "var(--accent-orange)" },
           ].map((kpi) => (
             <div key={kpi.label} className="hd-kpi-tile">
               <div className="hd-kpi-label">{kpi.label}</div>
               <div className="hd-kpi-value" style={{ color: kpi.color }}>{kpi.value}</div>
-              <div className={`hd-kpi-delta ${kpi.up ? "up" : "dn"}`}>{kpi.up ? "▲" : "▼"} {kpi.delta}</div>
+              <div className="hd-kpi-delta">{kpi.delta}</div>
             </div>
           ));
         })()}
@@ -439,13 +442,15 @@ export default function App() {
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "10px", color: "var(--text-muted)" }}>
                 <span>CPU</span><span>{(statsData?.cpu ?? data?.system_cpu ?? 0).toFixed(1)}%</span>
               </div>
-              <Sparkline data={cpuHistory} height={70} />
+              {/* 오른쪽 스냅샷 패널 높이에 맞춰 늘어난 칸을 그래프가 채운다 — 70px일 땐
+                  아래 절반 이상이 빈 칸이었다. */}
+              <Sparkline data={cpuHistory} height={150} />
             </div>
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "10px", color: "var(--text-muted)" }}>
                 <span>{t("dash.memory")}</span><span>{(((statsData?.memory_used ?? data?.system_memory_used) ?? 0) / 1024 / 1024).toFixed(1)} GB</span>
               </div>
-              <Sparkline data={memHistory} color="var(--accent-green)" height={70} />
+              <Sparkline data={memHistory} color="var(--accent-green)" height={150} />
             </div>
           </div>
 
@@ -489,15 +494,15 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span style={{ fontSize: "13px", opacity: 0.5 }}>◇</span>
-              <span style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1px" }}>Snapshot Index</span>
+              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-main)" }}>{t("dash.snapshots")}</span>
             </div>
-            <span style={{ fontSize: "9px", fontWeight: 900, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 8px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
-              {vms.reduce((s, v) => s + (v.checkpoint_count ?? 0), 0)} TOTAL
+            <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 8px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
+              {t("dash.snapshotTotal", { n: vms.reduce((s, v) => s + (v.checkpoint_count ?? 0), 0) })}
             </span>
           </div>
 
-          <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.8px", textTransform: "uppercase", paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>
-            Recent Restore Points
+          <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 600, paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>
+            {t("dash.snapshotByVm")}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: 1, overflowY: "auto" }}>
@@ -508,9 +513,10 @@ export default function App() {
                   <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
                     <div style={{ fontSize: "11px", fontWeight: 800, fontFamily: "var(--font)", letterSpacing: "0.5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{vm.name}</div>
-                    <div style={{ fontSize: "9px", color: "var(--text-muted)" }}>{vm.checkpoint_count} checkpoint{(vm.checkpoint_count ?? 0) !== 1 ? "s" : ""}</div>
+                    <div style={{ fontSize: "10px", color: "var(--text-muted)" }}>{t("dash.snapshotCount", { n: vm.checkpoint_count ?? 0 })}</div>
                   </div>
-                  <div style={{ fontSize: "9px", color: "var(--text-muted)", flexShrink: 0 }}>{vm.uptime !== "—" ? vm.uptime : "—"}</div>
+                  {/* 오른쪽엔 예전에 VM 가동 시간이 있었는데, 스냅샷 목록 안이라 "스냅샷 시각"으로
+                      읽혔다. 상태는 왼쪽 점이 이미 보여준다. */}
                 </div>
               );
             })}
@@ -548,7 +554,8 @@ export default function App() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: "12px", fontWeight: 500, color: "var(--text-muted)" }}>{t("dash.nodes", { n: vms.length + horizonHosts.length })}</span>
           <span style={{ fontSize: "11px", color: "var(--accent-green)", fontWeight: 600, background: "rgba(34,197,94,0.08)", padding: "2px 10px", borderRadius: "6px", border: "1px solid rgba(34,197,94,0.2)" }}>
-            {t("dash.online", { n: runningVms + horizonHosts.filter(h => h.status !== "Offline").length, total: vms.length + horizonHosts.length })}
+            {/* 백엔드는 응답 없는 호스트를 "TIMEOUT"으로 보낸다("Offline"은 안 온다) — 카드와 같은 판정. */}
+            {t("dash.online", { n: runningVms + horizonHosts.filter(h => h.status !== "TIMEOUT" && h.status !== "Offline").length, total: vms.length + horizonHosts.length })}
           </span>
         </div>
         <div className="rack-container no-scrollbar" style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "scroll", maxHeight: "480px" }}>
@@ -570,7 +577,7 @@ export default function App() {
                 <Reorder.Item key={asset.id} value={asset} style={{ listStyle: "none", margin: 0, padding: 0, width: "100%" }}>
                   {asset.type === "HYPER_V"
                     ? <HyperVCard vm={asset.data} animDelay={idx * 50} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={() => setShowVmSettings(asset.data as VmInfo)} />
-                    : <HorizonCard host={asset.data as RemoteHost} animDelay={idx * 50} onEdit={(h) => { setEditingHost(h); setShowAssetModal(true); }} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VDI] ${msg}`, "success"); }} />
+                    : <HorizonCard host={asset.data as RemoteHost} animDelay={idx * 50} onEdit={(h) => { setEditingHost(h); setShowAssetModal(true); }} onDelete={setConfirmDelete} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VDI] ${msg}`, "success"); }} />
                   }
                 </Reorder.Item>
               ))}
@@ -632,14 +639,14 @@ export default function App() {
                     <div className="mst-rack-status">
                       <span className={`mst-rack-led ${isOffline ? "offline" : "online"}`} />
                       <span className={`mst-rack-latency ${isOffline ? "offline" : "online"}`}>
-                        {isOffline ? "---" : `${host.latency}MS`}
+                        {isOffline ? "---" : `${host.latency}ms`}
                       </span>
                     </div>
                     {/* 네임플레이트 */}
                     <div className="mst-rack-name">
                       <span className="mst-rack-hostname">{host.name}</span>
                       <span className={`mst-proto-tag ${proto}`}>{host.protocol}</span>
-                      {host.is_detected && <span className="mst-proto-tag auto">AUTO</span>}
+                      {host.is_detected && <span className="mst-proto-tag auto" title={t("remote.autoHint")}>{t("remote.autoTag")}</span>}
                     </div>
                     {/* 주소. 자동 감지는 이름이 곧 주소라 겹쳐 찍지 않는다(원격 자산 탭과 동일). */}
                     <div className={`mst-rack-addr${host.host === host.name ? " is-same" : ""}`}>
@@ -672,9 +679,10 @@ export default function App() {
 
   const StatsBar = (
     <div className="stats-bar">
-      <div className="stat-item"><Server size={12} /><span>VM <strong>{vms.length}</strong> · <strong>{runningVms}</strong> UP</span></div>
+      <div className="stat-item"><Server size={12} /><span>{t("dash.statusVms", { n: vms.length, up: runningVms })}</span></div>
       <span className="stat-sep">|</span>
-      <div className="stat-item"><Globe size={12} /><span>{t("dash.statusRemote")} <strong>{remoteHosts.length}</strong></span></div>
+      {/* 사이드바·원격 자산 탭과 같은 집합(RDP)으로 센다 — KPI의 원격 자산 주석 참고. */}
+      <div className="stat-item"><Globe size={12} /><span>{t("dash.statusRemote")} <strong>{mstHostsList.length}</strong></span></div>
       <span className="stat-sep">|</span>
       <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
         <Cpu size={12} />
@@ -723,6 +731,7 @@ export default function App() {
             vmCount={vms.length + horizonHosts.length}
             remoteCount={mstHostsList.length}
             runningCount={runningVms}
+            hyperVOk={!!data && !data.vm_error}
             occupiedSlots={Object.keys(settings.slotAssignments ?? {}).length}
           />
 
@@ -820,7 +829,9 @@ export default function App() {
           {showAssetModal  && <AssetModal initialData={editingHost ?? (addProtocol === "HORIZON"
             ? { id: "", name: "", host: "", username: "", protocol: "HORIZON", is_detected: false, is_hidden: false }
             : undefined)} isEditing={!!editingHost} isPending={addHost.isPending || updateHost.isPending} onClose={() => { setShowAssetModal(false); setEditingHost(null); }} onSubmit={handleAssetAction} />}
-          {confirmDelete   && <ConfirmModal title={t("modal.deleteAsset.title")} message={t("modal.deleteAsset.body")} confirmText={t("modal.deleteAsset.confirm")} type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />}
+          {confirmDelete   && (deleteIsHide
+            ? <ConfirmModal title={t("modal.hideAsset.title")} message={t("modal.hideAsset.body")} confirmText={t("modal.hideAsset.confirm")} type="warning" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />
+            : <ConfirmModal title={t("modal.deleteAsset.title")} message={t("modal.deleteAsset.body")} confirmText={t("modal.deleteAsset.confirm")} type="danger" onConfirm={handleDeleteHost} onClose={() => setConfirmDelete(null)} />)}
           {replaceAsk && <ConfirmModal title={t("modal.slotFull.title")} message={t("modal.slotFull.body", { name: replaceAsk.name })} confirmText={t("modal.slotFull.confirm")} cancelText={t("modal.slotFull.no")} type="warning" onConfirm={() => connectToSlot("current", replaceAsk)} onClose={() => setReplaceAsk(null)} />}
           {errorModal      && <ConfirmModal title={errorModal.title} message={errorModal.body} confirmText={t("modal.ok")} onConfirm={() => setErrorModal(null)} onClose={() => setErrorModal(null)} />}
           {memoHost        && <MemoModal host={memoHost} onClose={() => setMemoHost(null)} onSaved={() => { refetch(); addToast(t("toast.memoSaved"), "success"); }} />}

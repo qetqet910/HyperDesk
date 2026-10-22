@@ -324,9 +324,9 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Cpu size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
-                  <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>vCPU Cores</label>
+                  <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.cpu")}</label>
                 </div>
-                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newProcessors}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: '#fff' }}>VCPU</span></div>
+                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newProcessors}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: 'var(--text-main)' }}>VCPU</span></div>
               </div>
               <input 
                 type="range" 
@@ -346,9 +346,9 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <MemoryStick size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
-                  <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Startup Ram</label>
+                  <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.ram")}</label>
                 </div>
-                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newMemory}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: '#fff' }}>GB</span></div>
+                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newMemory}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: 'var(--text-main)' }}>GB</span></div>
               </div>
               <div style={{ position: 'relative' }}>
                 <input 
@@ -360,11 +360,11 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
                   disabled={isRunning || isBusy}
                   style={{ 
                     width: '100%', 
-                    background: 'rgba(0,0,0,0.2)', 
-                    border: '1px solid var(--glass-border)', 
-                    borderRadius: '10px', 
+                    background: 'var(--sm-input-bg)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: '10px',
                     padding: '12px 16px',
-                    color: '#fff',
+                    color: 'var(--text-main)',
                     fontSize: '13px',
                     fontWeight: 700,
                     outline: 'none',

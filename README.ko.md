@@ -159,8 +159,8 @@ HyperDesk는 React 19 앱이지만, 브라우저를 통째로 싸 들고 다니�
 ## 개인정보
 
 HyperDesk에는 사용 통계, 분석, 계정이 없고 개발자에게 아무것도 보내지 않습니다. 비밀번호도
-저장하지 않으며, 로그인은 원격 데스크톱·Horizon 클라이언트가 처리합니다. 인터넷에 나가는 요청은
-설정의 업데이트 확인뿐이고, 폐쇄망에서는 끌 수 있습니다. 무엇을 읽고, 저장하고, 어디와
+저장하지 않으며, 로그인은 원격 데스크톱·Horizon 클라이언트가 처리합니다. 인터넷에는 전혀 접속하지
+않아(업데이트는 Microsoft Store가 처리) 폐쇄망에서도 그대로 씁니다. 무엇을 읽고, 저장하고, 어디와
 통신하는지는 [PRIVACY.md](PRIVACY.md)에 정리돼 있습니다.
 
 ## 문제 해결
@@ -206,9 +206,10 @@ debug 빌드는 `%TEMP%\hyperdesk-swallow.log`에 진단 로그를 남깁니다.
 
 ### 릴리즈
 
-`v*` 태그를 push하면 GitHub Actions(`.github/workflows/release.yml`)가 빌드하고 릴리즈를
-게시합니다. 버전은 `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
-`src-tauri/hyperdesk.exe.manifest` 네 곳을 똑같이 맞춰야 합니다.
+`v*` 태그를 push하면 GitHub Actions(`.github/workflows/store-submit.yml`)가 MSIX를 빌드해
+Microsoft Store에 제출하고 GitHub 릴리즈를 만듭니다. 버전은 `package.json`,
+`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/hyperdesk.exe.manifest` 네 곳을
+똑같이 맞춰야 합니다.
 
 ## 기술 스택
 

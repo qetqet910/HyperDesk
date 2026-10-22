@@ -31,6 +31,13 @@ export function translate(lang: Lang, key: Key, vars?: Record<string, string | n
   return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : s;
 }
 
+/** Hyper-V VM 상태의 표시 이름. 모르는 상태는 원문 그대로 돌려준다(Hyper-V가 새 상태를
+    추가해도 빈칸이 되지 않게). 명령 팔레트·스냅샷 페이지가 같이 쓴다. */
+export function vmStateLabel(state: string, t: (key: Key) => string): string {
+  const key = `vmState.${state}`;
+  return key in en ? t(key as Key) : state;
+}
+
 export function useT() {
   const { settings } = useSettings();
   const lang = settings.lang;

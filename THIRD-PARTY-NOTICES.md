@@ -18,9 +18,6 @@ npx license-checker --production --summary
 |---|---|
 | tauri | Apache-2.0 OR MIT |
 | tauri-plugin-opener | Apache-2.0 OR MIT |
-| tauri-plugin-global-shortcut | Apache-2.0 OR MIT |
-| tauri-plugin-updater | Apache-2.0 OR MIT |
-| tauri-plugin-process | Apache-2.0 OR MIT |
 | tauri-plugin-single-instance | Apache-2.0 OR MIT |
 | serde, serde_json | MIT OR Apache-2.0 |
 | uuid | Apache-2.0 OR MIT |
@@ -36,7 +33,7 @@ npx license-checker --production --summary
 |---|---|
 | react, react-dom | MIT |
 | @tauri-apps/api | Apache-2.0 OR MIT |
-| @tauri-apps/plugin-opener, plugin-updater, plugin-process | MIT OR Apache-2.0 |
+| @tauri-apps/plugin-opener | MIT OR Apache-2.0 |
 | @tanstack/react-query | MIT |
 | @lottiefiles/dotlottie-react, @lottiefiles/dotlottie-web | MIT |
 | framer-motion | MIT |

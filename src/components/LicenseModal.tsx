@@ -15,9 +15,6 @@ interface LicenseEntry {
 const RUST_DEPS: LicenseEntry[] = [
   { name: "tauri", license: "Apache-2.0 OR MIT" },
   { name: "tauri-plugin-opener", license: "Apache-2.0 OR MIT" },
-  { name: "tauri-plugin-global-shortcut", license: "Apache-2.0 OR MIT" },
-  { name: "tauri-plugin-updater", license: "Apache-2.0 OR MIT" },
-  { name: "tauri-plugin-process", license: "Apache-2.0 OR MIT" },
   { name: "tauri-plugin-single-instance", license: "Apache-2.0 OR MIT" },
   { name: "serde / serde_json", license: "MIT OR Apache-2.0" },
   { name: "uuid", license: "Apache-2.0 OR MIT" },
@@ -31,7 +28,7 @@ const RUST_DEPS: LicenseEntry[] = [
 const JS_DEPS: LicenseEntry[] = [
   { name: "react / react-dom", license: "MIT" },
   { name: "@tauri-apps/api", license: "Apache-2.0 OR MIT" },
-  { name: "@tauri-apps/plugin-opener / updater / process", license: "MIT OR Apache-2.0" },
+  { name: "@tauri-apps/plugin-opener", license: "MIT OR Apache-2.0" },
   { name: "@tanstack/react-query", license: "MIT" },
   { name: "@lottiefiles/dotlottie-react / dotlottie-web", license: "MIT" },
   { name: "framer-motion", license: "MIT" },
@@ -76,7 +73,7 @@ export function LicenseModal({ onClose }: LicenseModalProps) {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "40px", height: "40px", borderRadius: "10px", background: "rgba(255,255,255,0.03)" }}>
               <Package size={22} style={{ color: "var(--accent-blue)" }} />
             </div>
-            <h3 style={{ fontSize: "16px", fontWeight: 900, color: "#fff", letterSpacing: "-0.3px" }}>{t("lic.title")}</h3>
+            <h3 style={{ fontSize: "16px", fontWeight: 900, color: "var(--text-main)", letterSpacing: "-0.3px" }}>{t("lic.title")}</h3>
           </div>
           <button className="btn-icon" onClick={onClose} style={{ background: "rgba(255,255,255,0.05)", borderRadius: "8px" }}>
             <X size={18} />

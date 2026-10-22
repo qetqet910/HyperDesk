@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Fuse from "fuse.js";
-import { useT, type Key } from "@/lib/i18n";
+import { useT, vmStateLabel, type Key } from "@/lib/i18n";
 import {
   Search, Server, Globe, LayoutDashboard, Layers, Camera,
   Terminal, Play, Square, Pause, Save, Monitor,
@@ -78,18 +78,6 @@ const STATE_COLOR: Record<string, string> = {
   Paused:  "var(--accent-orange)",
   Saved:   "var(--accent-orange)",
 };
-
-// 모듈 레벨 함수라 훅을 못 쓴다 — t를 인자로 받는다. 알 수 없는 상태는 원문
-// 그대로 돌려준다(Hyper-V가 새 상태를 추가해도 빈칸이 되지 않게).
-function stateLabel(state: string, t: ReturnType<typeof useT>) {
-  const map: Record<string, string> = {
-    Running: t("vmState.Running"),
-    Off:     t("vmState.Off"),
-    Paused:  t("vmState.Paused"),
-    Saved:   t("vmState.Saved"),
-  };
-  return map[state] ?? state;
-}
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
@@ -541,7 +529,7 @@ export function CommandPalette({
                   <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: color, flexShrink: 0 }} />
                   <Server size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
                   <span style={{ flex: 1, fontSize: "13px", fontWeight: 500 }}>{item.vm.name}</span>
-                  <span style={{ fontSize: "10px", color, fontWeight: 500 }}>{stateLabel(item.vm.state, t)}</span>
+                  <span style={{ fontSize: "10px", color, fontWeight: 500 }}>{vmStateLabel(item.vm.state, t)}</span>
                   {item.vm.cpu_usage > 0 && (
                     <span style={{ fontSize: "10px", color: "var(--text-muted)", marginLeft: "8px" }}>CPU {item.vm.cpu_usage.toFixed(0)}%</span>
                   )}

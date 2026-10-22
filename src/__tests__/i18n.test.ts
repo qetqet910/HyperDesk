@@ -14,7 +14,7 @@ describe("translate", () => {
   });
 
   it("{n} 자리표시자를 치환한다", () => {
-    expect(translate("en", "sidebar.nodesActive", { n: 3 })).toBe("3 nodes active");
+    expect(translate("en", "sidebar.nodesActive", { n: 3 })).toBe("3 VMs running");
   });
 
   it("같은 자리표시자가 여러 번 나와도 전부 치환한다", () => {

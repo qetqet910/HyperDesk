@@ -11,7 +11,7 @@ use commands::{
     set_vm_memory, set_vm_processors, get_horizon_path, connect_horizon, check_host,
     set_window_visibility, is_window_valid, swallow_window,
     unswallow_window, sync_slot_bounds, set_header_cutout, toggle_fullscreen, set_fullscreen, quit_app, focus_slot_window,
-    set_connect_lock,
+    set_connect_lock, get_switch_lock,
     list_snapshots, create_snapshot, restore_snapshot, delete_snapshot,
     get_vm_memo, set_vm_memo, set_remote_host_memo,
     get_vm_tags, set_vm_tags, set_remote_host_tags,
@@ -26,28 +26,18 @@ use commands::debug_spawn_test_window;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, Emitter,
+    Manager,
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Modifiers, Code};
-
-/// 슬롯 전환 단축키 Alt+1~4를 등록한다.
-pub(crate) fn register_slot_hotkeys(app: &tauri::AppHandle) {
-    let shortcuts = app.global_shortcut();
-    let _ = shortcuts.unregister_all();
-    for (n, code) in [(1, Code::Digit1), (2, Code::Digit2), (3, Code::Digit3), (4, Code::Digit4)] {
-        match shortcuts.register(Shortcut::new(Some(Modifiers::ALT), code)) {
-            Ok(()) => crate::swallow::dlog(&format!("[hotkey] registered alt+{n}")),
-            // 다른 앱이 이미 잡고 있으면 실패한다 — 조용히 안 먹는 것보다 로그로 드러나는 게 낫다.
-            Err(e) => crate::swallow::dlog(&format!("[hotkey] FAILED alt+{n}: {e}")),
-        }
-    }
-}
+// Alt+1~4 슬롯 전환은 swallow.rs의 LL 키보드 훅만 처리한다. 전역 단축키(RegisterHotKey)는
+// 2026-10-20에 뺐다 — HyperDesk가 뒤에 있을 때도 발동해 다른 앱을 쓰는 중에 슬롯이 바뀌고
+// (1.4.0부터는 포커스까지 뺏었다), 시스템 전체에서 Alt+1~4를 가로채 다른 앱이 못 받았다.
+// HyperDesk나 세션 창이 앞에 있을 때는 LL 훅이 먼저 처리하므로 전역 단축키가 할 일이 없다.
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         // MUST be the first plugin. A second launch would stack another instance
-        // fighting over the global Alt+1..4 hotkeys and the LL keyboard hook; it is
+        // fighting over the LL keyboard hook (Alt+1..4); it is
         // rejected here: the new process exits and we just re-show the existing window.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
@@ -60,36 +50,6 @@ pub fn run() {
             rdplink::accept_args(app, argv);
         }))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &tauri::AppHandle, shortcut: &Shortcut, _event| {
-            // MultiView.tsx mirrors its `anyConnecting` lock into this flag via
-            // set_connect_lock — switching slots mid-swallow breaks the embed, and
-            // this handler runs natively with no visibility into React state, so
-            // it must consult the flag itself rather than trust the frontend to
-            // ignore the emitted event.
-            if shortcut.mods.contains(Modifiers::ALT) && !crate::swallow::is_connect_locked() {
-                match shortcut.key {
-                    Code::Digit1 => {
-                        let _ = app.emit("hotkey-focus", "slot-0");
-                        crate::swallow::focus_window("slot-0");
-                    }
-                    Code::Digit2 => {
-                        let _ = app.emit("hotkey-focus", "slot-1");
-                        crate::swallow::focus_window("slot-1");
-                    }
-                    Code::Digit3 => {
-                        let _ = app.emit("hotkey-focus", "slot-2");
-                        crate::swallow::focus_window("slot-2");
-                    }
-                    Code::Digit4 => {
-                        let _ = app.emit("hotkey-focus", "slot-3");
-                        crate::swallow::focus_window("slot-3");
-                    }
-                    _ => {}
-                }
-            }
-        }).build())
         .setup(|app| {
             // "이 rdp 링크를 열 앱" 선택지에 HyperDesk를 올린다(HKCU, 기본 앱은 안 빼앗음).
             // **release 빌드에서만.** 매 실행마다 자기 exe 경로로 덮어쓰므로 debug 빌드를
@@ -112,14 +72,6 @@ pub fn run() {
             // ~1.1s) in parallel with WebView2/React boot, so the first dashboard
             // fetch hits a warm worker (~30ms) instead of paying the cold cost.
             commands::prewarm_ps_worker();
-
-            // Register global hotkeys at startup (not just on focus)
-            let shortcuts = app.global_shortcut();
-            // Clear any stale registrations (e.g. a previous dev instance / zombie
-            // process that didn't release the OS-level hotkey) before registering,
-            // so register() doesn't fail with "already registered".
-            let _ = shortcuts;
-            register_slot_hotkeys(app.handle());
 
             // System tray setup
             let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
@@ -179,10 +131,6 @@ pub fn run() {
                     swallow::unswallow_all();
                     window.app_handle().exit(0);
                 }
-                // Shortcuts are registered once in setup() and stay registered for the
-                // app's lifetime (global, so they fire even while a swallowed native
-                // window has focus). Re-registering on every Focused event only threw
-                // "already registered" and left them broken — removed.
                 tauri::WindowEvent::Destroyed => {
                     // 전체화면 상태로 종료돼도 넓혀둔 작업영역을 되돌린다.
                     commands::restore_work_area();
@@ -202,7 +150,10 @@ pub fn run() {
                     commands::sync_restore_from_minimize(window);
                 }
                 // 세션 창은 메인 창이 소유한 최상위 창이라 스스로 따라오지 않는다.
-                tauri::WindowEvent::Moved(_) => swallow::resync_positions(),
+                tauri::WindowEvent::Moved(_) => {
+                    swallow::resync_positions();
+                    commands::reassert_fullscreen_if_displaced(window);
+                }
                 _ => {}
             }
         })
@@ -241,6 +192,7 @@ pub fn run() {
             quit_app,
             focus_slot_window,
             set_connect_lock,
+            get_switch_lock,
             list_snapshots,
             create_snapshot,
             restore_snapshot,

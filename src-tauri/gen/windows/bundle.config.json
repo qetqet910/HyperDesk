@@ -10,7 +10,10 @@
     "shareTarget": false,
     "fileAssociations": [],
     "protocolHandlers": [
-      { "name": "rdp", "displayName": "RDP 연결 (HyperDesk)" }
+      {
+        "name": "rdp",
+        "displayName": "RDP 연결 (HyperDesk)"
+      }
     ]
   },
   "signing": {
@@ -18,7 +21,15 @@
     "pfxPassword": null
   },
   "resourceIndex": {
-    "enabled": false,
+    "enabled": true,
     "keepConfig": false
+  },
+  "assets": {
+    "variants": {
+      "scale": false,
+      "targetSize": true,
+      "unplated": true,
+      "lightUnplated": false
+    }
   }
 }

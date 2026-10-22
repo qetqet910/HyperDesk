@@ -708,26 +708,44 @@
   align-items: center;
   gap: 6px;
   background: var(--sm-input-bg);
-  padding: 5px 10px;
+  padding: 5px 12px 5px 6px;
   border-radius: 10px;
   border: 1px solid var(--glass-border);
   flex-shrink: 0;
+  transition: border-color var(--duration-calm) var(--ease-calm), box-shadow var(--duration-calm) var(--ease-calm);
 }
+/* 포커스 표시는 상자 테두리 하나로 한다. 전역 `input:focus-visible` 링이 상자 **안쪽**의
+   42px 숫자칸에 따로 그려져서 링이 두 겹으로 보였다(사용자 스크린샷 2026-10-22). */
+.settings-number-input:focus-within {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-blue) 30%, transparent);
+}
+.settings-number-input input:focus-visible { outline: none; }
+.settings-number-input.is-disabled { opacity: 0.45; }
 .settings-number-input input {
-  width: 42px;
+  width: 48px;
   background: transparent;
   border: none;
   color: var(--accent-blue);
   font-size: 16px;
-  font-weight: 900;
+  font-weight: 800;
+  font-family: var(--font-num);
   text-align: center;
   outline: none;
+  /* 기본 스핀 버튼은 다크 테마에서 흰 화살표로 숫자를 가렸다 — 직접 입력이면 충분하다. */
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
+.settings-number-input input::-webkit-inner-spin-button,
+.settings-number-input input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.settings-number-input input:disabled { cursor: not-allowed; }
 .settings-number-input span {
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-muted);
-  letter-spacing: 0.5px;
 }
 
 /* Text input */

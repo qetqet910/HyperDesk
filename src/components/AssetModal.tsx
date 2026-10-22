@@ -115,7 +115,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                     boxShadow: hostData.protocol === 'RDP' ? '0 0 15px rgba(79, 142, 247, 0.3)' : 'none'
                   }}
                 >
-                  {hostData.protocol === 'RDP' && <Check size={12} style={{ marginRight: '6px' }} />} MST (RDP)
+                  {hostData.protocol === 'RDP' && <Check size={12} style={{ marginRight: '6px' }} />} {t("asset.rdp")}
                 </button>
                 <button
                   type="button"
@@ -128,7 +128,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                     boxShadow: hostData.protocol === 'HORIZON' ? '0 0 15px rgba(168, 85, 247, 0.3)' : 'none'
                   }}
                 >
-                  {hostData.protocol === 'HORIZON' && <Check size={12} style={{ marginRight: '6px' }} />} OMNISSA (VDI)
+                  {hostData.protocol === 'HORIZON' && <Check size={12} style={{ marginRight: '6px' }} />} Omnissa (VDI)
                 </button>
               </div>
             </div>
@@ -146,9 +146,9 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                 value={hostData.name}
                 onChange={(e) => { setHostData({ ...hostData, name: e.target.value }); if (errors.name) setErrors({ ...errors, name: undefined }); }}
                 style={{
-                  width: '100%', height: '36px', background: 'rgba(0,0,0,0.2)',
+                  width: '100%', height: '36px', background: 'var(--sm-input-bg)',
                   border: `1px solid ${errors.name ? 'var(--accent-red)' : 'var(--glass-border)'}`, borderRadius: '10px',
-                  padding: '0 12px', color: '#fff', fontSize: '13px', outline: 'none', transition: 'border-color 0.15s'
+                  padding: '0 12px', color: 'var(--text-main)', fontSize: '13px', outline: 'none', transition: 'border-color 0.15s'
                 }}
               />
               {errors.name && (
@@ -169,9 +169,9 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                 value={hostData.host}
                 onChange={(e) => { setHostData({ ...hostData, host: e.target.value }); setVerifyState('idle'); if (errors.host) setErrors({ ...errors, host: undefined }); }}
                 style={{
-                  width: '100%', height: '36px', background: 'rgba(0,0,0,0.2)',
+                  width: '100%', height: '36px', background: 'var(--sm-input-bg)',
                   border: `1px solid ${errors.host ? 'var(--accent-red)' : 'var(--glass-border)'}`, borderRadius: '10px',
-                  padding: '0 12px', color: '#fff', fontSize: '13px', outline: 'none', transition: 'border-color 0.15s'
+                  padding: '0 12px', color: 'var(--text-main)', fontSize: '13px', outline: 'none', transition: 'border-color 0.15s'
                 }}
               />
               {errors.host && (
@@ -226,9 +226,9 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
                     value={hostData.username}
                     onChange={(e) => setHostData({ ...hostData, username: e.target.value })}
                     style={{
-                      width: '100%', height: '36px', background: 'rgba(0,0,0,0.2)',
+                      width: '100%', height: '36px', background: 'var(--sm-input-bg)',
                       border: '1px solid var(--glass-border)', borderRadius: '10px',
-                      padding: '0 40px 0 12px', color: '#fff', fontSize: '13px', outline: 'none'
+                      padding: '0 40px 0 12px', color: 'var(--text-main)', fontSize: '13px', outline: 'none'
                     }}
                   />
                   <User size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.3 }} />

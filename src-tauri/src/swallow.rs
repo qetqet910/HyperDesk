@@ -158,8 +158,8 @@ fn current_generation(slot_id: &str) -> u64 {
 }
 
 /// Mirrors MultiView.tsx's `anyConnecting` React state on the Rust side. The
-/// Alt+1~4 global shortcut handler (lib.rs) runs entirely in Rust and has no
-/// visibility into React state — without this, it kept force-focusing a
+/// Alt+1~4 path (the LL keyboard hook, `ll_keyboard_proc`) runs entirely in Rust
+/// and has no visibility into React state — without this, it would force-focus a
 /// mid-connect slot's native window (SetForegroundWindow/BringWindowToTop)
 /// even while the frontend lock disabled the UI buttons for exactly that.
 static CONNECT_LOCK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -170,6 +170,47 @@ pub fn set_connect_lock(locked: bool) {
 
 pub fn is_connect_locked() -> bool {
     CONNECT_LOCK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 연결 중인 슬롯(슬롯 → 그 연결의 generation). 연결을 시작한 순간부터 **쓸 만한 창**(세션 창,
+/// 또는 640x400 이상인 창)이 슬롯에 붙고 3초가 지날 때까지 잡혀 있고, 그동안 Alt+1~4 전환을
+/// 막는다(프론트도 `switch-lock` 이벤트로 최소화/최대화·F11·슬롯 버튼을 막는다).
+/// 프론트의 connect lock(`CONNECT_LOCK`)은 **첫 창**이 붙는 순간 풀린다 — Hyper-V는 그 첫 창이
+/// 작은 "연결 중" 팝업이라, 콘솔이 뜨기 전에 연타하면 전환이 됐다(사용자 보고 2026-10-20).
+/// 끝까지(헌트 종료까지) 잡지 않는 이유: Hyper-V 헌트는 콘솔이 뜬 뒤에도 20초, Horizon은 최대
+/// 180초 더 돈다 — 그동안 Alt+1~4가 안 먹으면 그게 더 큰 문제다.
+fn hunt_locks() -> &'static Mutex<HashMap<String, u64>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn any_hunt_locked() -> bool {
+    !hunt_locks().lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+}
+
+/// 이 헌트의 잠금만 푼다 — 같은 슬롯에 더 새 연결이 시작됐으면 그쪽 잠금은 건드리지 않는다.
+fn release_hunt_lock(slot_id: &str, gen: u64) {
+    let removed = {
+        let mut locks = hunt_locks().lock().unwrap_or_else(|e| e.into_inner());
+        locks.get(slot_id) == Some(&gen) && locks.remove(slot_id).is_some()
+    };
+    if removed { notify_switch_lock(); }
+}
+
+/// 잠금 상태를 프론트에 알린다 — 연결 중엔 상단 최소화/최대화 버튼, F11, 몰입 전환, 슬롯 버튼을
+/// 막는다(사용자 요청 2026-10-21: "완전히 삼키기 전까지 전환·최소/최대화 막기").
+fn notify_switch_lock() {
+    if let Some(app) = APP_HANDLE.get() {
+        let _ = app.emit("switch-lock", any_hunt_locked());
+    }
+}
+
+/// 헌트 스레드가 어떤 경로로 끝나든(성공·실패·취소) 잠금이 남지 않게 한다.
+struct HuntLockGuard(String, u64);
+impl Drop for HuntLockGuard {
+    fn drop(&mut self) {
+        release_hunt_lock(&self.0, self.1);
+    }
 }
 
 /// Pixel bounds of a grid slot, in WebView-container client coordinates.
@@ -223,6 +264,43 @@ pub struct SwallowInfo {
     /// 그 아래 DOM이 비쳐 보인다 — swallow된 자식이 WebView2 표면 위에 그려지므로
     /// z-index로는 필을 띄울 수 없다. None이면 구멍 없음.
     pub header_cutout: Option<CutoutRect>,
+    /// RDP(mstsc)일 때 접속 해상도(원격 데스크톱 크기). `rdp_snap_offsets`가 쓴다.
+    pub rdp_session: Option<(i32, i32)>,
+}
+
+/// 우리가 띄운 mstsc의 접속 해상도(pid → 폭, 높이). `commands::connect_vm`이 기록한다.
+fn rdp_sessions() -> &'static Mutex<HashMap<u32, (i32, i32)>> {
+    static M: OnceLock<Mutex<HashMap<u32, (i32, i32)>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn note_rdp_session_size(pid: u32, w: i32, h: i32) {
+    rdp_sessions().lock().unwrap_or_else(|e| e.into_inner()).insert(pid, (w, h));
+}
+
+/// RDP 창을 **세션 해상도와 정확히 같은 크기**로 놓을 수 있으면 그렇게 만드는 (offset_x, offset).
+///
+/// mstsc는 smart sizing으로 세션 화면을 창 크기에 맞춰 늘리거나 줄인다. 전체화면 슬롯은 테두리
+/// 1px씩 + `BOTTOM_BIAS` 때문에 창이 1918x1081, 세션은 1920x1080이라 배율이 0.999/1.001 —
+/// 화면 전체가 재샘플링돼 흐렸다(사용자 보고 2026-10-15). 창이 세션보다 몇 px만 작으면 창을
+/// 세션 크기 그대로 두고 그 차이만큼 슬롯 밖으로 내밀어(가장자리 1px씩은 region이 자른다) 배율을
+/// 정확히 1로 만든다. 차이가 크면(창 모드 슬롯) 손대지 않는다 — 그때는 원래대로 축소된다.
+/// offset_x/offset은 vmconnect 크롬을 가리던 그 값이라 `framed_rect`·region·필 구멍이 모두
+/// 그대로 따라온다(유닛 테스트 `rdp_window_snaps_to_the_session_size_in_fullscreen`).
+///
+/// 동적 해상도(`dynamic resolution:i:1`)로 해결하려다 되돌렸다: 실기기에서 슬롯 크기가 여러 번
+/// 바뀌어도 원격 해상도가 접속 때 값(1920x1080)에 머물렀고(서버 미지원 또는 mstsc가 프로그램적
+/// 크기 변경에는 반응 안 함 — 미확정), smart sizing을 끈 탓에 스크롤바만 생겼다.
+fn rdp_snap_offsets(session: Option<(i32, i32)>, w: i32, h: i32) -> (i32, i32) {
+    const SNAP: i32 = 8;
+    let Some((sw, sh)) = session else { return (0, 0) };
+    let dw = sw - w;
+    if !(0..=SNAP).contains(&dw) || dw % 2 != 0 { return (0, 0); }
+    let ox = dw / 2;
+    // 창 안에서 슬롯이 시작하는 높이(= offset + BOTTOM_BIAS)도 0..=SNAP 안이어야 슬롯을 다 덮는다.
+    let top_inset = sh - h - ox;
+    if !(0..=SNAP).contains(&top_inset) { return (0, 0); }
+    (ox, top_inset - BOTTOM_BIAS)
 }
 
 const DEFAULT_OFFSET: i32 = 0; // Styles successfully removed
@@ -266,7 +344,10 @@ static REVEAL_BAND: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32:
 /// rect (left, top, right, bottom) in the window's own coordinates — or None
 /// when there is nothing to clip (region should be cleared). Split out from the
 /// Win32 call so the geometry that caused the white-border bugs is unit-testable.
-fn chrome_region_rect(offset_x: i32, offset: i32, band: i32, width: i32, height: i32) -> Option<CutoutRect> {
+/// `trim_bottom`: 테두리가 있는 창(vmconnect)이면 참 — 아래 주석. RDP 맞춤(`rdp_snap_offsets`)도
+/// offset_x를 쓰지만 테두리가 없으므로 자르면 안 된다(자르면 슬롯 맨 아래 1px이 비어 검은 줄이
+/// 생긴다 — 실제 창으로 확인한 테스트 `rdp_snap_region_covers_the_whole_slot`).
+fn chrome_region_rect(offset_x: i32, offset: i32, band: i32, width: i32, height: i32, trim_bottom: bool) -> Option<CutoutRect> {
     let top = offset + band + BOTTOM_BIAS;
     if top == 0 && offset_x == 0 {
         None
@@ -277,7 +358,7 @@ fn chrome_region_rect(offset_x: i32, offset: i32, band: i32, width: i32, height:
         // 창을 1px 키워 테두리를 바깥으로 미는 방식은 vmconnect가 크기 요청을 그대로
         // 안 받아줘서 실패했다. region을 줄이는 건 우리가 100% 통제하므로 확실하다.
         // 대가는 콘텐츠 맨 아래 1px인데, 흰 줄보다 눈에 안 띈다.
-        let border_trim = if offset_x > 0 { 1 } else { 0 };
+        let border_trim = if trim_bottom && offset_x > 0 { 1 } else { 0 };
         Some((offset_x, top, offset_x + width + (HORIZONTAL_BUFFER * 2),
               offset + height + BOTTOM_BIAS - border_trim))
     }
@@ -309,9 +390,21 @@ fn apply_chrome_region(
     height: i32,
     pill: Option<CutoutRect>,
 ) {
+    apply_region_inner(hwnd, offset_x, offset, width, height, pill, !is_rdp_window(hwnd));
+}
+
+fn apply_region_inner(
+    hwnd: HWND,
+    offset_x: i32,
+    offset: i32,
+    width: i32,
+    height: i32,
+    pill: Option<CutoutRect>,
+    trim_bottom: bool,
+) {
     let cutout = pill.map(|p| cutout_in_window(offset_x, offset, p));
     let band = REVEAL_BAND.load(std::sync::atomic::Ordering::Relaxed);
-    let base = chrome_region_rect(offset_x, offset, band, width, height);
+    let base = chrome_region_rect(offset_x, offset, band, width, height, trim_bottom);
     unsafe {
         if base.is_none() && cutout.is_none() {
             let _ = SetWindowRgn(hwnd, HRGN::default(), BOOL::from(true));
@@ -414,6 +507,13 @@ fn framed_rect(x: i32, y: i32, w: i32, h: i32, offset_x: i32, offset: i32) -> Cu
 fn is_horizon_class(class_name: &str) -> bool {
     let c = class_name.to_lowercase();
     c.contains("horizon") || c.contains("omnissa") || c.contains("vmware")
+}
+
+/// mstsc 세션 창인가(클래스로 판단 — RDP 맞춤 창은 테두리가 없다).
+fn is_rdp_window(hwnd: HWND) -> bool {
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetClassNameW(hwnd, &mut buf) };
+    String::from_utf16_lossy(&buf[..n as usize]) == "TscShellContainerClass"
 }
 
 fn get_offset(class_name: &str) -> i32 {
@@ -934,7 +1034,12 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
     hook_container_cursor(actual_parent.0);
     let app = app_handle.clone();
 
+    hunt_locks().lock().unwrap_or_else(|e| e.into_inner()).insert(s_id.clone(), my_gen);
+    notify_switch_lock();
     std::thread::spawn(move || {
+        let _hunt_lock = HuntLockGuard(s_id.clone(), my_gen);
+        // 쓸 만한 창이 붙은 뒤 이 시각까지 다른 창으로 안 바뀌면 잠금을 푼다(hunt_locks 주석).
+        let mut unlock_at: Option<std::time::Instant> = None;
         // Chain of windows already swallowed into this slot (login → picker →
         // desktop). Never re-swallow one — that's what prevents oscillation.
         let mut chain: Vec<isize> = Vec::new();
@@ -1093,6 +1198,18 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
                 match swallow_result {
                     Ok(()) => {
                         current = Some(h_wrap);
+                        // 쓸 만한 창이 붙었으면 전환 잠금을 푼다(hunt_locks 주석).
+                        let mut wr = RECT::default();
+                        let big = unsafe { GetWindowRect(h, &mut wr) }.is_ok()
+                            && wr.right - wr.left >= 640 && wr.bottom - wr.top >= 400;
+                        // 바로 풀지 않고 3초 안정을 기다린다 — Hyper-V는 콘솔이 붙은 직후 고급 세션으로
+                        // 바뀌며 전체 화면으로 자리를 옮기는데, 그 사이 전환하면 그 창과 연결 바가 다른
+                        // 모니터에 떴다(실기기 2026-10-21). 새 창이 또 붙으면 다시 3초.
+                        // Horizon은 로그인 창(작음)이 붙으면 바로 센다 — 안 그러면 사용자가 로그인하는
+                        // 동안(헌트는 최대 180초) 전환·최소화가 계속 막힌다(리뷰 지적 2026-10-22).
+                        if is_session || big || is_horizon {
+                            unlock_at = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        }
                         if is_session {
                             session_found = true;
                             break;
@@ -1115,6 +1232,11 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
             if is_horizon && last_dump.elapsed().as_secs() >= 5 {
                 last_dump = std::time::Instant::now();
                 dump_all_visible_windows();
+            }
+
+            if unlock_at.is_some_and(|t| std::time::Instant::now() >= t) {
+                unlock_at = None;
+                release_hunt_lock(&s_id, my_gen);
             }
 
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1356,6 +1478,18 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     // jitter filter and overflowing the surface), so we deliberately don't clip here.
     // smart sizing:i:1 in the .rdp scales the bitmap to fill the slot instead.
 
+    // RDP면 접속 해상도를 찾아 두고, 슬롯이 그 크기에 가까우면 창을 정확히 맞춘다(rdp_snap_offsets).
+    let rdp_session = if class_str.contains("TscShellContainerClass") {
+        let mut pid = 0u32;
+        unsafe { let _ = GetWindowThreadProcessId(child_hwnd, Some(&mut pid)); }
+        rdp_sessions().lock().unwrap_or_else(|e| e.into_inner()).get(&pid).copied()
+    } else {
+        None
+    };
+    if rdp_session.is_some() {
+        (offset_x, offset) = rdp_snap_offsets(rdp_session, width, height);
+    }
+
     let (original_style, original_ex_style, original_parent) = unsafe {
         let mut pid = 0;
         let _tid = GetWindowThreadProcessId(child_hwnd, Some(&mut pid));
@@ -1447,6 +1581,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
             offset_x,
             vmconnect_pid,
             header_cutout: None,
+            rdp_session,
         });
 
         let (fx, fy, fw, fh) = framed_rect(x, y, width, height, offset_x, offset);
@@ -1476,6 +1611,12 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     // Horizon 데스크톱 프레임인지 — 클래스에 Horizon/Omnissa/VMware가 들어간다
     // (`HwndWrapper[Horizon.Client.UI;;GUID]`). 여기서 한 번만 판정해 루프로 넘긴다.
     let is_horizon_cap = is_horizon_class(&class_str);
+    if is_horizon_cap {
+        // 전역 LOCATIONCHANGE 훅은 마우스가 움직일 때마다도 깨어나므로 Horizon을 처음 붙일
+        // 때만 켠다 — Horizon을 안 쓰는 사용자는 비용을 낼 이유가 없다.
+        static WATCH: std::sync::Once = std::sync::Once::new();
+        WATCH.call_once(spawn_horizon_watch);
+    }
     dlog!("[horizon] frame class='{}' is_horizon={}", class_str, is_horizon_cap);
     // Horizon은 자체 연결 바(핀 / Ctrl+Alt+Del / USB / 전체 화면 종료)를 화면 상단
     // 정중앙에 띄우는데, 그 자리가 우리 헤더 필과 정확히 겹친다 — 필을 못 잡고
@@ -1545,6 +1686,12 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                 let state = lock_state();
                 if let Some(info) = state.get(&s_id) {
                     if info.child_hwnd != h_child_raw { break; }
+                    // RDP 맞춤 오프셋은 update_position이 슬롯 크기에 따라 바꾼다 — 낡은 값으로
+                    // 위치를 "보정"하면 방금 맞춘 창을 도로 끌고 간다.
+                    if info.rdp_session.is_some() {
+                        offset_x_cap = info.offset_x;
+                        offset_cap = info.offset;
+                    }
                     ((info.x, info.y, info.width, info.height), info.is_visible, true, info.header_cutout)
                 } else {
                     ((0, 0, 0, 0), false, false, None)
@@ -1562,6 +1709,9 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                             let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(h, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
                         }
                     } else {
+                        // vmconnect 연결 바(BBar)는 별도 창이라 프레임을 세워둬도 제 모니터에 남는다
+                        // (실기기 2026-10-21: 연결 중 전환하자 다른 모니터에 떴다).
+                        if let Some(pid) = vmconnect_pid_cap { hide_vmconnect_bbar(pid); }
                         // 숨은 슬롯의 창이 화면에 나와 있으면 다시 세워둔다. 아래 위치 보정이
                         // set_visibility(false)와 엇갈려 방금 세워둔 창을 도로 끌어낼 수 있고,
                         // 최상위 창이라 그러면 지금 보는 슬롯 위에 그대로 남는다.
@@ -1886,7 +2036,10 @@ fn restore_and_close(info: &SwallowInfo) {
         if IsWindow(child_hwnd).as_bool() {
             // 소유 관계부터 끊는다 — 소유자(메인 창)가 파괴되면 Windows가 소유된 창도 같이 파괴한다.
             let _ = SetWindowLongPtrW(child_hwnd, GWLP_HWNDPARENT, info.original_parent);
-            let _ = SetWindowLongPtrW(child_hwnd, GWL_STYLE, info.original_style);
+            // 최대화 비트는 빼고 되돌린다 — 스왈로우 때 최대화를 풀어 뒀으므로 비트만 되살리면
+            // 아래 900x650 일반 창에 "최대화" 상태가 붙는다(연결 끊기 확인 창에서 취소하면 보인다).
+            let _ = SetWindowLongPtrW(child_hwnd, GWL_STYLE,
+                info.original_style & !(windows::Win32::UI::WindowsAndMessaging::WS_MAXIMIZE.0 as isize));
             let _ = SetWindowLongPtrW(child_hwnd, GWL_EXSTYLE, info.original_ex_style);
             let _ = SetWindowRgn(child_hwnd, HRGN::default(), BOOL::from(true));
             let _ = SetWindowPos(child_hwnd, HWND(std::ptr::null_mut()), 120, 120, 900, 650,
@@ -1990,7 +2143,8 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
         // 불리는데 숨은 창에는 SetForegroundWindow가 안 먹고, 위 place는 NOACTIVATE라 그 뒤로
         // 아무도 포커스를 안 준다 — 클릭 한 번 하기 전까지 키가 세션으로 안 갔다
         // (실기기 2026-10-12). 보여준 뒤 한 번 더 준다. 앱이 앞에 있을 때만.
-        if snap.horizon && app_is_foreground() {
+        // Alt+숫자를 아직 누르고 있으면(PENDING_FOCUS) 포커스는 뗄 때 훅이 옮긴다.
+        if snap.horizon && app_is_foreground() && PENDING_FOCUS.load(std::sync::atomic::Ordering::Relaxed) == 0 {
             focus_window(slot_id);
         }
 
@@ -2308,6 +2462,9 @@ pub fn update_position(slot_id: &str, x: i32, y: i32, width: i32, height: i32) {
         info.y = y;
         info.width = width;
         info.height = height;
+        if info.rdp_session.is_some() {
+            (info.offset_x, info.offset) = rdp_snap_offsets(info.rdp_session, width, height);
+        }
         
         if info.is_visible {
             unsafe {
@@ -2445,7 +2602,6 @@ pub fn install_keyboard_hook(app: AppHandle, main_hwnd: isize) {
     };
     let _ = APP_HANDLE.set(app);
     MAIN_HWND.store(main_hwnd, std::sync::atomic::Ordering::Relaxed);
-    spawn_horizon_watch();
     std::thread::spawn(|| unsafe {
         // LL hooks need a message pump on the installing thread.
         let mut hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0) {
@@ -2515,55 +2671,122 @@ fn app_is_foreground() -> bool {
 
 unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: windows::Win32::Foundation::WPARAM, lparam: LPARAM) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, KBDLLHOOKSTRUCT, HC_ACTION, LLKHF_INJECTED, LLKHF_UP, LLKHF_ALTDOWN,
-    };
+    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, KBDLLHOOKSTRUCT, HC_ACTION, LLKHF_UP, LLKHF_ALTDOWN};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VIRTUAL_KEY, VK_LWIN, VK_RWIN, VK_CONTROL};
+    use std::sync::atomic::Ordering::Relaxed;
 
     if code == HC_ACTION as i32 {
         let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
-        let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
-        let alt_down = kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
-        // Alt+1..4 (slot switching) must keep working while a VM holds focus —
-        // with keyboardhook:i:1 the remote would otherwise swallow them.
-        let is_slot_key = alt_down && (0x31..=0x34).contains(&kb.vkCode);
-
-        if !injected && is_slot_key {
+        // 숫자 1~4만 본다. 주입(SendInput) 입력도 받는다 — 매크로 패드·화상 키보드의 Alt+1~4는
+        // 예전엔 전역 단축키가 받았다. 우리 자신은 키보드 입력을 주입하지 않는다.
+        if (0x31..=0x34).contains(&kb.vkCode) {
             let up = kb.flags.0 & LLKHF_UP.0 != 0;
-            // 슬롯 키를 **우리 훅이 보기는 하는지** 남긴다. 안 찍히면 다른 앱(Horizon)이
-            // 훅 체인에서 우리보다 먼저 가로채 소비한 것이고, 찍히는데 fg=false면
-            // 포그라운드 판정이 문제다 — 둘은 고치는 방법이 완전히 다르다.
-            if !up {
-                dlog!("[keyhook] slot key vk={} seen, app_foreground={}",
-                    kb.vkCode - 0x30, app_is_foreground());
+            let alt = kb.flags.0 & LLKHF_ALTDOWN.0 != 0;
+            // **Alt 하나만** 눌린 Alt+1~4만 슬롯 키다. Win이나 Ctrl이 같이 눌려 있으면 다른
+            // 단축키다(Win+숫자 = 작업표시줄 앱 전환, Ctrl+Alt = AltGr 문자 입력). 사용자 보고
+            // (2026-10-20): "Win+숫자로 크롬을 전환하면 슬롯도 같이 바뀐다". 수정자는 Alt 플래그가
+            // 선 누름에서만 본다 — 뗌의 결정은 아래 slot_key_decision이 누름을 그대로 따른다.
+            let held = |vk: VIRTUAL_KEY| GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000 != 0;
+            let bit = 1u8 << (kb.vkCode - 0x31);
+            let was_eaten = EATEN_DIGITS.load(Relaxed) & bit != 0;
+            let was_down = DOWN_DIGITS.load(Relaxed) & bit != 0;
+            // 키를 누르고 있으면 오는 **자동 반복 누름**은 우리가 본 누름/뗌(`DOWN_DIGITS`)으로 안다.
+            // GetAsyncKeyState로는 못 안다 — 앞에 RDP 창이 있으면 mstsc 훅이 그 키를 가져가서
+            // 시스템 키 상태에 반영되지 않는다(실측 2026-10-21, F24 주입 프로브: 통과시킨 누름 뒤에도
+            // "안 눌림"). 반복은 첫 누름의 결정을 그대로 따른다 — 안 그러면
+            // Ctrl+Alt+1을 누른 채 Ctrl만 떼는 순간 다음 반복이 "새 Alt+1"이 되어 슬롯이 바뀌고
+            // 원격에는 1이 눌린 채 남아 계속 입력됐다(실기기 2026-10-20, 로그에 반복 전환 30회).
+            let (win, ctrl) = if alt && !up { (held(VK_LWIN) || held(VK_RWIN), held(VK_CONTROL)) } else { (false, false) };
+            let app_fg = alt && !up && app_is_foreground();
+            let (eat, switch, eaten_after) = slot_key_step(up, was_down, alt, win || ctrl, app_fg, was_eaten);
+            if eaten_after { EATEN_DIGITS.fetch_or(bit, Relaxed); } else { EATEN_DIGITS.fetch_and(!bit, Relaxed); }
+            if up { DOWN_DIGITS.fetch_and(!bit, Relaxed); } else { DOWN_DIGITS.fetch_or(bit, Relaxed); }
+
+            // Alt 플래그가 선 채 Win+숫자가 오는 건 정상이라면 없는 조합이다. "세션 클라이언트가 Alt
+            // 뗌을 가져가 로컬에 Alt가 눌린 채 남는다"(미확정 추정)가 맞으면 여기서 찍힌다. 릴리즈
+            // 빌드에서도 남기되 실행당 20줄까지만 — Ctrl 조합(AltGr 문자 입력)은 찍지 않는다.
+            if win && ODD_CHORD_LOGS.fetch_add(1, Relaxed) < 20 {
+                let (d, fg) = (kb.vkCode - 0x30, app_fg);
+                std::thread::spawn(move || {
+                    dlog(&format!("[keyhook] alt flag + win held on digit {d} -> passed (app_fg={fg})"));
+                });
             }
-            // **포그라운드가 우리면 슬롯 키는 우리 것이다.** 예전엔 vm_key_target()이
-            // Some일 때만(= 포커스가 swallow된 자식 트리 안일 때만) 가로챘는데,
-            // Omnissa/Horizon은 포커스 토폴로지가 달라 그 검사를 통과하지 못해
-            // Alt+1~4가 원격으로 넘어가 버렸다(실측: Horizon 슬롯에서 [keyhook]
-            // target 줄이 아예 안 찍힘). 어떤 앱이 어떤 식으로 포커스를 잡든
-            // "HyperDesk가 포그라운드"면 슬롯 전환은 우리가 처리하는 게 맞다.
-            if app_is_foreground() {
-                if !up {
-                    let idx = kb.vkCode - 0x31;
-                    // Off-thread: app.emit serializes into the webview; the hook
-                    // callback must return fast (system LL-hook timeout).
-                    std::thread::spawn(move || {
-                        if let Some(app) = APP_HANDLE.get() {
-                            let slot = format!("slot-{}", idx);
-                            let _ = app.emit("hotkey-focus", slot.clone());
-                            focus_window(&slot);
-                        }
-                    });
+            if switch {
+                let idx = kb.vkCode - 0x31;
+                dlog!("[keyhook] slot key {} -> switch", idx + 1);
+                // Off-thread: app.emit serializes into the webview; the hook
+                // callback must return fast (system LL-hook timeout).
+                std::thread::spawn(move || {
+                    // 연결 중에는 전환하지 않는다 — 스왈로우 도중 슬롯을 바꾸면 임베드가 깨진다.
+                    if is_connect_locked() || any_hunt_locked() { return; }
+                    // 화면은 지금 바꾸고 **키보드 포커스는 숫자를 뗄 때** 옮긴다. 누른 채로 포커스를
+                    // 새 세션에 주면 그 클라이언트가 활성화되며 자기 훅을 우리 앞에 걸고, 이어지는
+                    // 자동 반복 누름을 가져가 원격에 "1"이 입력됐다(실기기 2026-10-21, Alt+1 꾹).
+                    // 지금 앞에 있는 창은 그대로라 반복은 우리 훅이 계속 먹는다. 뗌을 못 보면
+                    // (다른 훅이 가져감) 1.5초 뒤 그냥 옮긴다.
+                    // 1.5초 안에 다시 누르면 그 누름이 새 대기가 된다 — 이 스레드는 자기 대기일 때만 옮긴다.
+                    let seq = PENDING_SEQ.fetch_add(1, Relaxed).wrapping_add(1);
+                    PENDING_FOCUS.store(idx as u8 + 1, Relaxed);
+                    if let Some(app) = APP_HANDLE.get() {
+                        let _ = app.emit("hotkey-focus", format!("slot-{}", idx));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    if PENDING_SEQ.load(Relaxed) == seq
+                        && PENDING_FOCUS.compare_exchange(idx as u8 + 1, 0, Relaxed, Relaxed).is_ok() {
+                        focus_window(&format!("slot-{}", idx));
+                    }
+                });
+            }
+            if up && eat {
+                let p = PENDING_FOCUS.swap(0, Relaxed);
+                if p != 0 {
+                    std::thread::spawn(move || focus_window(&format!("slot-{}", p - 1)));
                 }
-                return LRESULT(1); // keep it away from both the remote and RegisterHotKey
+            }
+            if eat {
+                return LRESULT(1); // keep it away from the remote session
             }
         }
     }
     CallNextHookEx(None, code, wparam, lparam)
 }
 
+/// Alt+1~4 슬롯 키 판정. 반환은 (이 이벤트를 먹을지, 슬롯을 바꿀지, 이 숫자의 "먹었다" 비트 새 값).
+/// `was_down` = 이 숫자의 누름을 본 뒤 아직 뗌을 못 봤다(= 이번 누름은 자동 반복). 단, 먹은 누름
+/// 뒤에 Alt 없이 오는 누름은 반복으로 보지 않는다 — 뗌을 놓쳐 비트가 남은 상태에서 그냥 숫자를
+/// 치면 그 숫자를 먹어버리게 되기 때문이다(놓친 뗌의 대가는 많아야 Alt+숫자 한 번 무시).
+///
+/// **뗌과 자동 반복 누름은 첫 누름의 결정을 그대로 따른다**(`was_eaten` = 이 숫자의 마지막
+/// 첫 누름을 먹었는가).
+/// 뗌을 따로 다시 판정하면 수정자를 떼는 순서에 따라 엇갈린다 — 예: VM 포커스에서 Ctrl+Alt+1은
+/// 누름이 통과해 원격이 받는데, Ctrl을 먼저 떼면 뗌은 "Alt+1"로 보여 먹혔고, 원격에는 1이
+/// 눌린 채 남아 자동 반복됐다(리뷰 지적 2026-10-20). 반대로 Alt를 먼저 떼면 먹은 누름의 뗌이
+/// 새던 것(v1.3.0부터의 알려진 비대칭)도 같이 없어진다.
+fn slot_key_step(up: bool, was_down: bool, alt: bool, other_mod: bool, app_fg: bool, was_eaten: bool) -> (bool, bool, bool) {
+    if up {
+        return (was_eaten, false, false);
+    }
+    if was_down && !(was_eaten && !alt) {
+        return (was_eaten, false, was_eaten); // 자동 반복: 첫 누름을 따른다
+    }
+    let eat = alt && !other_mod && app_fg;
+    (eat, eat, eat)
+}
+
+/// 숫자 1~4별 "누름을 먹었다" 비트(bit0 = 1). `slot_key_step`의 `was_eaten`.
+static EATEN_DIGITS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// Alt+1~4로 바꾼 슬롯 중 아직 키보드 포커스를 안 옮긴 것(슬롯 번호 + 1, 없으면 0).
+/// 숫자를 떼는 순간(또는 1.5초 뒤) 옮긴다 — `ll_keyboard_proc`의 switch 주석.
+static PENDING_FOCUS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// Alt+숫자 전환 번호 — 1.5초 대체 경로가 더 새 전환의 대기를 가로채지 않게 한다.
+static PENDING_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// 숫자 1~4별 "누름을 봤고 아직 뗌을 못 봤다" 비트. `slot_key_step`의 `was_down`.
+static DOWN_DIGITS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// `[keyhook] alt flag + win held` 진단 줄 수(실행당 20줄 상한).
+static ODD_CHORD_LOGS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
 /// Forward keyboard focus to a swallowed window by slot ID.
-/// Called from hotkey handlers and the focus_slot_window command.
+/// Called from the LL keyboard hook (Alt+1~4) and the focus_slot_window command.
 pub fn focus_window(slot_id: &str) {
     let (hwnd_raw, vmconnect_pid) = {
         let state = lock_state();
@@ -2636,7 +2859,7 @@ pub fn mark_fullscreen_native(hwnd: HWND, on: bool) {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
     use windows::Win32::UI::Shell::{ITaskbarList2, TaskbarList};
     unsafe {
-        // Tauri commands/hotkey handlers run on worker threads with no
+        // Tauri commands and the keyboard hook's spawned threads run with no
         // guaranteed COM state. Per-thread init is idempotent (RPC_E_CHANGED_MODE
         // == already up, fine).
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -3110,6 +3333,7 @@ mod tests {
                 class_name: "STATIC".to_string(),
                 offset: 0, offset_x: 0,
                 vmconnect_pid: None,
+                rdp_session: None,
                 // A cutout must be present or apply_chrome_region clears the region
                 // entirely for an RDP-shaped window — the floating header pill is
                 // always cut out of a live session, so this matches reality.
@@ -3201,7 +3425,7 @@ mod tests {
     fn chrome_region_none_when_nothing_to_clip() {
         // BOTTOM_BIAS가 생긴 뒤로는 크롬이 없어도 **항상** 자를 게 있다(바이어스만큼
         // 아래로 옮겨야 하므로). 예전엔 이 경우 None으로 region을 지웠다.
-        let r = chrome_region_rect(0, 0, 0, 1918, 1077).unwrap();
+        let r = chrome_region_rect(0, 0, 0, 1918, 1077, true).unwrap();
         assert_eq!(r.1, BOTTOM_BIAS);            // 보이는 구간이 바이어스만큼 내려감
         assert_eq!(r.3 - r.1, 1077);             // 그래도 슬롯 높이는 그대로 덮는다
     }
@@ -3211,7 +3435,7 @@ mod tests {
         // Enhanced session (offset 2,2), no reveal band. The region must expose
         // exactly the slot rect starting at the chrome offset — anything else
         // re-exposes the border or crops the VM.
-        let r = chrome_region_rect(2, 2, 0, 1918, 1077).unwrap();
+        let r = chrome_region_rect(2, 2, 0, 1918, 1077, true).unwrap();
         // offset_x>0(테두리 있음)이므로 아래를 1px 덜 보여준다 — 흰 줄 방지.
         assert_eq!(r, (2, 2 + BOTTOM_BIAS, 2 + 1918 + HORIZONTAL_BUFFER * 2, 2 + 1077 + BOTTOM_BIAS - 1));
         assert_eq!(r.2 - r.0, 1918 + HORIZONTAL_BUFFER * 2);
@@ -3222,7 +3446,7 @@ mod tests {
     fn chrome_region_reveal_band_pushes_top_down() {
         // Immersive top-edge reveal: a band crops the VM's top so the header
         // shows through. The visible top moves down by exactly the band.
-        let revealed = chrome_region_rect(0, 0, 48, 1000, 800).unwrap();
+        let revealed = chrome_region_rect(0, 0, 48, 1000, 800, true).unwrap();
         assert_eq!(revealed.1, 48 + BOTTOM_BIAS);       // 밴드 + 바이어스만큼 위가 내려감
         assert_eq!(revealed.3, 800 + BOTTOM_BIAS);      // 아래도 바이어스만큼 함께 이동
         assert_eq!(revealed.3 - revealed.1, 800 - 48);  // VM 영역은 밴드만큼만 줄어든다
@@ -3231,7 +3455,7 @@ mod tests {
     #[test]
     fn chrome_region_band_composes_with_chrome_offset() {
         // Both a vmconnect chrome offset AND a reveal band: they add on top.
-        let r = chrome_region_rect(2, 53, 48, 1000, 800).unwrap();
+        let r = chrome_region_rect(2, 53, 48, 1000, 800, true).unwrap();
         assert_eq!(r.1, 53 + 48 + BOTTOM_BIAS); // ribbon offset + reveal band + bias
         assert_eq!(r.0, 2);       // left chrome unchanged by the band
     }
@@ -3265,6 +3489,205 @@ mod tests {
         assert!(excluded_hwnds().contains(&fake_hwnd), "claimed hwnd must be excluded");
         lock_claimed().remove(&fake_hwnd);
         assert!(!excluded_hwnds().contains(&fake_hwnd), "release must un-exclude it");
+    }
+}
+
+#[cfg(test)]
+mod rdp_snap_tests {
+    use super::{framed_rect, rdp_snap_offsets, apply_region_inner, BOTTOM_BIAS};
+
+    /// 전체화면 슬롯(테두리 1px씩 안쪽, 1918x1078)이면 창이 세션(1920x1080) 크기 그대로
+    /// 모니터 원점에 놓여 배율이 정확히 1이 된다. 창 모드 슬롯은 손대지 않는다.
+    #[test]
+    fn rdp_window_snaps_to_the_session_size_in_fullscreen() {
+        let s = Some((1920, 1080));
+        let (ox, oy) = rdp_snap_offsets(s, 1918, 1078);
+        assert_eq!(framed_rect(1, 1, 1918, 1078, ox, oy), (0, 0, 1920, 1080));
+        // 슬롯 원점은 창 안 (ox, oy + BOTTOM_BIAS) — 필 구멍과 region이 같은 값을 쓴다.
+        assert_eq!((ox, oy + super::BOTTOM_BIAS), (1, 1));
+        // 창 모드 슬롯: 차이가 커서 그대로(축소 표시).
+        assert_eq!(rdp_snap_offsets(s, 1476, 1034), (0, 0));
+        // 세션보다 큰 슬롯은 덮지 못하므로 맞추지 않는다.
+        assert_eq!(rdp_snap_offsets(s, 1922, 1078), (0, 0));
+        // RDP가 아니면(접속 해상도 모름) 아무것도 안 한다.
+        assert_eq!(rdp_snap_offsets(None, 1918, 1078), (0, 0));
+    }
+
+    /// 실제 창에 region을 걸어 본다: 세션 크기(1920x1080) 창에서
+    /// 슬롯(1918x1078) 전체가 보이고, 헤더 필 자리만 뚫려야 한다. 순수 함수 테스트로는 못 잡은
+    /// "아래 1px 잘림"을 이 테스트가 잡았다(2026-10-21).
+    #[test]
+    fn rdp_snap_region_covers_the_whole_slot() {
+        use windows::core::w;
+        use windows::Win32::Foundation::{HINSTANCE, HWND, RECT};
+        use windows::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject, PtInRegion, HGDIOBJ, GetWindowRgn, GetWindowRgnBox};
+        use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW,
+            HMENU, WINDOW_EX_STYLE, WNDCLASSW, WS_POPUP,
+        };
+        unsafe {
+            unsafe extern "system" fn wp(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT { DefWindowProcW(h, m, w, l) }
+            let wc = WNDCLASSW { lpfnWndProc: Some(wp), lpszClassName: w!("HdTestRdpSnap"), ..Default::default() };
+            let _ = RegisterClassW(&wc); // 이미 등록돼 있으면 실패해도 된다
+            let h = CreateWindowExW(WINDOW_EX_STYLE(0), w!("HdTestRdpSnap"), w!("rdp"), WS_POPUP,
+                -20000, -20000, 1920, 1080, HWND::default(), HMENU::default(), HINSTANCE::default(), None).expect("window");
+            let (ox, oy) = rdp_snap_offsets(Some((1920, 1080)), 1918, 1078);
+            let pill = (468, 0, 288, 26); // 슬롯 기준 필 사각형(실제 로그 값)
+            apply_region_inner(h, ox, oy, 1918, 1078, Some(pill), false); // RDP 창 = 아래를 자르지 않음
+            let mut rb = RECT::default();
+            let kind = GetWindowRgnBox(h, &mut rb);
+            let rgn = CreateRectRgn(0, 0, 0, 0);
+            let _ = GetWindowRgn(h, rgn);
+            // 창 좌표 = 슬롯 좌표 + (ox, oy + BOTTOM_BIAS)
+            let (sx, sy) = (ox, oy + BOTTOM_BIAS);
+            let inside = |x: i32, y: i32| PtInRegion(rgn, sx + x, sy + y).as_bool();
+            let r = (rb.left, rb.top, rb.right, rb.bottom, inside(0, 1077), inside(1917, 1077), inside(468 + 10, 10), inside(468 - 1, 10));
+            let _ = DeleteObject(HGDIOBJ(rgn.0));
+            let _ = DestroyWindow(h);
+            assert!(kind.0 != 0, "region이 걸려야 한다");
+            assert_eq!((r.0, r.1, r.2, r.3), (1, 1, 1919, 1079), "슬롯 1918x1078 전체를 덮어야 한다");
+            assert!(r.4 && r.5, "슬롯 맨 아래 줄의 양 끝이 보여야 한다(검은 줄 없음)");
+            assert!(!r.6, "헤더 필 자리는 뚫려 있어야 한다");
+            assert!(r.7, "필 바로 왼쪽은 보여야 한다(구멍이 필 크기만큼만)");
+        }
+    }
+}
+
+/// 실제 `ll_keyboard_proc`을 이 프로세스에 걸고, 우리 테스트 창을 앞에 둔 채 Alt+1을 SendInput으로
+/// 넣어 **슬롯 전환 판정이 실제로 나는지** 본다(Windows가 주는 LLKHF 플래그 그대로).
+/// 수동 실행: `cargo test --lib alt_digit_end_to_end -- --ignored --nocapture --test-threads=1`
+/// 테스트 창이 잠깐 앞으로 나오고, 끝나면 원래 앞에 있던 창으로 돌려놓는다.
+#[cfg(test)]
+mod hook_e2e {
+    use super::*;
+    use std::sync::atomic::Ordering::SeqCst;
+    use windows::core::w;
+    use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_MENU};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, GetForegroundWindow, PeekMessageW, RegisterClassW, SetWindowsHookExW,
+        UnhookWindowsHookEx, HMENU, MSG, PM_REMOVE, WH_KEYBOARD_LL, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    };
+
+    fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+        INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT {
+            wVk: vk, dwFlags: if up { KEYEVENTF_KEYUP } else { Default::default() }, ..Default::default() } } }
+    }
+    fn pump(ms: u64) {
+        let end = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+        let mut msg = MSG::default();
+        while std::time::Instant::now() < end {
+            unsafe { while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {} }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    unsafe extern "system" fn wp(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT { DefWindowProcW(h, m, w, l) }
+
+    #[test]
+    #[ignore]
+    fn alt_digit_end_to_end() {
+        unsafe {
+            let prev = GetForegroundWindow();
+            let wc = WNDCLASSW { lpfnWndProc: Some(wp), lpszClassName: w!("HdHookE2E"), ..Default::default() };
+            let _ = RegisterClassW(&wc);
+            let main = CreateWindowExW(WINDOW_EX_STYLE(0), w!("HdHookE2E"), w!("hook e2e"), WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                100, 100, 300, 200, HWND::default(), HMENU::default(), HINSTANCE::default(), None).expect("window");
+            MAIN_HWND.store(main.0 as isize, SeqCst);
+            let _ = SendInput(&[INPUT { r#type: INPUT_MOUSE, ..Default::default() }], std::mem::size_of::<INPUT>() as i32);
+            let _ = SetForegroundWindow(main);
+            pump(200);
+            let fg_ok = GetForegroundWindow() == main;
+            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0).expect("hook");
+            PENDING_FOCUS.store(0, SeqCst);
+            let one = VIRTUAL_KEY(0x31);
+            for (vk, up) in [(VK_MENU, false), (one, false), (one, true), (VK_MENU, true)] {
+                let sent = SendInput(&[key(vk, up)], std::mem::size_of::<INPUT>() as i32);
+                assert_eq!(sent, 1, "SendInput 실패 — 화면 잠김/관리자 창");
+                pump(80);
+            }
+            let pending_or_focused = PENDING_FOCUS.load(SeqCst);
+            let _ = UnhookWindowsHookEx(hook);
+            let _ = DestroyWindow(main);
+            MAIN_HWND.store(0, SeqCst);
+            if !prev.0.is_null() { let _ = SetForegroundWindow(prev); }
+            println!("fg_ok={fg_ok} pending_after={pending_or_focused} eaten_bits={:#b} down_bits={:#b}",
+                EATEN_DIGITS.load(SeqCst), DOWN_DIGITS.load(SeqCst));
+            assert!(fg_ok, "테스트 창을 앞으로 못 가져왔다");
+        }
+    }
+}
+#[cfg(test)]
+mod hunt_lock_tests {
+    use super::{any_hunt_locked, hunt_locks, release_hunt_lock, HuntLockGuard};
+
+    /// 연결 잠금은 그 연결(generation)만 풀 수 있다 — 같은 슬롯에 새 연결이 시작됐는데 옛 헌트가
+    /// 끝나면서 새 잠금을 풀어버리면 연결 중 전환이 다시 된다.
+    #[test]
+    fn only_the_owning_hunt_releases_the_lock() {
+        let slot = "test-hunt-lock";
+        hunt_locks().lock().unwrap().insert(slot.to_string(), 7);
+        assert!(any_hunt_locked());
+        release_hunt_lock(slot, 6); // 옛 헌트
+        assert!(hunt_locks().lock().unwrap().contains_key(slot), "옛 헌트가 새 잠금을 풀면 안 된다");
+        drop(HuntLockGuard(slot.to_string(), 7)); // 현재 헌트가 어떤 경로로든 끝남
+        assert!(!hunt_locks().lock().unwrap().contains_key(slot));
+    }
+}
+#[cfg(test)]
+mod slot_key_tests {
+    use super::slot_key_step;
+
+    /// 키 이벤트 하나. `alt`/`ctrl`/`win`은 그 순간 눌려 있는 수정자.
+    #[derive(Clone, Copy)]
+    struct Ev { up: bool, alt: bool, ctrl: bool, win: bool }
+    fn dn(alt: bool, ctrl: bool, win: bool) -> Ev { Ev { up: false, alt, ctrl, win } }
+    fn up(alt: bool) -> Ev { Ev { up: true, alt, ctrl: false, win: false } }
+
+    /// 훅과 같은 방식으로 이벤트 열을 흘린다(먹었다/눌려 있다 비트를 훅처럼 갱신).
+    /// 반환: (먹은 이벤트 번호들, 전환 횟수).
+    fn run(app_fg: bool, evs: &[Ev]) -> (Vec<usize>, usize) {
+        let (mut eaten_bit, mut down_bit, mut eaten, mut switches) = (false, false, vec![], 0);
+        for (i, e) in evs.iter().enumerate() {
+            let (eat, sw, after) = slot_key_step(e.up, down_bit, e.alt, e.ctrl || e.win, app_fg, eaten_bit);
+            eaten_bit = after;
+            down_bit = !e.up;
+            if eat { eaten.push(i); }
+            if sw { switches += 1; }
+        }
+        (eaten, switches)
+    }
+
+    #[test]
+    fn alt_digit_switches_once_and_hides_its_release() {
+        // Alt+1 누르고 있다가(반복 3번) 뗌: 전부 먹고 전환은 한 번.
+        let (eaten, sw) = run(true, &[dn(true, false, false), dn(true, false, false), dn(true, false, false), dn(true, false, false), up(true)]);
+        assert_eq!((eaten, sw), (vec![0, 1, 2, 3, 4], 1));
+        // Alt를 먼저 떼고 숫자를 떼도 그 뗌은 먹는다(안 그러면 뗌만 새어 나간다).
+        let (eaten, _) = run(true, &[dn(true, false, false), up(false)]);
+        assert_eq!(eaten, vec![0, 1]);
+    }
+
+    #[test]
+    fn ctrl_alt_digit_then_releasing_ctrl_never_turns_into_a_slot_key() {
+        // 실기기 재현(2026-10-20): VM에서 Ctrl+Alt+1 누른 채(반복) Ctrl만 떼고 반복이 이어지다 뗌.
+        // 예전엔 Ctrl을 뗀 뒤 반복이 "새 Alt+1"로 판정돼 전환 + 뗌을 먹어 원격에 1이 눌린 채 남았다.
+        let evs = [dn(true, true, false), dn(true, true, false), dn(true, false, false), dn(true, false, false), up(true)];
+        assert_eq!(run(true, &evs), (vec![], 0), "전부 원격으로 가야 한다(누름·반복·뗌 짝이 맞게)");
+        // Win+Alt 플래그(Win+숫자에 Alt가 눌린 것으로 남은 경우)도 마찬가지.
+        assert_eq!(run(true, &[dn(true, false, true), dn(true, false, false), up(true)]), (vec![], 0));
+    }
+
+    #[test]
+    fn a_missed_release_never_swallows_plain_typing() {
+        // Alt+1(먹음) 뒤 뗌을 놓침(다른 훅이 가져감) → 나중에 그냥 1을 치면 반드시 통과해야 한다.
+        assert_eq!(run(true, &[dn(true, false, false), dn(false, false, false), up(false)]), (vec![0], 1));
+    }
+
+    #[test]
+    fn nothing_is_ours_when_another_app_is_in_front_or_alt_is_not_held() {
+        assert_eq!(run(false, &[dn(true, false, false), up(true)]), (vec![], 0));
+        assert_eq!(run(true, &[dn(false, false, false), up(false)]), (vec![], 0));
     }
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { User, Bell, Sun, Moon, Monitor, Palette, Shield, RefreshCw, MonitorPlay, Keyboard, Database, FolderOpen, EyeOff, Trash2, Package, Languages, Link2 } from "lucide-react";
-import { useSettings } from "@/contexts/SettingsContext";
+import { User, Bell, Sun, Moon, Monitor, Palette, Shield, MonitorPlay, Keyboard, Database, Copy, Eye, Trash2, Package, Languages, Link2 } from "lucide-react";
+import { useSettings, POLL_MIN_SEC, POLL_MAX_SEC } from "@/contexts/SettingsContext";
 import { applyTheme } from "@/lib/theme";
 import { useT, LANGS, LANG_LABEL, type Key } from "@/lib/i18n";
 import { api } from "@/lib/tauri-api";
@@ -8,29 +8,12 @@ import type { ToastType } from "@/hooks/useToast";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { LicenseModal } from "@/components/LicenseModal";
 
-type UpdateState = "idle" | "checking" | "upToDate" | "available" | "error";
-
-const MS_STORE_URL = "https://apps.microsoft.com/detail/9NPVXL622ZQQ";
-
-// Store-distributed (MSIX) installs can't write to their own install
-// directory, so an in-app self-updater (tauri-plugin-updater's
-// downloadAndInstall) can't work — this only checks the latest GitHub release
-// tag against the running version and, if newer, sends the user to the Store
-// listing (MS handles the actual update from there).
-function isNewerVersion(latest: string, current: string): boolean {
-  const l = latest.split(".").map(Number);
-  const c = current.split(".").map(Number);
-  for (let i = 0; i < Math.max(l.length, c.length); i++) {
-    const a = l[i] ?? 0, b = c[i] ?? 0;
-    if (a !== b) return a > b;
-  }
-  return false;
-}
-
 const HOTKEYS: { keys: string; descKey: Key }[] = [
   { keys: "Alt + 1 ~ 4", descKey: "set.hotkey.slots" },
   { keys: "Ctrl + B", descKey: "set.hotkey.sidebar" },
   { keys: "Ctrl + K", descKey: "set.hotkey.search" },
+  { keys: "F11", descKey: "set.hotkey.fullscreen" },
+  { keys: "Esc", descKey: "set.hotkey.escape" },
 ];
 
 interface SettingsPageProps {
@@ -42,6 +25,20 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
   const t = useT();
   const [confirmAction, setConfirmAction] = useState<"resetHidden" | "clearData" | null>(null);
   const [showLicenses, setShowLicenses] = useState(false);
+
+  // 입력 중엔 문자열 그대로 두고(지우고 다시 쓰는 중간 상태가 있다) 칸을 벗어날 때 범위로
+  // 맞춰 저장한다. 예전엔 입력마다 바로 저장해서, 칸을 비우면 0(= 갱신이 조용히 멈춤),
+  // 1을 치면 1초마다 Hyper-V를 조회했다.
+  const [intervalDraft, setIntervalDraft] = useState(String(settings.pollingInterval / 1000));
+  useEffect(() => { setIntervalDraft(String(settings.pollingInterval / 1000)); }, [settings.pollingInterval]);
+  const commitInterval = () => {
+    const n = intervalDraft.trim() === "" ? NaN : Math.round(Number(intervalDraft));
+    const sec = Number.isFinite(n)
+      ? Math.min(POLL_MAX_SEC, Math.max(POLL_MIN_SEC, n))
+      : settings.pollingInterval / 1000;
+    setIntervalDraft(String(sec));
+    updateSettings({ pollingInterval: sec * 1000 });
+  };
 
   const openDataDir = async () => {
     try {
@@ -91,8 +88,6 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
   };
 
   const [appVersion, setAppVersion] = useState<string>("");
-  const [updateState, setUpdateState] = useState<UpdateState>("idle");
-  const [updateVersion, setUpdateVersion] = useState<string>("");
 
   useEffect(() => {
     import("@tauri-apps/api/app")
@@ -100,30 +95,6 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
       .then(setAppVersion)
       .catch(() => setAppVersion(""));
   }, []);
-
-  const handleCheckUpdate = async () => {
-    // 폐쇄망 배포 대비 — 이 앱에서 인터넷을 타는 건 업데이트 확인뿐이라,
-    // 이 스위치 하나로 외부 통신을 완전히 끊는다.
-    if (!settings.updateCheckEnabled) {
-      setUpdateState("idle");
-      return;
-    }
-    setUpdateState("checking");
-    try {
-      const res = await fetch("https://api.github.com/repos/qetqet910/HyperDesk/releases/latest");
-      if (!res.ok) throw new Error(`GitHub API ${res.status}`);
-      const data = await res.json();
-      const latest = String(data.tag_name ?? "").replace(/^v/, "");
-      if (latest && isNewerVersion(latest, appVersion)) {
-        setUpdateVersion(latest);
-        setUpdateState("available");
-      } else {
-        setUpdateState("upToDate");
-      }
-    } catch {
-      setUpdateState("error");
-    }
-  };
 
   return (
     <div className="settings-page">
@@ -187,23 +158,6 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
         <div className="settings-group">
           <div className="settings-group__head"><Bell size={15} /><h3>{t("set.monitoring")}</h3></div>
           <div className="settings-fields">
-            {/* 외부 통신 차단 스위치. 이 앱에서 인터넷을 타는 곳은 업데이트 확인
-                (GitHub 릴리스 조회)뿐이라, 이걸 끄면 완전한 온프레미스로 동작한다.
-                폐쇄망 고객 대비. */}
-            <div className="settings-row col">
-              <div className="settings-row-label">{t("set.updateCheck")}</div>
-              <div className="settings-row-desc">{t("set.updateCheckDesc")}</div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.updateCheckEnabled}
-                aria-label={t("set.updateCheck")}
-                className={`toggle-switch ${settings.updateCheckEnabled ? "active" : ""}`}
-                onClick={() => updateSettings({ updateCheckEnabled: !settings.updateCheckEnabled })}
-              >
-                <div className="toggle-knob" />
-              </button>
-            </div>
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.liveSync")}</div>
               <div className="settings-row-desc">{t("set.liveSyncDesc")}</div>
@@ -221,15 +175,21 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.interval")}</div>
               <div className="settings-row-desc">{t("set.intervalDesc")}</div>
-              <div className="settings-number-input">
+              {/* 자동 새로고침이 꺼져 있으면 간격은 아무 의미가 없다 — 바꿀 수 있어 보이면 안 된다. */}
+              <div className={`settings-number-input${settings.autoRefresh ? "" : " is-disabled"}`}>
                 <input
                   type="number"
-                  min="2"
-                  max="300"
-                  value={settings.pollingInterval / 1000}
-                  onChange={(e) => updateSettings({ pollingInterval: Number(e.target.value) * 1000 })}
+                  inputMode="numeric"
+                  min={POLL_MIN_SEC}
+                  max={POLL_MAX_SEC}
+                  aria-label={t("set.interval")}
+                  disabled={!settings.autoRefresh}
+                  value={intervalDraft}
+                  onChange={(e) => setIntervalDraft(e.target.value)}
+                  onBlur={commitInterval}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                 />
-                <span>SEC</span>
+                <span>{t("set.seconds")}</span>
               </div>
             </div>
           </div>
@@ -330,14 +290,14 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
               <div className="settings-row-label">{t("set.dataPath")}</div>
               <div className="settings-row-desc">{t("set.dataPathDesc")}</div>
               <button className="hd-segment-btn" style={{ alignSelf: "flex-start" }} onClick={openDataDir}>
-                <FolderOpen size={13} /> {t("set.copyPath")}
+                <Copy size={13} /> {t("set.copyPath")}
               </button>
             </div>
             <div className="settings-row col">
               <div className="settings-row-label">{t("set.resetHidden")}</div>
               <div className="settings-row-desc">{t("set.resetHiddenDesc")}</div>
               <button className="hd-segment-btn" style={{ alignSelf: "flex-start" }} onClick={() => setConfirmAction("resetHidden")}>
-                <EyeOff size={13} /> {t("set.reset")}
+                <Eye size={13} /> {t("set.reset")}
               </button>
             </div>
             <div className="settings-row col">
@@ -367,36 +327,6 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
               <button className="hd-segment-btn" style={{ alignSelf: "flex-start" }} onClick={() => setShowLicenses(true)}>
                 <Package size={13} /> {t("set.viewLicenses")}
               </button>
-            </div>
-            <div className="settings-row col">
-              <div className="settings-row-label">{t("set.update")}</div>
-              <div className="settings-row-desc">
-                {updateState === "idle" && t("set.update.idle")}
-                {updateState === "checking" && t("set.update.checking")}
-                {updateState === "upToDate" && t("set.update.upToDate")}
-                {updateState === "available" && t("set.update.available", { version: updateVersion })}
-                {updateState === "error" && t("set.update.error")}
-              </div>
-              {updateState === "available" ? (
-                <a
-                  className="hd-btn"
-                  style={{ alignSelf: "flex-start" }}
-                  href={MS_STORE_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <RefreshCw size={13} /> {t("set.update.store")}
-                </a>
-              ) : (
-                <button
-                  className="hd-btn"
-                  style={{ alignSelf: "flex-start" }}
-                  onClick={handleCheckUpdate}
-                  disabled={updateState === "checking"}
-                >
-                  <RefreshCw size={13} /> {t("set.update.check")}
-                </button>
-              )}
             </div>
           </div>
         </div>
