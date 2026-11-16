@@ -1910,12 +1910,18 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
                     {
                         let mut origin = POINT { x: target_rect.0, y: target_rect.1 };
                         let _ = ClientToScreen(h_parent, &mut origin);
-                        let target = RECT {
+                        let slot = RECT {
                             left: origin.x,
                             top: origin.y,
                             right: origin.x + target_rect.2,
                             bottom: origin.y + target_rect.3,
                         };
+                        // 원격 해상도 = 크기 요청을 거부하고 머무는 프레임의 클라이언트 크기.
+                        let mut fc = RECT::default();
+                        let session = if windows::Win32::UI::WindowsAndMessaging::GetClientRect(h_child, &mut fc).is_ok() {
+                            Some((fc.right - fc.left, fc.bottom - fc.top))
+                        } else { None };
+                        let target = horizon_snap_target(session, slot);
                         if sync_horizon_surface(h_child, target) {
                             interval_ms = FAST_MS; // 방금 옮겼으면 잠시 촘촘히 지켜본다
                         }
@@ -2196,6 +2202,27 @@ pub fn set_visibility(slot_id: &str, visible: bool) -> Result<(), String> {
 /// 좌표 주의: `MKSEmbedded`는 WS_CHILD라 SetWindowPos가 **부모-클라이언트 기준**이다.
 /// 목표는 화면 좌표로 계산한 뒤 `ScreenToClient`로 변환할 것 — 빼면 부모 원점이
 /// (0,0)이 아닌 순간 그대로 어긋난다(유닛 테스트로 고정).
+/// Horizon 렌더 서피스의 목표 사각형(화면 좌표). 전체화면 슬롯이면 **원격 해상도 그대로**(배율 1).
+///
+/// 프레임은 크기 요청을 거부해 원격 해상도(전체화면 레이아웃 = 모니터 크기, 예: 1920x1080)에 머물고,
+/// Horizon은 그 해상도로 그린 화면을 서피스 크기에 맞춰 늘리거나 줄인다. 서피스를 슬롯 크기에
+/// 맞추면 전체화면 슬롯(테두리 1px 등으로 1918x1078 근처)에서도 0.999배 재샘플링이 일어나 화면
+/// 전체가 흐렸다(사용자 보고 2026-11-14 — RDP의 `rdp_snap_offsets`와 같은 문제). 슬롯이 원격보다
+/// 0~`SNAP`px만 작으면 서피스를 원격 크기 그대로 두고 슬롯 밖으로 몇 px 내민다 — 넘치는 부분은
+/// 프레임 region이 잘라낸다. 가로는 가운데, 세로는 **아래에 맞춘다**(원격 작업표시줄이 잘리지
+/// 않게 — `BOTTOM_BIAS`와 같은 이유로 위쪽을 자른다). 차이가 크면(창 모드 슬롯) 슬롯 그대로 =
+/// 축소(사용자 결정: 창 모드는 흐려도 됨).
+fn horizon_snap_target(session: Option<(i32, i32)>, slot: RECT) -> RECT {
+    const SNAP: i32 = 8;
+    let Some((sw, sh)) = session else { return slot };
+    let dw = sw - (slot.right - slot.left);
+    let dh = sh - (slot.bottom - slot.top);
+    if !(0..=SNAP).contains(&dw) || !(0..=SNAP).contains(&dh) { return slot; }
+    let left = slot.left - dw / 2;
+    let top = slot.top - dh;
+    RECT { left, top, right: left + sw, bottom: top + sh }
+}
+
 fn sync_horizon_surface(frame: HWND, target_screen: RECT) -> bool {
     let Some(surface) = find_descendant_by_class(frame, "MKSEmbedded") else { return false };
     unsafe {
@@ -3494,10 +3521,36 @@ mod tests {
 
 #[cfg(test)]
 mod rdp_snap_tests {
-    use super::{framed_rect, rdp_snap_offsets, apply_region_inner, BOTTOM_BIAS};
+    use super::{framed_rect, rdp_snap_offsets, apply_region_inner, BOTTOM_BIAS, horizon_snap_target};
+    use windows::Win32::Foundation::RECT;
 
     /// 전체화면 슬롯(테두리 1px씩 안쪽, 1918x1078)이면 창이 세션(1920x1080) 크기 그대로
     /// 모니터 원점에 놓여 배율이 정확히 1이 된다. 창 모드 슬롯은 손대지 않는다.
+    /// Horizon 전체화면 슬롯: 서피스가 원격 해상도 그대로(배율 1), 슬롯을 빈틈없이 덮고,
+    /// 넘치는 몇 px은 가로 가운데·세로는 위쪽에서 잘린다(원격 작업표시줄 보존).
+    /// 창 모드 슬롯과 원격 크기를 모를 때는 예전처럼 슬롯 그대로(축소).
+    #[test]
+    fn horizon_surface_snaps_to_the_session_size_in_fullscreen() {
+        let rect = |l, t, r, b| RECT { left: l, top: t, right: r, bottom: b };
+        let s = Some((1920, 1080));
+        // 전체화면 슬롯 1918x1078 at (1,1)
+        let t = horizon_snap_target(s, rect(1, 1, 1919, 1079));
+        assert_eq!((t.right - t.left, t.bottom - t.top), (1920, 1080), "배율 1");
+        assert_eq!((t.left, t.top), (0, -1));
+        assert!(t.left <= 1 && t.top <= 1 && t.right >= 1919 && t.bottom == 1079,
+            "슬롯을 빈틈없이 덮고 아래 끝은 슬롯 아래 끝과 같다");
+        // 정확히 같은 크기면 그대로
+        assert_eq!(horizon_snap_target(s, rect(0, 0, 1920, 1080)), rect(0, 0, 1920, 1080));
+        // 창 모드 슬롯 → 슬롯 그대로
+        let win = rect(223, 40, 223 + 1476, 40 + 1037);
+        assert_eq!(horizon_snap_target(s, win), win);
+        // 슬롯이 원격보다 크면(축소가 아니라 확대) 손대지 않는다
+        let big = rect(0, 0, 2560, 1440);
+        assert_eq!(horizon_snap_target(s, big), big);
+        // 원격 크기를 모르면 그대로
+        assert_eq!(horizon_snap_target(None, win), win);
+    }
+
     #[test]
     fn rdp_window_snaps_to_the_session_size_in_fullscreen() {
         let s = Some((1920, 1080));
