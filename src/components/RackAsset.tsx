@@ -158,21 +158,21 @@ export function HyperVCard({ vm, animDelay = 0, onError, onSuccess, onSettings }
   const metrics = (
     <>
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
-        <div style={{ fontSize: '8px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>{t("card.cpu")}</div>
+        <div style={{ fontSize: "var(--fs-2xs)", color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>{t("card.cpu")}</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
           <span style={{ fontSize: '16px', fontWeight: 900, color: isRunning ? 'var(--text-main)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>
             {cpu.toString().padStart(2, '0')}
           </span>
-          <span style={{ fontSize: '9px', opacity: 0.4, fontWeight: 800 }}>%</span>
+          <span style={{ fontSize: "var(--fs-2xs)", opacity: 0.4, fontWeight: 800 }}>%</span>
         </div>
       </div>
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px', minWidth: 0, overflow: 'hidden' }}>
-        <div style={{ fontSize: '8px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>{t("card.memory")}</div>
+        <div style={{ fontSize: "var(--fs-2xs)", color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>{t("card.memory")}</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px', whiteSpace: 'nowrap' }}>
           <span style={{ fontSize: '16px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>
             {isRunning ? memGB(vm.memory_assigned) : memGB(vm.memory_startup)}
           </span>
-          <span style={{ fontSize: '10px', opacity: 0.4, fontWeight: 800 }}>GB</span>
+          <span style={{ fontSize: "var(--fs-xs)", opacity: 0.4, fontWeight: 800 }}>GB</span>
           {/* Status dot instead of the raw enum string: on a Korean host
               MemoryStatus can be a localized word that overflowed the column and
               collided with the STOP button. A 6px dot conveys OK/not-OK without
@@ -292,21 +292,21 @@ export function HorizonCard({ host, animDelay = 0, onEdit, onDelete, onError, on
   const metrics = (
     <>
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
-        <div style={{ fontSize: '8px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>{t("card.latency")}</div>
+        <div style={{ fontSize: "var(--fs-2xs)", color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>{t("card.latency")}</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
           <span style={{ fontSize: '16px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: 'var(--font-num)' }}>
             {isOffline ? '---' : host.latency?.toString().padStart(3, '0')}
           </span>
-          <span style={{ fontSize: '9px', opacity: 0.4, fontWeight: 800 }}>ms</span>
+          <span style={{ fontSize: "var(--fs-2xs)", opacity: 0.4, fontWeight: 800 }}>ms</span>
         </div>
       </div>
       <div style={{ borderLeft: '1px solid rgba(255,255,255,0.04)', paddingLeft: '20px' }}>
-        <div style={{ fontSize: '8px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>{t("card.load")}</div>
+        <div style={{ fontSize: "var(--fs-2xs)", color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 800 }}>{t("card.load")}</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
           <span style={{ fontSize: '16px', fontWeight: 900, color: isOffline ? 'var(--accent-red)' : 'var(--text-main)', fontFamily: 'var(--font-num)' }}>
             {isOffline ? '--' : Math.round(host.load ?? 0).toString().padStart(2, '0')}
           </span>
-          <span style={{ fontSize: '9px', opacity: 0.4, fontWeight: 800 }}>%</span>
+          <span style={{ fontSize: "var(--fs-2xs)", opacity: 0.4, fontWeight: 800 }}>%</span>
         </div>
       </div>
     </>

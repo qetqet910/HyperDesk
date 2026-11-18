@@ -100,7 +100,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
             
             {/* Protocol Selector */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ fontSize: "var(--fs-xs)", fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Terminal size={12} /> {t("asset.protocol")}
               </label>
               <div style={{ display: 'flex', gap: '10px' }}>
@@ -217,7 +217,7 @@ export function AssetModal({ initialData, isEditing = false, isPending = false, 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)' }}>{t("asset.user")}</label>
-                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{hostData.protocol === 'HORIZON' ? t("asset.userHorizon") : t("asset.userRdp")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: 'var(--text-muted)' }}>{hostData.protocol === 'HORIZON' ? t("asset.userHorizon") : t("asset.userRdp")}</span>
                 </div>
                 <div style={{ position: 'relative' }}>
                   <input

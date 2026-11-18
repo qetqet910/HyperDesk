@@ -104,7 +104,7 @@
 /* Eyebrow label */
 .hd-sidebar__eyebrow {
   position: relative;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   font-family: var(--font);
   text-transform: uppercase;
@@ -301,7 +301,7 @@
 }
 
 .hd-sidebar__status-label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   color: var(--accent-green);
 }
@@ -567,40 +567,9 @@ body::before {
   box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
 }
 
-/* 상단 악센트 그라디언트 라인 */
-.bento-cell::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 16px;
-  right: 16px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
-  opacity: 0.7;
-  border-radius: 2px;
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* 코너 HUD 브래킷 4개 */
-.bento-cell::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(var(--accent-blue), var(--accent-blue)) top 8px left 8px / 10px 1px no-repeat,
-    linear-gradient(var(--accent-blue), var(--accent-blue)) top 8px left 8px / 1px 10px no-repeat,
-    linear-gradient(var(--accent-blue), var(--accent-blue)) top 8px right 8px / 10px 1px no-repeat,
-    linear-gradient(var(--accent-blue), var(--accent-blue)) top 8px right 8px / 1px 10px no-repeat,
-    linear-gradient(var(--accent-blue), var(--accent-blue)) bottom 8px left 8px / 10px 1px no-repeat,
-    linear-gradient(var(--accent-blue), var(--accent-blue)) bottom 8px left 8px / 1px 10px no-repeat,
-    linear-gradient(var(--accent-blue), var(--accent-blue)) bottom 8px right 8px / 10px 1px no-repeat,
-    linear-gradient(var(--accent-blue), var(--accent-blue)) bottom 8px right 8px / 1px 10px no-repeat;
-  opacity: 0.35;
-  pointer-events: none;
-  z-index: 2;
-  border-radius: inherit;
-}
+/* 2026-11 리디자인: 상단 그라디언트 라인과 코너 HUD 브래킷 4개를 뺐다. 정보 없는 장식이
+   모든 패널에 반복돼 "SF 콘솔" 코스튬으로 읽혔고, 패널 경계는 테두리·배경 차이로 충분하다.
+   다시 넣지 말 것 — 강조가 필요하면 제목 굵기/수치 색으로. */
 
 /* ─── MST 라인 아이템 — 서버 랙 슬레드 스타일 ───────────────── */
 .mst-rack-row {
@@ -621,7 +590,7 @@ body::before {
 .mst-rack-row:hover,
 .mst-rack-row:focus-within {
   border-color: var(--accent-blue);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 12px rgba(91, 130, 190, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 8px rgba(5, 8, 12, 0.35);
 }
 
 /* 응답 없는 호스트는 정보 칸만 흐리게 한다. 줄 전체를 흐리면 메모·편집·삭제 버튼까지
@@ -662,7 +631,6 @@ body::before {
   margin: 3px 0;
   background: var(--accent-blue);
   opacity: 0.75;
-  box-shadow: 0 0 6px var(--accent-blue);
 }
 
 .mst-rack-row.dead .mst-rack-stripe {
@@ -702,7 +670,7 @@ body::before {
 
 .mst-rack-latency {
   font-family: var(--font-num);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.5px;
 }
@@ -810,8 +778,8 @@ body::before {
 }
 
 .mst-rack-connect {
-  width: 28px;
-  height: 28px;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -943,22 +911,20 @@ body::before {
 }
 
 .hd-kpi-tile {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.12)),
-    var(--bg-card);
+  background: var(--bg-card); /* 검정 그라디언트가 라이트에서 탁하게 보였다 */
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  box-shadow: var(--shadow);
+  box-shadow: none;
   position: relative;
   overflow: hidden;
 }
 
 .hd-kpi-label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--text-muted);
 }
@@ -976,7 +942,7 @@ body::before {
 
 /* 보조 설명 줄(변화량 아님) — 그래서 증감 색 없이 muted로 둔다. */
 .hd-kpi-delta {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   font-family: var(--font);
   color: var(--text-muted);
@@ -994,7 +960,8 @@ body::before {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: var(--ctl-h);
+  white-space: nowrap; /* 좁은 설정 칸에서 "고화질"이 두 줄로 꺾였다 */
   padding: 0 14px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -1046,8 +1013,8 @@ body::before {
 /* 28px·radius 6px — 앱의 다른 아이콘 버튼(.vm-row-icon 32px, .hd-segment-btn
    radius 6px)과 같은 계열. 26px·radius 4px는 여기서만 쓰던 예외였다. */
 .mst-rack-icon-btn {
-  width: 28px;
-  height: 28px;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1103,7 +1070,7 @@ body::before {
 }
 
 .hub-stat-label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--text-muted);
   white-space: nowrap;

@@ -5,7 +5,8 @@ import {
   Server,
   Play,
   Notebook,
-  AlertTriangle
+  AlertTriangle,
+  Camera
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "@/lib/tauri-api";
@@ -358,6 +359,35 @@ export default function App() {
   // ─── Content Components ───────────────────────────────────────────────────
 
 
+  // ─── VM 순서 ─────────────────────────────────────────────────────────────
+  // 드래그 정렬은 예전엔 대시보드에만 있었다. 대시보드가 "실행 중·주의" 요약으로 바뀌면서
+  // 정렬은 VM 페이지로 옮겼다 — 저장 키(hyperdesk_rack_order)와 VM+Omnissa 혼합 목록은
+  // 그대로라 기존 순서가 유지된다. VM만 재배열하고 Omnissa 항목은 뒤에 원래 순서로 붙인다.
+  const orderedVms = useMemo(
+    () => {
+      const ordered = localRackAssets.filter(a => a.type === "HYPER_V").map(a => a.data as VmInfo);
+      return ordered.length === vms.length ? ordered : vms;
+    },
+    [localRackAssets, vms],
+  );
+  const reorderVms = useCallback((names: string[]) => {
+    setLocalRackAssets(prev => {
+      const byId = new Map(prev.map(a => [a.id, a]));
+      const vmPart = names.map(n => byId.get(`vm-${n}`)).filter((a): a is AppRackAsset => !!a);
+      const next = [...vmPart, ...prev.filter(a => a.type !== "HYPER_V")];
+      localStorage.setItem("hyperdesk_rack_order", JSON.stringify(next.map(i => i.id)));
+      return next;
+    });
+  }, []);
+
+  // 대시보드 VM 칸은 전체 목록(= VM 페이지 중복)이 아니라 지금 볼 것만: 실행 중이거나
+  // 전환/일시정지 상태인 VM, 응답 없는 Omnissa. 꺼짐·저장됨은 VM 페이지에서 본다.
+  const attentionAssets = localRackAssets.filter(a =>
+    a.type === "HYPER_V"
+      ? !["Off", "Saved"].includes((a.data as VmInfo).state)
+      : ["TIMEOUT", "Offline"].includes((a.data as RemoteHost).status ?? ""),
+  );
+
   // ─── Dashboard content (extracted for clarity) ───────────────────────────
 
   const DashboardContent = (
@@ -389,10 +419,11 @@ export default function App() {
           const memTotalGB = ((statsData?.memory_total ?? data?.system_memory_total ?? 1) / 1024 / 1024);
           const memPct = memTotalGB > 0 ? ((memUsedGB / memTotalGB) * 100).toFixed(1) : "0";
           // 보조 줄은 변화량이 아니라 설명이다 — ▲/▼를 붙이면 "늘었다/줄었다"로 읽혔다.
+          // "활성 VM"은 바로 위 상태 줄(VM n · 실행 m)과 같은 숫자라 뺐다. 수치 색은 상태를
+          // 뜻할 때만(지연: 정상/느림, 원격: 응답 없음 있음) — 장식용 파랑은 쓰지 않는다.
           return [
-            { label: t("dash.kpi.activeVms"), value: `${runningVms}/${vms.length}`, delta: t("dash.kpi.activeVmsDelta", { n: runningVms }), color: "var(--accent-green)" },
-            { label: t("dash.kpi.memory"), value: `${memUsedGB.toFixed(1)} GB`, delta: `${memPct}%`, color: "var(--accent-blue)" },
-            { label: t("dash.kpi.remote"), value: t("dash.kpi.remoteValue", { n: onlineRemote }), delta: t("dash.kpi.remoteDelta", { n: mstHostsList.length }), color: "var(--accent-blue)" },
+            { label: t("dash.kpi.memory"), value: `${memUsedGB.toFixed(1)} GB`, delta: `${memPct}%`, color: "var(--text-main)" },
+            { label: t("dash.kpi.remote"), value: t("dash.kpi.remoteValue", { n: onlineRemote }), delta: t("dash.kpi.remoteDelta", { n: mstHostsList.length }), color: onlineRemote < mstHostsList.length ? "var(--accent-orange)" : "var(--text-main)" },
             { label: t("dash.kpi.latency"), value: `${avgLatency} ms`, delta: t("dash.kpi.latencyDelta", { n: latencyHosts.length }), color: avgLatency < 50 ? "var(--accent-green)" : "var(--accent-orange)" },
           ].map((kpi) => (
             <div key={kpi.label} className="hd-kpi-tile">
@@ -428,8 +459,8 @@ export default function App() {
         <BentoCell className="cell-master-hub" style={{ flex: "3 1 340px", padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Cpu size={14} color="var(--accent-blue)" />
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-main)" }}>{t("dash.resourceMonitor")}</span>
+              <Cpu size={14} color="var(--text-muted)" />
+              <span style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-main)" }}>{t("dash.resourceMonitor")}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: 500, color: "var(--accent-green)" }}>
               <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent-green)", display: "inline-block" }} />
@@ -439,7 +470,7 @@ export default function App() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", flex: 1 }}>
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "10px", color: "var(--text-muted)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>
                 <span>CPU</span><span>{(statsData?.cpu ?? data?.system_cpu ?? 0).toFixed(1)}%</span>
               </div>
               {/* 오른쪽 스냅샷 패널 높이에 맞춰 늘어난 칸을 그래프가 채운다 — 70px일 땐
@@ -447,7 +478,7 @@ export default function App() {
               <Sparkline data={cpuHistory} height={150} />
             </div>
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "10px", color: "var(--text-muted)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>
                 <span>{t("dash.memory")}</span><span>{(((statsData?.memory_used ?? data?.system_memory_used) ?? 0) / 1024 / 1024).toFixed(1)} GB</span>
               </div>
               <Sparkline data={memHistory} color="var(--accent-green)" height={150} />
@@ -493,15 +524,15 @@ export default function App() {
         <BentoCell style={{ flex: "2 1 300px", padding: "20px", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "13px", opacity: 0.5 }}>◇</span>
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-main)" }}>{t("dash.snapshots")}</span>
+              <Camera size={14} color="var(--text-muted)" />
+              <span style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-main)" }}>{t("dash.snapshots")}</span>
             </div>
-            <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 8px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
+            <span style={{ fontSize: "var(--fs-xs)", fontWeight: 700, color: "var(--text-secondary)", background: "var(--accent-wash)", padding: "2px 8px", borderRadius: "4px" }}>
               {t("dash.snapshotTotal", { n: vms.reduce((s, v) => s + (v.checkpoint_count ?? 0), 0) })}
             </span>
           </div>
 
-          <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 600, paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 600, paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>
             {t("dash.snapshotByVm")}
           </div>
 
@@ -512,8 +543,8 @@ export default function App() {
                 <div key={vm.name} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", background: "rgba(255,255,255,0.02)", borderRadius: "6px", border: "1px solid var(--border)" }}>
                   <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 800, fontFamily: "var(--font)", letterSpacing: "0.5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{vm.name}</div>
-                    <div style={{ fontSize: "10px", color: "var(--text-muted)" }}>{t("dash.snapshotCount", { n: vm.checkpoint_count ?? 0 })}</div>
+                    <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{vm.name}</div>
+                    <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>{t("dash.snapshotCount", { n: vm.checkpoint_count ?? 0 })}</div>
                   </div>
                   {/* 오른쪽엔 예전에 VM 가동 시간이 있었는데, 스냅샷 목록 안이라 "스냅샷 시각"으로
                       읽혔다. 상태는 왼쪽 점이 이미 보여준다. */}
@@ -552,11 +583,13 @@ export default function App() {
       >
         <BentoCell className="cell-4x2" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: "12px", fontWeight: 500, color: "var(--text-muted)" }}>{t("dash.nodes", { n: vms.length + horizonHosts.length })}</span>
-          <span style={{ fontSize: "11px", color: "var(--accent-green)", fontWeight: 600, background: "rgba(34,197,94,0.08)", padding: "2px 10px", borderRadius: "6px", border: "1px solid rgba(34,197,94,0.2)" }}>
+          <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600, color: "var(--text-secondary)" }}>
             {/* 백엔드는 응답 없는 호스트를 "TIMEOUT"으로 보낸다("Offline"은 안 온다) — 카드와 같은 판정. */}
             {t("dash.online", { n: runningVms + horizonHosts.filter(h => h.status !== "TIMEOUT" && h.status !== "Offline").length, total: vms.length + horizonHosts.length })}
           </span>
+          <button className="hd-btn hd-btn--small" onClick={() => setPage("vms")}>
+            {t("dash.viewAll", { n: vms.length + horizonHosts.length })}
+          </button>
         </div>
         <div className="rack-container no-scrollbar" style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "scroll", maxHeight: "480px" }}>
           {data?.vm_error && (() => {
@@ -571,21 +604,18 @@ export default function App() {
               </div>
             );
           })()}
-          {localRackAssets.length > 0 ? (
-            <Reorder.Group axis="y" values={localRackAssets} onReorder={(o) => { setLocalRackAssets(o); localStorage.setItem("hyperdesk_rack_order", JSON.stringify(o.map(i => i.id))); }} style={{ display: "flex", flexDirection: "column", gap: "12px", listStyle: "none", padding: 0, margin: 0 }}>
-              {localRackAssets.map((asset, idx) => (
-                <Reorder.Item key={asset.id} value={asset} style={{ listStyle: "none", margin: 0, padding: 0, width: "100%" }}>
-                  {asset.type === "HYPER_V"
-                    ? <HyperVCard vm={asset.data} animDelay={idx * 50} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={() => setShowVmSettings(asset.data as VmInfo)} />
-                    : <HorizonCard host={asset.data as RemoteHost} animDelay={idx * 50} onEdit={(h) => { setEditingHost(h); setShowAssetModal(true); }} onDelete={setConfirmDelete} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VDI] ${msg}`, "success"); }} />
-                  }
-                </Reorder.Item>
+          {attentionAssets.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {attentionAssets.map((asset, idx) => (
+                asset.type === "HYPER_V"
+                  ? <HyperVCard key={asset.id} vm={asset.data as VmInfo} animDelay={idx * 50} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VM] ${msg}`, "success"); }} onSettings={() => setShowVmSettings(asset.data as VmInfo)} />
+                  : <HorizonCard key={asset.id} host={asset.data as RemoteHost} animDelay={idx * 50} onEdit={(h) => { setEditingHost(h); setShowAssetModal(true); }} onDelete={setConfirmDelete} onError={handleError} onSuccess={(msg) => { addToast(msg, "success"); addLog(`[VDI] ${msg}`, "success"); }} />
               ))}
-            </Reorder.Group>
+            </div>
           ) : (
-            <div style={{ padding: "40px", textAlign: "center", opacity: 0.3, border: "1px dashed var(--border)", borderRadius: "12px" }}>
-              <Server size={24} style={{ marginBottom: "10px" }} />
-              <div style={{ fontSize: "12px", fontWeight: 500 }}>{t("dash.noVms")}</div>
+            <div style={{ padding: "28px", textAlign: "center", color: "var(--text-muted)", border: "1px dashed var(--border)", borderRadius: "12px" }}>
+              <Server size={22} style={{ marginBottom: "8px" }} />
+              <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>{vms.length === 0 ? t("dash.noVms") : t("dash.allQuiet")}</div>
             </div>
           )}
         </div>
@@ -764,7 +794,8 @@ export default function App() {
                   <div className="hd-page" key={page}>
                     {page === "dashboard" && DashboardContent}
                     {page === "vms" && <VmsPage
-                      vms={vms}
+                      vms={orderedVms}
+                      onReorder={reorderVms}
                       statsData={statsData}
                       horizonHosts={horizonHosts}
                       onError={handleError}

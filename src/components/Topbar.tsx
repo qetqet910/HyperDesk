@@ -68,7 +68,7 @@ export function Topbar({ title, subtitle, isRefreshing, onRefresh, actions, onSe
       <div className="hd-topbar__right">
         <div className="hd-topbar__actions" data-tauri-drag-region="false">
           {onSearch && (
-            <button className="tool-btn" onClick={(e) => { e.stopPropagation(); onSearch(); }} title={t("topbar.search")}>
+            <button className="tool-btn" onClick={(e) => { e.stopPropagation(); onSearch(); }} title={t("topbar.search")} aria-label={t("topbar.search")}>
               <Search size={14} />
             </button>
           )}
@@ -76,25 +76,26 @@ export function Topbar({ title, subtitle, isRefreshing, onRefresh, actions, onSe
           <button
             className="tool-btn"
             onClick={toggleTheme}
-            title={settings.theme === "light" ? "Dark Mode" : "Light Mode"}
+            title={settings.theme === "light" ? t("topbar.darkMode") : t("topbar.lightMode")}
+            aria-label={settings.theme === "light" ? t("topbar.darkMode") : t("topbar.lightMode")}
           >
             {settings.theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
           </button>
           {onRefresh && (
-            <button className={`tool-btn ${isRefreshing ? "spinning" : ""}`} onClick={(e) => { e.stopPropagation(); onRefresh(); }} title={t("topbar.refresh")}>
+            <button className={`tool-btn ${isRefreshing ? "spinning" : ""}`} onClick={(e) => { e.stopPropagation(); onRefresh(); }} title={t("topbar.refresh")} aria-label={t("topbar.refresh")}>
               <RefreshCw size={14} />
             </button>
           )}
         </div>
 
         <div className="hd-topbar__window-controls" data-tauri-drag-region="false">
-          <button className="window-control-btn" disabled={switchLocked} onClick={() => getTauriWindow()?.minimize()} title={t("topbar.minimize")}>
+          <button className="window-control-btn" disabled={switchLocked} onClick={() => getTauriWindow()?.minimize()} title={t("topbar.minimize")} aria-label={t("topbar.minimize")}>
             <Minus size={14} />
           </button>
-          <button className="window-control-btn" disabled={switchLocked} onClick={() => getTauriWindow()?.toggleMaximize()} title={isMaximized ? t("topbar.restore") : t("topbar.maximize")}>
+          <button className="window-control-btn" disabled={switchLocked} onClick={() => getTauriWindow()?.toggleMaximize()} title={isMaximized ? t("topbar.restore") : t("topbar.maximize")} aria-label={isMaximized ? t("topbar.restore") : t("topbar.maximize")}>
             {isMaximized ? <Copy size={13} /> : <Square size={13} />}
           </button>
-          <button className="window-control-btn window-control-btn--close" onClick={() => getTauriWindow()?.close()} title={t("topbar.close")}>
+          <button className="window-control-btn window-control-btn--close" onClick={() => getTauriWindow()?.close()} title={t("topbar.close")} aria-label={t("topbar.close")}>
             <X size={15} />
           </button>
         </div>

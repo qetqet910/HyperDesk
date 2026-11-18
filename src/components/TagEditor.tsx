@@ -117,7 +117,7 @@ export function TagEditor({ tags, onChange, placeholder: placeholderProp, maxTag
         </div>
       )}
 
-      <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "5px" }}>
+      <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: "5px" }}>
         {t("tags.hint")}
       </div>
     </div>
@@ -140,7 +140,7 @@ export function TagPill({ tag }: { tag: string }) {
     <span style={{
       display: "inline-flex", alignItems: "center",
       background: bg, border: `1px solid ${border}`, color: text,
-      borderRadius: "4px", padding: "1px 7px", fontSize: "10px", fontWeight: 600,
+      borderRadius: "4px", padding: "1px 7px", fontSize: "var(--fs-xs)", fontWeight: 600,
     }}>
       {tag}
     </span>

@@ -45,11 +45,11 @@ describe("EventsPage", () => {
     expect(onClear).toHaveBeenCalledTimes(1);
   });
 
-  it("로그 종류 태그를 한국어로 렌더링한다 ([정보], [성공], [오류])", () => {
+  it("로그 종류 태그를 한국어로 렌더링한다 (정보·성공·오류 배지, 대괄호 없음)", () => {
     render(<EventsPage logs={mockLogs} onClear={vi.fn()} />);
-    expect(screen.getByText("[정보]")).toBeInTheDocument();
-    expect(screen.getByText("[성공]")).toBeInTheDocument();
-    expect(screen.getByText("[오류]")).toBeInTheDocument();
+    expect(screen.getByText("정보")).toBeInTheDocument();
+    expect(screen.getByText("성공")).toBeInTheDocument();
+    expect(screen.getByText("오류")).toBeInTheDocument();
   });
 
   it("페이지를 열면 Hyper-V 이벤트를 바로 불러오고, 새로고침 버튼이 있다", async () => {
@@ -58,13 +58,13 @@ describe("EventsPage", () => {
     await waitFor(() => expect(tauriApi.api.getHyperVEvents).toHaveBeenCalledTimes(1));
   });
 
-  it("백엔드가 준 수준(warn/error)을 [경고]/[오류]로 보여 준다", async () => {
+  it("백엔드가 준 수준(warn/error)을 경고·오류 배지로 보여 준다", async () => {
     vi.mocked(tauriApi.api.getHyperVEvents).mockResolvedValue([
       { time_created: "2026-10-22 09:00:00", level: "warn", event_id: 12030, message: "heartbeat" },
       { time_created: "2026-10-22 09:01:00", level: "error", event_id: 14070, message: "no memory" },
     ]);
     render(<EventsPage logs={[]} onClear={vi.fn()} />);
-    expect(await screen.findByText("[경고]")).toBeInTheDocument();
-    expect(screen.getByText("[오류]")).toBeInTheDocument();
+    expect(await screen.findByText("경고")).toBeInTheDocument();
+    expect(screen.getByText("오류")).toBeInTheDocument();
   });
 });

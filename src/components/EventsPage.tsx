@@ -16,7 +16,7 @@ const LEVEL_KEY: Record<string, Key> = {
 
 export function EventsPage({ logs, onClear }: EventsPageProps) {
   const t = useT();
-  const levelTag = (level: string) => `[${LEVEL_KEY[level] ? t(LEVEL_KEY[level]) : level.toUpperCase()}]`;
+  const levelTag = (level: string) => (LEVEL_KEY[level] ? t(LEVEL_KEY[level]) : level.toUpperCase());
   const [hyperVEvents, setHyperVEvents] = useState<HyperVEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [eventError, setEventError] = useState<string | null>(null);
@@ -47,7 +47,7 @@ export function EventsPage({ logs, onClear }: EventsPageProps) {
       {/* Hyper-V 시스템 이벤트 섹션 */}
       <div className="bento-cell cell-4x2" style={{ gridColumn: "1 / -1", padding: "0", display: "flex", flexDirection: "column", marginBottom: "8px" }}>
         <div className="terminal-header" style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-muted)" }}>{t("events.hyperv")}</span>
+          <span style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-secondary)" }}>{t("events.hyperv")}</span>
           <button
             className="hd-btn hd-btn--small"
             onClick={loadHyperVEvents}
@@ -73,7 +73,7 @@ export function EventsPage({ logs, onClear }: EventsPageProps) {
             </div>
           )}
           {hyperVEvents.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "200px", overflowY: "auto" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "max(200px, 42vh)", overflowY: "auto" }}>
               {hyperVEvents.map((evt, i) => (
                 <div key={i} style={{ display: "flex", gap: "12px", fontSize: "11px", fontFamily: "monospace", padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ color: "var(--text-muted)", flexShrink: 0, width: "140px" }}>{evt.time_created}</span>
@@ -90,9 +90,9 @@ export function EventsPage({ logs, onClear }: EventsPageProps) {
       </div>
 
       {/* 앱 내부 로그 */}
-      <div className="bento-cell cell-4x2" style={{ gridColumn: "1 / -1", padding: "0", display: "flex", flexDirection: "column", height: "400px" }}>
+      <div className="bento-cell cell-4x2" style={{ gridColumn: "1 / -1", padding: "0", display: "flex", flexDirection: "column", height: "max(280px, 36vh)" }}>
         <div className="terminal-header" style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-muted)" }}>{t("events.app")}</span>
+          <span style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-secondary)" }}>{t("events.app")}</span>
           <button className="hd-btn hd-btn--small" onClick={onClear} disabled={logs.length === 0}>{t("events.clear")}</button>
         </div>
         <div className="terminal-logs" style={{ flex: 1, padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>

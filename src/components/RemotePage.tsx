@@ -48,6 +48,7 @@ export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
           className={`mst-rack-connect ${isOffline ? "disabled" : ""}`}
           disabled={isOffline}
           title={isOffline ? t("remote.offline") : t("remote.connect")}
+          aria-label={isOffline ? t("remote.offline") : t("remote.connect")}
           onClick={() => !isOffline && onConnect(host.host, host.protocol, host.username)}
         >
           <Play size={13} />
@@ -56,10 +57,10 @@ export function RemoteAssetRow({ host, onConnect, onEdit, onMemo, onDelete }: {
             the backend promotes a detected id to a manual entry on save.
             Delete stays for all — detected hosts are hidden, not purged,
             so they don't zombie-regenerate from the registry. */}
-        <button className="mst-rack-icon-btn" title={t("remote.memo")} onClick={() => onMemo(host)}><Notebook size={14} /></button>
-        <button className="mst-rack-icon-btn" title={t("remote.edit")} onClick={() => onEdit(host)}><Pencil size={14} /></button>
+        <button className="mst-rack-icon-btn" title={t("remote.memo")} aria-label={t("remote.memo")} onClick={() => onMemo(host)}><Notebook size={14} /></button>
+        <button className="mst-rack-icon-btn" title={t("remote.edit")} aria-label={t("remote.edit")} onClick={() => onEdit(host)}><Pencil size={14} /></button>
         {/* ✕는 "닫기"로 읽힌다. 자동 감지 항목은 지우지 않고 숨기므로 아이콘도 그대로 말한다. */}
-        <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? t("remote.hide") : t("remote.delete")} onClick={() => onDelete(host.id)}>
+        <button className="mst-rack-icon-btn mst-rack-icon-btn--del" title={host.is_detected ? t("remote.hide") : t("remote.delete")} aria-label={host.is_detected ? t("remote.hide") : t("remote.delete")} onClick={() => onDelete(host.id)}>
           {host.is_detected ? <EyeOff size={14} /> : <Trash2 size={14} />}
         </button>
       </div>
@@ -73,13 +74,13 @@ export function RemotePage({ remoteHosts, onConnect, onEdit, onMemo, onDelete, o
   return (
     <div className="dashboard-grid">
       <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-muted)" }}>
-          <span style={{ color: "var(--accent-blue)" }}>→</span> {t("remote.heading")}
-        </div>
+        {/* 다른 페이지와 같은 섹션 제목(.section-label 규칙과 같은 크기·색). 예전엔 11px 대문자
+            + 파란 화살표 기호의 eyebrow였다. 개수는 제목 옆 흐린 숫자로. */}
+        <h3 style={{ margin: 0, display: "flex", alignItems: "baseline", gap: "8px", fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-secondary)" }}>
+          {t("remote.heading")}
+          <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600, color: "var(--text-muted)" }}>{t("remote.count", { n: remoteHosts.length })}</span>
+        </h3>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "9px", fontWeight: 900, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 10px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
-            {t("remote.count", { n: remoteHosts.length })}
-          </span>
           <ColumnToggle value={settings.remoteAssetColumns} onChange={(v) => updateSettings({ remoteAssetColumns: v })} />
           <button className="hd-segment-btn" onClick={onAdd}>
             <Plus size={13} /> {t("remote.add")}

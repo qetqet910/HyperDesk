@@ -108,7 +108,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
             {t("snap.heading")}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "9px", fontWeight: 900, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 10px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
+            <span style={{ fontSize: "var(--fs-2xs)", fontWeight: 900, color: "var(--accent-blue)", background: "rgba(110,113,255,0.1)", padding: "2px 10px", borderRadius: "4px", border: "1px solid rgba(110,113,255,0.2)" }}>
               {t("snap.total", { n: allTotal })}
             </span>
             <button
@@ -136,7 +136,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
               className={`hd-segment-btn ${selectedVm === vm.name ? "active" : ""}`}
               onClick={() => setSelectedVm(vm.name)}
             >
-              <span style={{ fontSize: "9px", color: vm.state === "Running" ? "var(--accent-green)" : "var(--text-muted)" }}>●</span>
+              <span style={{ fontSize: "var(--fs-2xs)", color: vm.state === "Running" ? "var(--accent-green)" : "var(--text-muted)" }}>●</span>
               {vm.name}
               {(snapsByVm[vm.name]?.length ?? 0) > 0 && (
                 <span className="hd-segment-count">{snapsByVm[vm.name].length}</span>
@@ -169,7 +169,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                     <Server size={13} color="var(--accent-blue)" />
                     <span style={{ fontSize: "12px", fontWeight: 800 }}>{vm.name}</span>
                     <span className={`status-dot ${vm.state === "Running" ? "online" : "offline"}`} />
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{vmStateLabel(vm.state, t)}</span>
+                    <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>{vmStateLabel(vm.state, t)}</span>
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
                     {isCreatingThis ? (
@@ -237,7 +237,7 @@ export function SnapshotsPage({ vms, onSuccess, onError }: SnapshotsPageProps) {
                         {snaps.map(snap => (
                           <tr key={snap.id || snap.name}>
                             <td style={{ fontWeight: 700 }}>{snap.name}</td>
-                            <td><span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{snap.snapshot_type}</span></td>
+                            <td><span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>{snap.snapshot_type}</span></td>
                             <td style={{ fontSize: "11px", color: "var(--text-muted)" }}>{snap.creation_time || "—"}</td>
                             <td style={{ textAlign: "right" }}>
                               <div style={{ display: "flex", justifyContent: "flex-end", gap: "6px" }}>

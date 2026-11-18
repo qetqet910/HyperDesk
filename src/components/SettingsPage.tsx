@@ -271,7 +271,7 @@ export function SettingsPage({ addToast }: SettingsPageProps) {
         {/* ── 단축키 ── */}
         <div className="settings-group">
           <div className="settings-group__head"><Keyboard size={15} /><h3>{t("set.hotkeys")}</h3></div>
-          <div className="settings-fields">
+          <div className="settings-fields settings-fields--hotkeys">
             {HOTKEYS.map((h) => (
               <div className="settings-row col" key={h.keys}>
                 {/* 다른 그룹과 같은 굵기의 라벨 — 여긴 설명이 곧 항목 이름이다. */}

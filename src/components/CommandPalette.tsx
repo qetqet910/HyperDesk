@@ -496,7 +496,7 @@ export function CommandPalette({
             placeholder={mode.type === "vm-context" || mode.type === "host-context" ? t("cmd.placeholderAction") : t("cmd.placeholder")}
             style={{ flex: 1, background: "none", border: "none", outline: "none", fontSize: "14px", color: "var(--text-main)", minWidth: 0 }}
           />
-          <kbd style={{ fontSize: "10px", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "4px", padding: "2px 6px", flexShrink: 0 }}>Esc</kbd>
+          <kbd style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "4px", padding: "2px 6px", flexShrink: 0 }}>Esc</kbd>
         </div>
 
         {/* Results */}
@@ -507,7 +507,7 @@ export function CommandPalette({
           {results.map((item, i) => {
             if (item.kind === "section-header") {
               return (
-                <div key={`h-${i}`} style={{ fontSize: "10px", fontWeight: 600, color: "var(--text-muted)", padding: "10px 10px 4px", letterSpacing: "0.3px" }}>
+                <div key={`h-${i}`} style={{ fontSize: "var(--fs-xs)", fontWeight: 600, color: "var(--text-muted)", padding: "10px 10px 4px", letterSpacing: "0.3px" }}>
                   {item.label}
                 </div>
               );
@@ -529,9 +529,9 @@ export function CommandPalette({
                   <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: color, flexShrink: 0 }} />
                   <Server size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
                   <span style={{ flex: 1, fontSize: "13px", fontWeight: 500 }}>{item.vm.name}</span>
-                  <span style={{ fontSize: "10px", color, fontWeight: 500 }}>{vmStateLabel(item.vm.state, t)}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color, fontWeight: 500 }}>{vmStateLabel(item.vm.state, t)}</span>
                   {item.vm.cpu_usage > 0 && (
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", marginLeft: "8px" }}>CPU {item.vm.cpu_usage.toFixed(0)}%</span>
+                    <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginLeft: "8px" }}>CPU {item.vm.cpu_usage.toFixed(0)}%</span>
                   )}
                   {mode.type === "root" && <ChevronRight size={12} color="var(--text-muted)" style={{ marginLeft: "4px" }} />}
                 </div>
@@ -549,8 +549,8 @@ export function CommandPalette({
                 >
                   <Wifi size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
                   <span style={{ flex: 1, fontSize: "13px", fontWeight: 500 }}>{item.host.name}</span>
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{item.host.host}</span>
-                  <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "4px", background: "rgba(110,113,255,0.1)", color: "var(--accent-blue)", marginLeft: "6px", fontWeight: 600 }}>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>{item.host.host}</span>
+                  <span style={{ fontSize: "var(--fs-2xs)", padding: "1px 6px", borderRadius: "4px", background: "rgba(110,113,255,0.1)", color: "var(--accent-blue)", marginLeft: "6px", fontWeight: 600 }}>
                     {item.host.protocol}
                   </span>
                   {mode.type === "root" && <ChevronRight size={12} color="var(--text-muted)" style={{ marginLeft: "4px" }} />}
@@ -570,7 +570,7 @@ export function CommandPalette({
                   <span style={{ flex: 1, fontSize: "13px", fontWeight: 600 }}>
                     {t("cmd.quickConnect", { host: item.host })}
                   </span>
-                  <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "4px", background: "var(--accent-wash)", color: "var(--accent-soft)", fontWeight: 700 }}>
+                  <span style={{ fontSize: "var(--fs-2xs)", padding: "1px 6px", borderRadius: "4px", background: "var(--accent-wash)", color: "var(--accent-soft)", fontWeight: 700 }}>
                     RDP
                   </span>
                 </div>
@@ -603,7 +603,7 @@ export function CommandPalette({
                   <span style={{ flexShrink: 0, color: action.destructive ? "var(--accent-red)" : "var(--text-muted)" }}>{action.icon}</span>
                   <span style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: action.destructive ? "var(--accent-red)" : "var(--text-main)" }}>{action.label}</span>
                   {action.destructive && <AlertTriangle size={11} color="var(--accent-red)" style={{ marginLeft: "4px" }} />}
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)", marginLeft: "4px" }}>{vm.name}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginLeft: "4px" }}>{vm.name}</span>
                 </div>
               );
             }
@@ -620,7 +620,7 @@ export function CommandPalette({
                   <span style={{ flexShrink: 0, color: action.destructive ? "var(--accent-red)" : "var(--text-muted)" }}>{action.icon}</span>
                   <span style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: action.destructive ? "var(--accent-red)" : "var(--text-main)" }}>{action.label}</span>
                   {action.destructive && <AlertTriangle size={11} color="var(--accent-red)" style={{ marginLeft: "4px" }} />}
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)", marginLeft: "4px" }}>{host.name}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginLeft: "4px" }}>{host.name}</span>
                 </div>
               );
             }
@@ -650,12 +650,12 @@ export function CommandPalette({
             ["Enter", t("cmd.hint.select")],
             [mode.type === "vm-context" || mode.type === "host-context" ? "Esc / ←" : "Esc", mode.type === "vm-context" || mode.type === "host-context" ? t("cmd.hint.back") : t("cmd.hint.close")],
           ].map(([key, label]) => (
-            <span key={key} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "var(--text-muted)" }}>
-              <kbd style={{ border: "1px solid var(--border)", borderRadius: "3px", padding: "1px 5px", fontSize: "9px" }}>{key}</kbd>
+            <span key={key} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>
+              <kbd style={{ border: "1px solid var(--border)", borderRadius: "3px", padding: "1px 5px", fontSize: "var(--fs-2xs)" }}>{key}</kbd>
               {label}
             </span>
           ))}
-          <span style={{ marginLeft: "auto", fontSize: "10px", color: "var(--text-muted)" }}>
+          <span style={{ marginLeft: "auto", fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>
             {t("cmd.results", { n: selectableResults.length })}
           </span>
         </div>

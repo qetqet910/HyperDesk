@@ -16,7 +16,7 @@ export function Sparkline({ data, color = "var(--accent-blue)", height = 30, suf
   const chartData = useMemo(() => data.map((v, i) => ({ value: v, id: i })), [data]);
   // 점이 둘 이상 쌓여야 선이 된다. 자동 새로고침이 꺼져 있으면 영원히 안 쌓이므로 그 이유를 말한다.
   if (data.length < 2) return (
-    <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", color: "var(--text-muted)", opacity: 0.7 }}>
+    <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--fs-xs)", color: "var(--text-muted)", opacity: 0.7 }}>
       {t(settings.autoRefresh ? "spark.gathering" : "spark.paused")}
     </div>
   );
@@ -35,7 +35,7 @@ export function Sparkline({ data, color = "var(--accent-blue)", height = 30, suf
           </defs>
           <RechartsTooltip
             content={({ active, payload }) => active && payload?.length ? (
-              <div style={{ background: "rgba(0,0,0,0.9)", padding: "4px 10px", borderRadius: "6px", border: `1px solid color-mix(in srgb, ${color} 40%, transparent)`, fontSize: "10px", color, fontWeight: 800 }}>
+              <div style={{ background: "rgba(0,0,0,0.9)", padding: "4px 10px", borderRadius: "6px", border: `1px solid color-mix(in srgb, ${color} 40%, transparent)`, fontSize: "var(--fs-xs)", color, fontWeight: 800 }}>
                 {Number(payload[0].value).toFixed(1)}{suffix}
               </div>
             ) : null}

@@ -30,6 +30,11 @@
   font-display: swap;
 }
 
+/* 네이티브 스크롤바·<select>·입력 캐럿이 테마를 따르게. 없으면 다크 테마에서도 Windows가
+   밝은 스크롤바와 흰 드롭다운 목록을 그렸다. 레트로는 은색 표면이라 light. */
+:root, [data-theme="dark"] { color-scheme: dark; }
+[data-theme="light"], [data-theme="retro"] { color-scheme: light; }
+
 /* ─── Dark mode (default) — Cool Navy palette ─── */
 :root,
 [data-theme="dark"] {
@@ -509,9 +514,33 @@
                 color var(--duration-calm) var(--ease-calm),
                 box-shadow var(--duration-calm) var(--ease-calm),
                 transform var(--duration-calm) var(--ease-calm);
-  /* 마이크로 배지(LIVE, N/4, v1.1.7, RDP) 전용 최소 크기. 이전엔 8/8.5/9px이
-     섞여 있었다 — 9px 아래로 내리지 말 것(한글 글리프가 뭉갠다). */
-  --fs-micro: 9px;
+  /* ─── 타입 스케일 (2026-11 리디자인) ───
+     제품 UI는 고정 rem 스케일, 비율 ≈1.15. 화면 텍스트의 절반 이상이 8~10px이던 걸
+     여기로 모았다. **11px(--fs-xs) 아래는 대문자 배지·숫자 카운트 전용(--fs-2xs).**
+     한글 라벨·설명에 --fs-2xs를 쓰지 말 것 — 펴진고딕 한글은 10px부터 획이 뭉갠다. */
+  --fs-2xs: 10px;   /* 대문자 배지(RDP/HYPER-V), 카운트 칩 */
+  --fs-xs: 11px;    /* 메타, 필드 라벨, 보조 설명 */
+  --fs-sm: 12px;    /* 보조 본문, 표 셀 */
+  --fs-md: 13px;    /* 기본 본문, 버튼 */
+  --fs-lg: 14px;    /* 행 제목, 강조 본문 */
+  --fs-xl: 16px;    /* 패널 제목 */
+  --fs-2xl: 20px;   /* 페이지 제목, 큰 수치 */
+  --fs-3xl: 24px;   /* KPI 수치 */
+  --fs-micro: var(--fs-2xs); /* 옛 이름 — 기존 규칙 호환 */
+
+  /* 컨트롤 높이 — 버튼·입력·세그먼트가 한 줄에 섞여도 높이가 맞게. */
+  --ctl-h-sm: 26px;
+  --ctl-h: 30px;
+  --ctl-h-lg: 36px;
+
+  /* 간격 — 4px 그리드 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
 }
 
 /* ─── Light mode overrides for structural elements ─── */
@@ -635,7 +664,7 @@
 
 /* Section label */
 .settings-section-label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 800;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -810,18 +839,17 @@
   content: "";
   position: absolute;
   inset: -32px -16px;
-  background:
-    radial-gradient(520px circle at 8% -10%, var(--accent-wash-strong), transparent 60%),
-    radial-gradient(460px circle at 105% 20%, var(--accent-wash-strong), transparent 55%),
-    radial-gradient(600px circle at 50% 110%, var(--accent-wash), transparent 60%);
+  background: none; /* 블루 글로우 3겹 제거(장식) — 규칙은 레트로 오버라이드 호환용으로 남김 */
   pointer-events: none;
   z-index: -1;
 }
 /* Flat single-column settings sheet — no cards, no tabs. One continuous list
    with labelled groups separated by hairlines, so related info stays together
    and the eye flows top-to-bottom instead of hunting across masonry columns. */
+/* 가운데 정렬(사용자 결정 2026-11-18 — 왼쪽 정렬은 한쪽으로 쏠려 보였다). 폭 상한은 한 줄
+   3~4칸 필드가 읽히는 정도. */
 .settings-sheet {
-  max-width: 760px;
+  max-width: 880px;
   margin: 0 auto;
 }
 .settings-group {
@@ -843,14 +871,14 @@
   padding-bottom: 10px;
   border-bottom: 1px solid var(--accent-wash-strong);
 }
-.settings-group__head svg { color: var(--accent-blue); flex-shrink: 0; }
+/* 그룹 제목은 비인터랙티브 — 브랜드 색·대문자를 쓰지 않는다(DESIGN.md 4.1). */
+.settings-group__head svg { color: var(--text-muted); flex-shrink: 0; }
 .settings-group__head h3 {
   margin: 0;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: var(--accent-blue);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--text-main);
   white-space: nowrap;
 }
 /* A category's fields run side by side as equal-width cells instead of
@@ -877,6 +905,14 @@
   flex: 1 0 auto;
   margin-bottom: 10px;
 }
+/* 단축키 5개는 한 줄에 — flex 170px 기준이면 5번째가 다음 줄로 떨어졌다. 라벨이 2줄로
+   접혀도 키 배지는 같은 바닥선에 서게 라벨이 남는 높이를 먹는다. */
+.settings-fields--hotkeys {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+}
+.settings-fields--hotkeys > .settings-row > .settings-row-label { flex: 1 0 auto; }
 /* 값 입력칸은 칸 폭 전체로 늘어나면 허전하다 — 내용 폭만 차지한다. */
 .settings-fields > .settings-row > .settings-number-input { align-self: flex-start; }
 /* 설명 바로 뒤에 오므로 위쪽 간격은 설명이 이미 갖고 있다. */
@@ -1029,7 +1065,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 }
 .main-header h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.3px; }
 .version {
-  font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.5px;
   color: var(--accent-blue);
   background: var(--sm-row-bg);
   padding: 2px 8px; border-radius: 20px; margin-left: 6px;
@@ -1047,7 +1083,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .add-btn:hover { opacity: 0.88; }
 
 .refresh-btn {
-  width: 34px; height: 34px; border-radius: var(--radius-sm);
+  width: var(--ctl-h); height: var(--ctl-h); box-sizing: border-box; border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: transparent; color: var(--text-muted);
   display: flex; align-items: center; justify-content: center;
@@ -1264,21 +1300,19 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 12px;
-  margin-bottom: -4px;
+  margin-top: var(--sp-4);
+  margin-bottom: -2px;
 }
+/* 섹션 제목은 제목답게 — 예전엔 11px 흐린 글씨 + 페이드 라인(eyebrow 형태)이라 본문보다
+   약해 보였다. 구분은 위쪽 여백이 맡고 라인은 그리지 않는다(레트로도 같음). */
 .section-label h3 {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-secondary);
   white-space: nowrap;
   letter-spacing: 0;
 }
-.section-line {
-  height: 1px;
-  flex: 1;
-  background: linear-gradient(to right, var(--border), transparent);
-}
+.section-line { display: none; }
 
 /* Internal Layout Fixes */
 .overview-box { 
@@ -1462,7 +1496,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .metrics { display: flex; flex-direction: column; gap: 14px; margin-bottom: 18px; }
 .metric { display: flex; flex-direction: column; gap: 5px; }
 .metric-label {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.7px;
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.7px;
   color: var(--text-muted); display: flex; align-items: center; gap: 4px;
 }
 .metric-value { font-size: 15px; font-weight: 600; color: var(--text-main); }
@@ -1483,8 +1517,8 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   display: flex; gap: 8px;
 }
 .action-btn {
-  flex: 1; height: 32px; border: none; border-radius: 6px;
-  font-size: 11px; font-weight: 700;
+  flex: 1; height: var(--ctl-h); box-sizing: border-box; border: none; border-radius: 6px;
+  font-size: var(--fs-sm); font-weight: 700;
   display: flex; align-items: center; justify-content: center; gap: 5px;
   cursor: pointer; transition: opacity 0.15s, transform 0.1s;
   color: #fff; background: var(--border);
@@ -1519,7 +1553,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   align-items: center;
   justify-self: start;
   gap: 4px;
-  font-size: 9px;
+  font-size: var(--fs-2xs);
   font-weight: 800;
   letter-spacing: 0.4px;
   line-height: 1.25;
@@ -1532,7 +1566,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .vm-row-sub {
   display: flex;
   gap: 6px;
-  font-size: 9px;
+  font-size: var(--fs-2xs);
   font-weight: 700;
   letter-spacing: 0.2px;
   color: var(--text-muted);
@@ -1829,7 +1863,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
    생긴다 — 알약 높이가 글자보다 패딩보다 줄상자로 결정되던 이유. */
 .status-badge {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: var(--fs-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
   line-height: 1.25; padding: 2px 7px; border-radius: 20px;
 }
 .status-badge.running { color: var(--accent-green); background: rgba(34,197,94,0.1); }
@@ -2152,7 +2186,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 }
 .session-card.empty .session-card__name { color: var(--text-muted); font-weight: 600; }
 .session-card__sub {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -2214,7 +2248,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 }
 .session-metric__v {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
@@ -2261,7 +2295,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   color: var(--text-muted);
 }
 .rail-host__v {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
@@ -2559,7 +2593,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 10px;
 }
-.selector-section h5 { font-size: 10px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; letter-spacing: 0.8px; }
+.selector-section h5 { font-size: var(--fs-xs); text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; letter-spacing: 0.8px; }
 .selector-item {
   display: flex; align-items: center; gap: 12px; padding: 12px;
   background: rgba(255,255,255,0.03); border-radius: 10px; cursor: pointer;
@@ -2759,7 +2793,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 }
 
 .retry-status {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--accent-blue);
   margin-top: 8px;
   opacity: 0.8;
@@ -2810,7 +2844,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 800;
   letter-spacing: 0.6px;
   text-transform: uppercase;
@@ -2961,24 +2995,28 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
 .status-dot.online { background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
 .status-dot.offline { background: var(--text-muted); }
 
+/* 수준 배지 — 테두리 박스 + 대괄호([정보])를 걷고 상태 배지와 같은 어휘로. 배경은 글자색에서
+   틴트(color-mix)라 3테마 모두 토큰만 따라간다(예전 네온 rgba는 라이트에서 탁했다). */
 .log-tag {
-  font-size: 10px;
-  font-weight: 800;
-  padding: 2px 6px;
+  display: inline-block;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 18px;
+  padding: 0 6px;
   border-radius: 4px;
-  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
-.log-tag.info { color: var(--accent-blue); background: rgba(0, 153, 255, 0.1); }
-.log-tag.success { color: var(--accent-green); background: rgba(0, 255, 153, 0.1); }
-.log-tag.error { color: var(--accent-red); background: rgba(255, 51, 102, 0.1); }
-.log-tag.warn { color: var(--accent-orange); background: rgba(255, 153, 0, 0.1); }
+.log-tag.info { color: var(--accent-soft); }
+.log-tag.success { color: var(--accent-green); }
+.log-tag.error { color: var(--accent-red); }
+.log-tag.warn { color: var(--accent-orange); }
 
 /* ─── hd-btn ─── */
 .hd-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 14px;
+  padding: 0 14px; min-height: var(--ctl-h); box-sizing: border-box;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -3000,7 +3038,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   cursor: not-allowed;
 }
 .hd-btn--small {
-  padding: 4px 10px;
+  padding: 0 10px; min-height: var(--ctl-h-sm);
   font-size: 11px;
   border-radius: 6px;
 }

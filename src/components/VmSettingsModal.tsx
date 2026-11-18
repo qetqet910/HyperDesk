@@ -78,9 +78,9 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <HardDrive size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
-          <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.diskUsage")}</label>
+          <label style={{ fontSize: "var(--fs-xs)", fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.diskUsage")}</label>
         </div>
-        {disks && <div style={{ fontSize: '13px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>{fmtGB(total)}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '3px' }}>GB</span></div>}
+        {disks && <div style={{ fontSize: '13px', fontWeight: 900, fontFamily: 'var(--font-num)' }}>{fmtGB(total)}<span style={{ fontSize: "var(--fs-xs)", opacity: 0.5, marginLeft: '3px' }}>GB</span></div>}
       </div>
 
       {loadErr && <div style={{ fontSize: '11px', color: 'var(--accent-orange)' }}>{t("vmset.diskLoadFail")}</div>}
@@ -98,7 +98,7 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }} title={d.path}>
                   {fname}
                 </span>
-                <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', flexShrink: 0 }}>
+                <span style={{ fontSize: "var(--fs-2xs)", fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', flexShrink: 0 }}>
                   {d.is_checkpoint ? t("vmset.checkpoint") : d.disk_type}
                 </span>
                 <span style={{ fontFamily: 'var(--font-num)', fontWeight: 800, flexShrink: 0, minWidth: '54px', textAlign: 'right' }}>{fmtGB(d.file_size)} GB</span>
@@ -110,7 +110,7 @@ function DiskSection({ vm, isRunning, onLog }: { vm: VmInfo; isRunning: boolean;
 
       {/* Honest guidance: the two levers, and why compaction may not help here. */}
       {disks && disks.length > 0 && (
-        <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', lineHeight: 1.6, borderTop: '1px solid var(--glass-border)', paddingTop: '12px' }}>
+        <div style={{ fontSize: "var(--fs-xs)", color: 'var(--text-muted)', lineHeight: 1.6, borderTop: '1px solid var(--glass-border)', paddingTop: '12px' }}>
           {checkpointBytes > 0 && (
             <div>{t("vmset.hintCkptPre")}<b style={{ color: 'var(--accent-orange)' }}>{fmtGB(checkpointBytes)}GB</b>{t("vmset.hintCkptPost")}</div>
           )}
@@ -324,9 +324,9 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Cpu size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
-                  <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.cpu")}</label>
+                  <label style={{ fontSize: "var(--fs-xs)", fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.cpu")}</label>
                 </div>
-                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newProcessors}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: 'var(--text-main)' }}>VCPU</span></div>
+                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newProcessors}<span style={{ fontSize: "var(--fs-xs)", opacity: 0.5, marginLeft: '4px', color: 'var(--text-main)' }}>VCPU</span></div>
               </div>
               <input 
                 type="range" 
@@ -346,9 +346,9 @@ export function VmSettingsModal({ vm, onClose, onLog }: VmSettingsModalProps) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <MemoryStick size={16} className="neon-text-blue" style={{ opacity: 0.8 }} />
-                  <label style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.ram")}</label>
+                  <label style={{ fontSize: "var(--fs-xs)", fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{t("vmset.ram")}</label>
                 </div>
-                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newMemory}<span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px', color: 'var(--text-main)' }}>GB</span></div>
+                <div className="neon-text-blue" style={{ fontSize: '16px', fontWeight: 900 }}>{newMemory}<span style={{ fontSize: "var(--fs-xs)", opacity: 0.5, marginLeft: '4px', color: 'var(--text-main)' }}>GB</span></div>
               </div>
               <div style={{ position: 'relative' }}>
                 <input 

@@ -67,7 +67,7 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
           <div className="stat-card">
             <div className="stat-label">{t("net.switchCount")}</div>
             <div className="stat-value">{loading ? "..." : switches.length}</div>
-            <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "4px" }}>
+            <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: "4px" }}>
               {switches.filter(s => s.switch_type === "External").length} External ·{" "}
               {switches.filter(s => s.switch_type === "Internal").length} Internal ·{" "}
               {switches.filter(s => s.switch_type === "Private").length} Private
@@ -76,7 +76,7 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
           <div className="stat-card">
             <div className="stat-label">{t("net.activeConn")}</div>
             <div className="stat-value">{vms.filter(v => (v.ip_addresses?.length ?? 0) > 0).length}</div>
-            <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "4px" }}>{t("net.vmsWithIp")}</div>
+            <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: "4px" }}>{t("net.vmsWithIp")}</div>
           </div>
         </div>
 
@@ -90,7 +90,7 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
               {switches.map(sw => (
                 <div key={sw.name} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "8px 10px", background: "rgba(255,255,255,0.02)", borderRadius: "6px", border: "1px solid var(--border)" }}>
                   <span style={{
-                    fontSize: "9px", fontWeight: 900, padding: "2px 7px", borderRadius: "4px",
+                    fontSize: "var(--fs-2xs)", fontWeight: 900, padding: "2px 7px", borderRadius: "4px",
                     background: sw.switch_type === "External" ? "rgba(0,255,153,0.1)" : sw.switch_type === "Internal" ? "rgba(110,113,255,0.1)" : "rgba(255,255,255,0.05)",
                     color: sw.switch_type === "External" ? "var(--accent-green)" : sw.switch_type === "Internal" ? "var(--accent-blue)" : "var(--text-muted)",
                     border: `1px solid ${sw.switch_type === "External" ? "rgba(0,255,153,0.2)" : sw.switch_type === "Internal" ? "rgba(110,113,255,0.2)" : "var(--border)"}`,
@@ -99,7 +99,7 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
                   </span>
                   <span style={{ fontWeight: 700, fontSize: "12px", flex: 1 }}>{sw.name}</span>
                   {sw.net_adapter_name && (
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{sw.net_adapter_name}</span>
+                    <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>{sw.net_adapter_name}</span>
                   )}
                 </div>
               ))}
@@ -138,7 +138,7 @@ export function NetworkPage({ vms, statsData, netHistory }: NetworkPageProps) {
                       <td>
                         {switchType ? (
                           <span style={{
-                            fontSize: "9px", fontWeight: 900, padding: "1px 6px", borderRadius: "3px",
+                            fontSize: "var(--fs-2xs)", fontWeight: 900, padding: "1px 6px", borderRadius: "3px",
                             background: switchType === "External" ? "rgba(0,255,153,0.08)" : switchType === "Internal" ? "rgba(110,113,255,0.08)" : "rgba(255,255,255,0.04)",
                             color: switchType === "External" ? "var(--accent-green)" : switchType === "Internal" ? "var(--accent-blue)" : "var(--text-muted)",
                           }}>

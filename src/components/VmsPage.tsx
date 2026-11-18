@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { Reorder } from "framer-motion";
 import { Server, Plus, MonitorPlay } from "lucide-react";
 import { HyperVCard } from "@/components/RackAsset";
 import { RemoteAssetRow } from "@/components/RemotePage";
@@ -24,11 +25,14 @@ interface VmsPageProps {
   onHostMemo: (host: RemoteHost) => void;
   onHostDelete: (id: string) => void;
   onHostAdd: () => void;
+  /** VM 드래그 정렬(대시보드에서 옮겨 옴). "전체" 필터 + 1열일 때만 켠다 — 걸러진 목록·2열
+   *  그리드에서 끌면 보이지 않는 VM의 자리가 꼬인다. */
+  onReorder?: (names: string[]) => void;
 }
 
 type VmFilter = "all" | "running" | "paused" | "off";
 
-export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSettings, onCreate, onHostConnect, onHostEdit, onHostMemo, onHostDelete, onHostAdd }: VmsPageProps) {
+export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSettings, onCreate, onHostConnect, onHostEdit, onHostMemo, onHostDelete, onHostAdd, onReorder }: VmsPageProps) {
   const { settings, updateSettings } = useSettings();
   const t = useT();
   const [vmFilter, setVmFilter] = useState<VmFilter>("all");
@@ -43,10 +47,10 @@ export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSe
   }, [vms, vmFilter]);
 
   const segments = [
-    { id: "all"     as VmFilter, label: t("vms.all"),     icon: "■", iconColor: "var(--accent-blue)",   count: vms.length },
-    { id: "running" as VmFilter, label: t("vms.running"),  icon: "●", iconColor: "var(--accent-green)",  count: vms.filter(v => v.state === "Running").length },
-    { id: "paused"  as VmFilter, label: t("vms.paused"), icon: "▪", iconColor: "var(--accent-orange)", count: vms.filter(v => v.state === "Paused" || v.state === "Saved").length },
-    { id: "off"     as VmFilter, label: t("vms.off"),     icon: "○", iconColor: "var(--text-muted)",    count: vms.filter(v => v.state === "Off").length },
+    { id: "all"     as VmFilter, label: t("vms.all"), iconColor: "var(--accent-blue)",   count: vms.length },
+    { id: "running" as VmFilter, label: t("vms.running"), iconColor: "var(--accent-green)",  count: vms.filter(v => v.state === "Running").length },
+    { id: "paused"  as VmFilter, label: t("vms.paused"), iconColor: "var(--accent-orange)", count: vms.filter(v => v.state === "Paused" || v.state === "Saved").length },
+    { id: "off"     as VmFilter, label: t("vms.off"), iconColor: "var(--text-muted)",    count: vms.filter(v => v.state === "Off").length },
   ];
 
   return (
@@ -59,7 +63,12 @@ export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSe
               className={`hd-segment-btn ${vmFilter === seg.id ? "active" : ""}`}
               onClick={() => setVmFilter(seg.id)}
             >
-              <span style={{ fontSize: "10px", color: vmFilter === seg.id ? seg.iconColor : "var(--text-muted)" }}>{seg.icon}</span>
+              {/* 상태 점 — 유니코드 기호(■●▪○) 대신 그린 점. "꺼짐"은 속이 빈 링이라 색 없이도 구분된다. */}
+              <span aria-hidden style={{
+                width: 7, height: 7, borderRadius: seg.id === "all" ? 2 : "50%", flexShrink: 0,
+                background: seg.id === "off" ? "transparent" : (vmFilter === seg.id ? seg.iconColor : "var(--text-muted)"),
+                boxShadow: seg.id === "off" ? `inset 0 0 0 1.5px ${vmFilter === seg.id ? "var(--text-secondary)" : "var(--text-muted)"}` : "none",
+              }} />
               {seg.label}
               {seg.count > 0 && <span className="hd-segment-count">{seg.count}</span>}
             </button>
@@ -85,7 +94,15 @@ export function VmsPage({ vms, statsData, horizonHosts, onError, onSuccess, onSe
         // else it collapses to 1 column instead of clipping the card contents.
         ? { gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(600px, 1fr))", gap: "12px" }
         : { gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "12px" }}>
-        {filteredVms.length > 0 ? filteredVms.map((vm, idx) => (
+        {filteredVms.length > 0 && onReorder && vmFilter === "all" && settings.vmColumns !== 2 ? (
+          <Reorder.Group axis="y" values={vms.map(v => v.name)} onReorder={onReorder} style={{ display: "flex", flexDirection: "column", gap: "12px", listStyle: "none", padding: 0, margin: 0 }}>
+            {vms.map((vm, idx) => (
+              <Reorder.Item key={vm.name} value={vm.name} style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                <HyperVCard vm={vm} animDelay={idx * 50} onError={onError} onSuccess={onSuccess} onSettings={() => onSettings(vm)} />
+              </Reorder.Item>
+            ))}
+          </Reorder.Group>
+        ) : filteredVms.length > 0 ? filteredVms.map((vm, idx) => (
           <HyperVCard
             key={vm.name}
             vm={vm}

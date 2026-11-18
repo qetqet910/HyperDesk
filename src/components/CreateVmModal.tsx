@@ -53,7 +53,7 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
     }
   };
 
-  const labelStyle: React.CSSProperties = { fontSize: '10px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' };
+  const labelStyle: React.CSSProperties = { fontSize: "var(--fs-xs)", fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' };
   const inputStyle: React.CSSProperties = { width: '100%', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: '10px', padding: '8px 12px', color: 'var(--text-main)', fontSize: '14px', fontWeight: 600, outline: 'none' };
   const cardStyle: React.CSSProperties = { background: 'rgba(0,0,0,0.2)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--glass-border)' };
 
@@ -76,7 +76,7 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
           <div style={cardStyle}>
             <div style={labelStyle}><Server size={12} /> {t("newvm.name")}</div>
             <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("newvm.namePlaceholder")} autoFocus />
-            {name.length > 0 && !nameValid && <div style={{ fontSize: '10.5px', color: 'var(--accent-red)', marginTop: '6px' }}>{t("newvm.nameInvalid")}</div>}
+            {name.length > 0 && !nameValid && <div style={{ fontSize: "var(--fs-xs)", color: 'var(--accent-red)', marginTop: '6px' }}>{t("newvm.nameInvalid")}</div>}
           </div>
 
           {/* Generation */}
@@ -102,7 +102,7 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
               <div style={labelStyle}><MemoryStick size={12} /> RAM</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
                 <input type="number" min={1} max={512} style={{ ...inputStyle, padding: '8px 10px', fontFamily: 'var(--font-num)' }} value={memoryGb} onChange={(e) => setMemoryGb(Number(e.target.value))} />
-                <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700 }}>GB</span>
+                <span style={{ fontSize: "var(--fs-xs)", color: 'var(--text-muted)', fontWeight: 700 }}>GB</span>
               </div>
             </div>
             <div style={cardStyle}>
@@ -113,7 +113,7 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
               <div style={labelStyle}><HardDrive size={12} /> {t("newvm.disk")}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
                 <input type="number" min={1} max={4096} style={{ ...inputStyle, padding: '8px 10px', fontFamily: 'var(--font-num)' }} value={diskGb} onChange={(e) => setDiskGb(Number(e.target.value))} />
-                <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700 }}>GB</span>
+                <span style={{ fontSize: "var(--fs-xs)", color: 'var(--text-muted)', fontWeight: 700 }}>GB</span>
               </div>
             </div>
           </div>
@@ -131,7 +131,7 @@ export function CreateVmModal({ onClose, onCreated, onError }: CreateVmModalProp
           <div style={cardStyle}>
             <div style={labelStyle}><Disc size={12} /> {t("newvm.iso")}</div>
             <input style={inputStyle} value={isoPath} onChange={(e) => setIsoPath(e.target.value)} placeholder={t("newvm.isoPlaceholder")} />
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>{t("newvm.isoHint")}</div>
+            <div style={{ fontSize: "var(--fs-xs)", color: 'var(--text-muted)', marginTop: '6px' }}>{t("newvm.isoHint")}</div>
           </div>
         </div>
 
