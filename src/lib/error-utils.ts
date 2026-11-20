@@ -19,9 +19,11 @@ export function parseError(raw: string): ParsedError {
   // 영문화하게 되면 여기 패턴도 같이 바꿔야 매칭이 유지된다.
   if (raw.includes("Hyper-V PowerShell 모듈") || (raw.includes("Get-VM") && raw.includes("not recognized")))
     return { titleKey: "error.hyperv.title", bodyKey: "error.hyperv.body" };
+  if (raw.includes("HD_NO_VMCONNECT"))
+    return { titleKey: "error.noVmconnect.title", bodyKey: "error.noVmconnect.body" };
   if (raw.includes("Cannot find vm") || raw.includes("No virtual machine"))
     return { titleKey: "error.vmNotFound.title", bodyKey: "error.vmNotFound.body" };
-  if (raw.includes("Access is denied") || raw.includes("access denied"))
+  if (raw.includes("HD_NO_HYPERV_RIGHTS") || raw.includes("Access is denied") || raw.includes("access denied"))
     return { titleKey: "error.denied.title", bodyKey: "error.denied.body" };
   if (raw.includes("already running") || raw.includes("already started"))
     return { titleKey: "error.running.title", bodyKey: "error.running.body" };

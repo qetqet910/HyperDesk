@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 이전 태그와 태그 메시지를 읽어 릴리즈 노트를 만든다
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -43,20 +45,53 @@ jobs:
           $msix = Get-ChildItem -Path "src-tauri/target/msix" -Filter "*.msixbundle" | Select-Object -First 1
           msstore publish $msix.FullName -id 9NPVXL622ZQQ
 
-      - name: Create GitHub Release & Upload Asset
+      # 변경 사항 = 주석 태그 메시지(`git tag -a vX.Y.Z -m "- 항목1" -m "- 항목2"`).
+      # 메시지 없는 태그면 이전 태그 이후 커밋 제목으로 채운다.
+      - name: Build release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8 # 한글 커밋 제목/태그 메시지가 깨지지 않게
+          $tag = "${{ github.ref_name }}"
+          $prev = git describe --tags --abbrev=0 "$tag^" 2>$null
+          $isAnnotated = (git cat-file -t "refs/tags/$tag") -eq 'tag'
+          $changes = if ($isAnnotated) { (git for-each-ref "refs/tags/$tag" --format='%(contents)').Trim() } else { '' }
+          if (-not $changes) {
+            $range = if ($prev) { "$prev..$tag" } else { $tag }
+            $changes = (git log $range --no-merges --pretty='- %s') -join "`n"
+          }
+          $compare = if ($prev) { "**Full Changelog**: [``$prev...$tag``](https://github.com/${{ github.repository }}/compare/$prev...$tag)" } else { '' }
+          $body = @"
+          ### ✅ 권장: Microsoft Store
+
+          <a href="https://apps.microsoft.com/detail/9NPVXL622ZQQ">
+            <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft" />
+          </a>
+
+          - Microsoft가 서명하고 검증한 패키지입니다.
+          - 새 버전이 나오면 **자동으로 업데이트**됩니다.
+
+          ### 📦 수동 설치
+
+          하단 **Assets**에서 ``.msixbundle`` 파일을 내려받아 실행하세요. (서명된 Msixbundle)
+
+          ---
+
+          ## 📝 변경 사항
+
+          $changes
+
+          $compare
+          "@
+          # YAML 블록이 들여쓰기 10칸을 걷어내므로 "@ 는 PowerShell에서 0열이 된다(필수).
+          $body | Set-Content -Encoding utf8 release-notes.md
+
+      # 첨부 파일은 올리지 않는다 — CI 산출물은 미서명이라 설치가 안 된다. Store 인증 후
+      # 서명된 .msixbundle을 받아 `gh release upload <tag> <파일> --clobber`로 붙인다.
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: 'src-tauri/target/msix/*.msixbundle'
-          generate_release_notes: true
-          body: |
-            ## 설치 (Microsoft Store)
-
-            👉 **https://apps.microsoft.com/detail/9NPVXL622ZQQ**
-
-            Store 버전은 Microsoft가 서명·검증하며 자동으로 업데이트됩니다.
-
-            > ⚠️ 아래 첨부된 `.msixbundle`은 Store 제출용 **미서명 원본 아티팩트**입니다.
-            > 서명되어 있지 않아 직접 설치되지 않습니다 — 반드시 위 Store 링크로 받으세요.
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

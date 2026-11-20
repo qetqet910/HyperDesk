@@ -270,6 +270,14 @@ pub async fn get_vms() -> Result<Vec<VmInfo>, String> {
             Write-Error "Hyper-V PowerShell 모듈이 설치되어 있지 않습니다. 'Windows 기능 켜기/끄기'에서 Hyper-V를 활성화해주세요."
             exit 1
         }
+        # 권한 없는 계정의 Get-VM은 "Access is denied"가 아니라 OS 언어로 된 다른 문구를 내거나
+        # 아예 빈 목록을 돌려준다 — 그래서 문구 매칭으로는 못 잡는다. 실패/빈 결과일 때만 토큰의
+        # 그룹을 직접 본다(관리자로 실행 중이거나 Hyper-V Administrators, SID S-1-5-32-578).
+        $hdNoRights = {
+            $p = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+            -not ($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -or
+                  $p.IsInRole([Security.Principal.SecurityIdentifier]'S-1-5-32-578'))
+        }
         try {
             $vms = Get-VM -ErrorAction Stop | ForEach-Object {
                 $vm = $_
@@ -295,11 +303,14 @@ pub async fn get_vms() -> Result<Vec<VmInfo>, String> {
             }
             if ($vms) {
                 $vms | ConvertTo-Json -Depth 3
+            } elseif (& $hdNoRights) {
+                Write-Error "HD_NO_HYPERV_RIGHTS"
+                exit 1
             } else {
                 "[]"
             }
         } catch {
-            Write-Error $_.Exception.Message
+            if (& $hdNoRights) { Write-Error "HD_NO_HYPERV_RIGHTS" } else { Write-Error $_.Exception.Message }
             exit 1
         }
     "#;
@@ -606,10 +617,26 @@ pub async fn connect_vm(host: String, protocol: String, username: Option<String>
 }
 
 /// vmconnect 키보드 옵션을 `Remote`("가상 컴퓨터에서 사용")로 바꾼 XML을 돌려준다.
-/// 이미 Remote면 `Ok(None)`. 설정 노드를 못 찾으면 `Err` — 문서화 안 된 파일이라
-/// 아는 모양이 아니면 건드리지 않는다(값은 실측: `FullScreen` / `Remote` / `Local`).
+/// 이미 Remote면 `Ok(None)`. 값은 실측: `FullScreen` / `Remote` / `Local`.
+///
+/// **노드가 없으면 넣는다(2026-11-20).** .NET 사용자 설정은 기본값(`FullScreen`)이면 항목을
+/// 아예 안 쓴다. 예전엔 그걸 "모르는 모양"으로 보고 안내만 띄웠는데, Hyper-V 설정을 한 번도
+/// 안 바꾼 PC에선 그 상태가 영원히 이어져 **실행마다 같은 안내**가 떴다(사용자 보고).
+/// 섹션 닫는 태그 앞에, 섹션이 없으면 `</configuration>` 앞에 실측 모양 그대로 넣는다.
+/// 노드는 있는데 값이 깨진 모양이면 여전히 `Err`(건드리지 않는다).
 fn vmconnect_keyboard_remote(xml: &str) -> Result<Option<String>, ()> {
-    let at = xml.find("name=\"VMConnectKeyboardOption\"").ok_or(())?;
+    const SECTION: &str = "Microsoft.Virtualization.Client.ClientVirtualizationSettings";
+    const NODE: &str = "        <setting name=\"VMConnectKeyboardOption\" type=\"Microsoft.Virtualization.Client.VMConnectKeyboardOption\">\n            <value>Remote</value>\n        </setting>\n";
+    let Some(at) = xml.find("name=\"VMConnectKeyboardOption\"") else {
+        let sec_close = format!("    </{SECTION}>");
+        if let Some(i) = xml.find(&sec_close) {
+            return Ok(Some(format!("{}{}{}", &xml[..i], NODE, &xml[i..])));
+        }
+        if let Some(i) = xml.find("</configuration>") {
+            return Ok(Some(format!("{}    <{SECTION}>\n{}    </{SECTION}>\n{}", &xml[..i], NODE, &xml[i..])));
+        }
+        return Err(());
+    };
     let open = at + xml[at..].find("<value>").ok_or(())? + "<value>".len();
     // 그 사이에 태그가 닫혔으면(`</setting>` 또는 자기 닫힘 `/>`) 이건 다른 설정의 <value>다.
     if xml[at..open].contains("</setting>") || xml[at..open].contains("/>") { return Err(()); }
@@ -618,13 +645,33 @@ fn vmconnect_keyboard_remote(xml: &str) -> Result<Option<String>, ()> {
     Ok(Some(format!("{}Remote{}", &xml[..open], &xml[close..])))
 }
 
+/// Store(MSIX) 설치본으로 실행 중인가 — 패키지는 `...\WindowsApps\<패키지>\`에 설치된다.
+fn is_packaged() -> bool {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_lowercase().contains(r"\windowsapps\"))
+        .unwrap_or(false)
+}
+
 /// 콘솔을 띄우기 직전에 부른다(이 설정은 **새 vmconnect 인스턴스에만** 적용된다).
-/// true = Remote임(원래 그랬거나 방금 바꿈). false = 파일이 없거나 모르는 모양 → 사용자 안내.
-/// 파일을 새로 만들지는 않는다 — 다른 PC에서 Hyper-V 관리자가 그 파일을 읽는지 검증 못 했다.
+/// true = Remote임(원래 그랬거나 방금 바꿈). false = 못 바꿈 → 사용자 안내.
+/// 파일이 없으면(Hyper-V 설정을 한 번도 저장 안 한 PC) 실측 모양의 빈 설정 파일에서 시작한다.
 fn ensure_vmconnect_keyboard_remote() -> bool {
     let Some(appdata) = std::env::var_os("APPDATA") else { return false };
     let path = std::path::PathBuf::from(appdata).join(r"Microsoft\Windows\Hyper-V\Client\1.0\clientsettings.config");
-    let Ok(xml) = std::fs::read_to_string(&path) else { return false };
+    let xml = match std::fs::read_to_string(&path) {
+        Ok(x) => x,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let dir_exists = path.parent().is_some_and(|d| d.is_dir());
+            // Store(MSIX) 설치본이 **없는 폴더를 새로 만들면** 패키지 안으로 가상화된다 — 우리 눈엔
+            // 써진 걸로 보이는데 vmconnect는 실제 위치를 읽으므로 설정이 안 먹고, 실행마다 "됐다"고
+            // 착각한다. 그 경우만 쓰지 않고 안내로 돌린다(이미 있는 실제 폴더 안의 새 파일은 실측상
+            // 실제 위치에 써진다 — 아래 rename 주석). 패키지 여부는 실행 파일 위치로 판단한다.
+            if !dir_exists && is_packaged() { return false; }
+            if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n</configuration>".to_string()
+        }
+        Err(_) => return false,
+    };
     match vmconnect_keyboard_remote(&xml) {
         Ok(None) => true,
         // 임시 파일에 쓰고 바꿔치기한다 — 쓰는 도중 죽어도 남의 설정 파일이 빈 채로 남지 않는다.
@@ -640,6 +687,28 @@ fn ensure_vmconnect_keyboard_remote() -> bool {
     }
 }
 
+/// 지금 사용자를 로컬 Hyper-V Administrators(S-1-5-32-578)에 넣는다 — UAC 승인 1회.
+/// 앱 자체를 관리자로 띄우는 대신 이걸 쓰는 이유: MSIX는 `requireAdministrator`면 실행이 안
+/// 되고(CLAUDE.md), 그룹은 한 번 넣으면 영구라 매 실행 UAC가 없다. 새 그룹은 **다시 로그인해야**
+/// 토큰에 반영된다. SID는 승격 전 프로세스에서 읽는다 — 표준 사용자가 UAC 창에 다른 관리자
+/// 계정을 넣으면 승격된 쪽의 `$env:USERNAME`은 그 관리자라서다. 그룹도 SID로 지정한다(이름은 OS 언어별).
+#[tauri::command]
+pub async fn grant_hyperv_rights() -> Result<(), String> {
+    let script = r#"
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $cmd = 'try {{ Add-LocalGroupMember -SID S-1-5-32-578 -Member ''{0}'' -ErrorAction Stop }} catch {{ if ($_.FullyQualifiedErrorId -notlike ''MemberExists*'') {{ exit 1 }} }}' -f $sid
+        $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+        try {
+            $p = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $enc"
+        } catch { Write-Error "HD_GRANT_CANCELLED"; exit 1 }
+        if ($p.ExitCode -ne 0) { Write-Error "HD_GRANT_FAILED"; exit 1 }
+    "#;
+    tokio::task::spawn_blocking(move || run_powershell(script))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|_| ())
+}
+
 #[tauri::command]
 pub async fn connect_console(app: AppHandle, name: String) -> Result<u32, String> {
     // Win/Alt+Tab을 VM으로 보내려면 vmconnect가 키를 가져가도록 설정돼 있어야 한다.
@@ -648,7 +717,13 @@ pub async fn connect_console(app: AppHandle, name: String) -> Result<u32, String
     if !ensure_vmconnect_keyboard_remote() && !HINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
         let _ = app.emit("vmconnect-keyboard-hint", ());
     }
-    let child = Command::new("C:\\Windows\\System32\\vmconnect.exe")
+    // Hyper-V 관리 도구가 없는 PC(Windows Home, 기능 일부만 켠 경우)엔 vmconnect.exe가 없다.
+    // 원시 OS 오류 대신 프론트가 분류할 수 있는 표식으로 돌려준다(error-utils.ts).
+    let exe = std::path::Path::new("C:\\Windows\\System32\\vmconnect.exe");
+    if !exe.exists() {
+        return Err("HD_NO_VMCONNECT".to_string());
+    }
+    let child = Command::new(exe)
         .args(["localhost", &name])
         .spawn()
         .map_err(|e| format!("Failed to launch vmconnect: {}", e))?;
@@ -826,38 +901,32 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
     })
 }
 
-const RDP_SCAN_SCRIPT: &str = r#"
-    $mrus = @()
-    try {
-        $history = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Terminal Server Client\Default" -ErrorAction SilentlyContinue
-        if ($history) {
-            $mrus = $history.PSObject.Properties | Where-Object { $_.Name -like "MRU*" } | Select-Object -ExpandProperty Value
+/// mstsc가 남긴 접속 기록(HKCU): `Default`의 MRU* 값 + `Servers`의 하위 키 이름. 중복 제거, 순서 유지.
+/// 예전엔 이걸 PowerShell(콜드 spawn ~1.3s, 저사양 PC·백신 검사 시 수 초)로 5초마다 돌렸다 —
+/// 레지스트리 두 번 읽는 일이라 winreg로 바로 읽는다(로딩이 느리다는 보고, 2026-11-20).
+fn scan_rdp_history() -> Vec<String> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let mut out: Vec<String> = Vec::new();
+    if let Ok(k) = hkcu.open_subkey(r"Software\Microsoft\Terminal Server Client\Default") {
+        for (name, _) in k.enum_values().flatten() {
+            if name.starts_with("MRU") {
+                if let Ok(v) = k.get_value::<String, _>(&name) { out.push(v.trim().to_string()); }
+            }
         }
-    } catch {}
-
-    $server_hosts = @()
-    try {
-        $servers = Get-ChildItem -Path "HKCU:\Software\Microsoft\Terminal Server Client\Servers" -ErrorAction SilentlyContinue
-        if ($servers) { $server_hosts = $servers.PSChildName }
-    } catch {}
-
-    ($mrus + $server_hosts) | Where-Object { $_ -ne $null } | Select-Object -Unique
-"#;
+    }
+    if let Ok(k) = hkcu.open_subkey(r"Software\Microsoft\Terminal Server Client\Servers") {
+        out.extend(k.enum_keys().flatten());
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|h| !h.trim().is_empty() && seen.insert(h.clone()));
+    out
+}
 
 #[tauri::command]
 pub async fn get_dashboard(app: AppHandle) -> Result<DashboardData, String> {
-    // VM query (blocking Get-VM) and RDP registry scan (blocking) are
-    // independent, so run them concurrently on blocking threads instead of
-    // letting the slow Get-VM gate the rest of the dashboard. The RDP scan
-    // deliberately stays on a COLD run_powershell, not the warm worker: it never
-    // touches Hyper-V/CIM (just two registry reads), so it gets none of the
-    // warm path's benefit but would fully share its mutex — routing it through
-    // run_powershell_warm serialized this "concurrent" pair behind one lock,
-    // silently defeating the comment above (worst case, a wedged Get-VM could
-    // stall the RDP scan for the warm worker's full 120s hang-guard window).
-    let vms_fut = get_vms();
-    let rdp_fut = tokio::task::spawn_blocking(|| run_powershell(RDP_SCAN_SCRIPT));
-    let (vms_res, rdp_res) = tokio::join!(vms_fut, rdp_fut);
+    // RDP 기록은 레지스트리 직접 읽기라 즉시 끝난다(scan_rdp_history) — 느린 건 Get-VM뿐이다.
+    let vms_res = get_vms().await;
+    let rdp_detected = scan_rdp_history();
 
     // 1. Hyper-V VMs
     let (mut vms, vm_error) = match vms_res {
@@ -911,8 +980,7 @@ pub async fn get_dashboard(app: AppHandle) -> Result<DashboardData, String> {
     }
 
     // Fold in the RDP registry scan — never overrides an existing HORIZON classification.
-    if let Ok(Ok(rdp_out)) = rdp_res {
-        let rdp_detected: Vec<String> = rdp_out.split('\n').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    {
         for host in rdp_detected {
             if let Some(existing) = remote_hosts.iter_mut().find(|h| h.host == host) {
                 // Same reasoning as the VDI loop above — leaving this out of a
@@ -1283,30 +1351,21 @@ fn get_vm_memos_path(app: &AppHandle) -> std::path::PathBuf {
 
 #[tauri::command]
 pub async fn get_vm_memo(app: AppHandle, vm_name: String) -> String {
-    let path = get_vm_memos_path(&app);
-    if let Ok(content) = std::fs::read_to_string(path) {
-        if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, String>>(&content) {
-            return map.get(&vm_name).cloned().unwrap_or_default();
-        }
-    }
-    String::new()
+    let map: std::collections::HashMap<String, String> = crate::hosts::read_json_or_quarantine(&get_vm_memos_path(&app));
+    map.get(&vm_name).cloned().unwrap_or_default()
 }
 
 #[tauri::command]
 pub async fn set_vm_memo(app: AppHandle, vm_name: String, memo: String) -> Result<(), String> {
     let path = get_vm_memos_path(&app);
-    let mut map: std::collections::HashMap<String, String> = if let Ok(content) = std::fs::read_to_string(&path) {
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        std::collections::HashMap::new()
-    };
+    let mut map: std::collections::HashMap<String, String> = crate::hosts::read_json_or_quarantine(&path);
     if memo.is_empty() {
         map.remove(&vm_name);
     } else {
         map.insert(vm_name, memo);
     }
     let json = serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    crate::hosts::write_atomic(&path, &json)
 }
 
 // ─── VM Tag commands ──────────────────────────────────────────────────────────
@@ -1319,12 +1378,7 @@ fn get_vm_tags_path(app: &AppHandle) -> std::path::PathBuf {
 }
 
 fn load_vm_tags_map(app: &AppHandle) -> std::collections::HashMap<String, Vec<String>> {
-    let path = get_vm_tags_path(app);
-    if let Ok(content) = std::fs::read_to_string(path) {
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        std::collections::HashMap::new()
-    }
+    crate::hosts::read_json_or_quarantine(&get_vm_tags_path(app))
 }
 
 #[tauri::command]
@@ -1338,7 +1392,7 @@ pub async fn set_vm_tags(app: AppHandle, vm_name: String, tags: Vec<String>) -> 
     let mut map = load_vm_tags_map(&app);
     if tags.is_empty() { map.remove(&vm_name); } else { map.insert(vm_name, tags); }
     let json = serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    crate::hosts::write_atomic(&path, &json)
 }
 
 #[tauri::command]
@@ -2387,8 +2441,17 @@ mod tests {
         let out = vmconnect_keyboard_remote(xml).unwrap().expect("should change");
         assert_eq!(out, xml.replace("FullScreen", "Remote"), "다른 설정은 한 글자도 안 바뀌어야 한다");
         assert_eq!(vmconnect_keyboard_remote(&out), Ok(None), "이미 Remote면 안 쓴다");
-        // 설정 노드가 없거나 값이 비어 있는 모르는 모양은 건드리지 않는다.
+        // 루트조차 모르는 모양은 건드리지 않는다.
         assert_eq!(vmconnect_keyboard_remote("<configuration />"), Err(()));
+        // 기본값이라 노드가 없는 파일(섹션은 있음) → 섹션 안에 넣고, 다른 설정은 그대로.
+        let no_node = "<configuration>\n    <Microsoft.Virtualization.Client.ClientVirtualizationSettings>\n        <setting name=\"VMConnectReleaseKey\" type=\"Microsoft.Virtualization.Client.VMConnectReleaseKey\">\n            <value>Left</value>\n        </setting>\n    </Microsoft.Virtualization.Client.ClientVirtualizationSettings>\n</configuration>";
+        let added = vmconnect_keyboard_remote(no_node).unwrap().expect("노드를 넣어야 한다");
+        assert!(added.contains("<value>Left</value>"));
+        assert_eq!(vmconnect_keyboard_remote(&added), Ok(None), "넣은 뒤엔 Remote로 읽혀야 한다");
+        // 섹션도 없는 새 파일 → 섹션째 넣는다.
+        let fresh = vmconnect_keyboard_remote("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n</configuration>").unwrap().unwrap();
+        assert_eq!(vmconnect_keyboard_remote(&fresh), Ok(None));
+        assert!(fresh.contains("<Microsoft.Virtualization.Client.ClientVirtualizationSettings>"));
         // 자기 닫힘 노드 뒤에 오는 **다른 설정의 값**을 덮어쓰면 안 된다.
         let no_value = "<setting name=\"VMConnectKeyboardOption\" type=\"T\" /><setting name=\"X\"><value>Left</value></setting>";
         assert_eq!(vmconnect_keyboard_remote(no_value), Err(()));

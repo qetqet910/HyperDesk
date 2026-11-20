@@ -2376,7 +2376,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   /* 아래로만 떨어지는 그림자 — 직각이라 형태로는 떠 있는 느낌이 안 나므로 그림자가
      그 역할을 한다. inset 하이라이트는 위 테두리를 없앤 자리를 대신한다. */
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  /* **자동 숨김을 쓰지 않는다.** 숨겼다 호버로 내리는 방식을 시도했다가 되돌렸다 —
+  /* (2026-11-20 갱신) 평소엔 상시 표시, 전체화면/몰입에서만 접는다 — 아래 .tucked 참고.
+     접어도 6px 띠를 구멍으로 남겨 호버를 받는다. 아래는 예전(띠 없이 숨긴) 시도의 기록:
+     **자동 숨김을 쓰지 않는다.** 숨겼다 호버로 내리는 방식을 시도했다가 되돌렸다 —
      swallow된 Win32 자식이 슬롯을 덮고 있어서 그 위에서는 DOM이 마우스 이벤트를
      아예 못 받는다(cutout이 존재하는 이유가 바로 그거다). 그래서
      `.slot-content-area:hover`는 영원히 안 걸리고, 남는 건 4px짜리 띠 호버뿐이라
@@ -3146,6 +3148,11 @@ textarea:focus-visible,
 .slot-header-bar.centered {
   transform: translateX(-50%);
 }
+
+/* 전체화면 자동 숨김(SwallowSlot isTucked) — 아래 6px 띠만 남기고 위로 접는다. 띠는 구멍으로
+   남아 있어 웹뷰가 호버를 받는다. 6px보다 줄이면 조준이 안 된다(예전 4px 시도가 그랬다). */
+.slot-header-bar.tucked { transform: translateY(calc(-100% + 6px)); }
+.slot-header-bar.centered.tucked { transform: translateX(-50%) translateY(calc(-100% + 6px)); }
 
 .slot-header-bar.centered {
   /* !important 필수 — 인라인 style의 left(중앙 상태에선 -1px)를 이겨야 한다.

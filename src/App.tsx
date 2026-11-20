@@ -83,6 +83,10 @@ export default function App() {
   const t = useT();
   const { toasts, addToast, removeToast } = useToast();
   const { data, isLoading, refetch } = useDashboard();
+  // 첫 대시보드 응답(Get-VM — 저사양 PC에선 수 초)을 전체 화면으로 기다리지 않는다.
+  // 스플래시는 최대 1초, 그 뒤엔 앱을 띄우고 VM 목록 자리에만 "불러오는 중"을 보인다.
+  const [splashDone, setSplashDone] = useState(false);
+  useEffect(() => { const id = setTimeout(() => setSplashDone(true), 1000); return () => clearTimeout(id); }, []);
   const { data: statsData } = useSystemStats();
   const { addHost, removeHost, updateHost, connect: connectHost } = useHostActions();
   const vmActions = useVmActions();
@@ -593,13 +597,26 @@ export default function App() {
         </div>
         <div className="rack-container no-scrollbar" style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "scroll", maxHeight: "480px" }}>
           {data?.vm_error && (() => {
-            const err = showError(parseError(data.vm_error));
+            const parsed = parseError(data.vm_error);
+            const err = showError(parsed);
             return (
               <div style={{ padding: "14px 16px", borderRadius: "10px", border: "1px solid rgba(244,63,94,0.3)", background: "rgba(244,63,94,0.08)", display: "flex", gap: "10px", alignItems: "flex-start" }}>
                 <AlertTriangle size={16} color="var(--accent-red)" style={{ flexShrink: 0, marginTop: "1px" }} />
                 <div>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--accent-red)" }}>{err.title}</div>
                   <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>{err.body}</div>
+                  {/* 앱을 관리자로 띄우지 않는다(MSIX 제약) — 대신 그룹에 한 번 넣는다(commands.rs grant_hyperv_rights). */}
+                  {parsed.titleKey === "error.denied.title" && (
+                    <button
+                      className="hd-btn hd-btn--small"
+                      style={{ marginTop: "8px" }}
+                      onClick={() => api.grantHypervRights()
+                        .then(() => addToast(t("error.denied.granted"), "success"))
+                        .catch((e) => { if (!String(e).includes("HD_GRANT_CANCELLED")) setErrorModal({ title: t("error.denied.title"), body: t("error.denied.grantFailed") }); })}
+                    >
+                      {t("error.denied.grant")}
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -615,7 +632,7 @@ export default function App() {
           ) : (
             <div style={{ padding: "28px", textAlign: "center", color: "var(--text-muted)", border: "1px dashed var(--border)", borderRadius: "12px" }}>
               <Server size={22} style={{ marginBottom: "8px" }} />
-              <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>{vms.length === 0 ? t("dash.noVms") : t("dash.allQuiet")}</div>
+              <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>{!data ? t("loading.1") : vms.length === 0 ? t("dash.noVms") : t("dash.allQuiet")}</div>
             </div>
           )}
         </div>
@@ -731,7 +748,7 @@ export default function App() {
     // opacity만 남긴다(사라지는 게 아니라 전정기관을 자극하는 움직임만 제거).
     <MotionConfig reducedMotion="user">
     <AnimatePresence mode="wait">
-      {isLoading && !data ? (
+      {isLoading && !data && !splashDone ? (
         <motion.div
           key="loading"
           initial={{ opacity: 1 }}
@@ -789,7 +806,7 @@ export default function App() {
                   never shows the fallback on first paint. */}
               <Suspense fallback={<div className="hd-page" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "12px" }}>{t("common.loading")}</div>}>
                 {page === "multiview" ? (
-                  <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} connectRequest={slotRequest} onConnectRequestHandled={() => setSlotRequest(null)} onError={(msg) => { addToast(msg, "error"); addLog(`[MULTIVIEW] ${msg}`, "error"); }} />
+                  <MultiView data={{ vms, remoteHosts }} isOverlayActive={isOverlayActive} connectRequest={slotRequest} onConnectRequestHandled={() => setSlotRequest(null)} onError={(msg) => { const e = parseError(msg); const shown = e.detail ? msg : t(e.bodyKey); addToast(shown, "error"); addLog(`[MULTIVIEW] ${shown}`, "error"); }} />
                 ) : (
                   <div className="hd-page" key={page}>
                     {page === "dashboard" && DashboardContent}

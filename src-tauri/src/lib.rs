@@ -19,7 +19,7 @@ use commands::{
     get_vm_disk_info, compact_vm_disk, convert_vm_disk_to_dynamic,
     get_vm_switches, get_vm_network_adapters,
     get_hyper_v_events,
-    get_data_dir_path, reset_hidden_hosts, clear_app_data,
+    get_data_dir_path, reset_hidden_hosts, clear_app_data, grant_hyperv_rights,
 };
 #[cfg(debug_assertions)]
 use commands::debug_spawn_test_window;
@@ -216,6 +216,7 @@ pub fn run() {
             get_data_dir_path,
             reset_hidden_hosts,
             clear_app_data,
+            grant_hyperv_rights,
             #[cfg(debug_assertions)]
             debug_spawn_test_window,
         ])

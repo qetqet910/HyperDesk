@@ -202,4 +202,5 @@ export const api = {
   getDataDirPath: () => invoke<string>("get_data_dir_path"),
   resetHiddenHosts: () => invoke<void>("reset_hidden_hosts"),
   clearAppData: () => invoke<void>("clear_app_data"),
+  grantHypervRights: () => invoke<void>("grant_hyperv_rights"),
 };

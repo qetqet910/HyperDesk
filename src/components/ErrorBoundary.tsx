@@ -34,6 +34,18 @@ export class ErrorBoundary extends React.Component<React.PropsWithChildren, Stat
             {"\n\n"}
             <b>Stack:</b> {this.state.error.stack}
           </div>
+          {/* 복구 경로. 예전엔 스택만 보여 주고 끝이라 앱을 껐다 켜는 것 말고 방법이 없었다.
+              이 컴포넌트는 i18n 바깥(main.tsx 최상단)이라 문구를 두 언어로 같이 적는다.
+              마지막 버튼은 저장된 화면 설정(localStorage)이 렌더를 깨는 경우용 — 등록한
+              자산·메모·태그는 백엔드 파일이라 지워지지 않는다. */}
+          <div style={{ display: "flex", gap: "8px", marginTop: "16px", flexWrap: "wrap", justifyContent: "center" }}>
+            <button onClick={() => this.setState({ error: null })}>다시 시도 / Retry</button>
+            <button onClick={() => location.reload()}>새로 고침 / Reload</button>
+            <button onClick={() => {
+              try { localStorage.removeItem("hyperdesk_settings"); localStorage.removeItem("hd_page"); } catch { /* 무시 */ }
+              location.reload();
+            }}>화면 설정 초기화 / Reset UI settings</button>
+          </div>
         </div>
       );
     }

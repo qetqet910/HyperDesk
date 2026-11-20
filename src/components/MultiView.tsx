@@ -117,6 +117,8 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
   const immersiveRef = useRef(false);
   // Tracks plain OS fullscreen (F11, not immersive) so ESC knows to exit it.
   const fullscreenRef = useRef(false);
+  // 같은 값의 state — 헤더 필 자동 숨김(SwallowSlot autoHidePill)이 렌더에 써야 해서 둔다.
+  const [isFs, setIsFs] = useState(false);
   // 몰입모드가 OS 전체화면을 **직접 켰는지**. F11 전체화면 상태에서 몰입에 들어갔다면
   // 나올 때 전체화면을 끄면 안 된다 — 끄면 F11 이전의 창 크기(apply_fullscreen이
   // 처음 저장한 값)로 떨어져서 "해제하면 전체화면 전 크기가 아니라 엉뚱한 크기"가 됐다.
@@ -252,6 +254,7 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
     try {
       await invoke("toggle_fullscreen");
       fullscreenRef.current = !fullscreenRef.current;
+      setIsFs(fullscreenRef.current);
     } catch (e) {
       onError(t("mv.fullscreenFailed", { err: String(e) }));
     }
@@ -386,6 +389,7 @@ export function MultiView({ data, isOverlayActive, onError, connectRequest, onCo
                 pillX={pillX}
                 onPillMove={setPillX}
                 connectRequest={slotConnect && slotConnect.idx === i ? { nonce: slotConnect.nonce, conn: slotConnect.host } : null}
+                autoHidePill={isImmersive || isFs}
               />
             );
           })}

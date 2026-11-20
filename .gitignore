@@ -76,3 +76,7 @@ _workspace/
 # 결과물(docs/store-assets/*.png)만 커밋하고 원본은 절대 커밋하지 말 것.
 /MultiView*.png
 /MutiView*.png
+
+# 로컬 에이전트 스킬/에이전트 설정 — 개인 도구라 저장소에 넣지 않는다
+.claude/
+skills-lock.json

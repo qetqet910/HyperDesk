@@ -573,6 +573,58 @@ fn title_match_better(title: &str, needle: &str, area: i64, best_area: i64) -> O
     }
 }
 
+/// vmconnect가 콘솔 말고 띄우는 대화상자(고급 세션 "디스플레이 구성" 창, "연결 중" 팝업)인가.
+/// 제목에 VM 이름이 들어가서 제목 매칭만으로는 콘솔과 못 가른다. 그 창을 슬롯에 삼키면
+/// (a) 콘솔이 이미 붙어 있어도 "더 큰 새 후보"로 보고 콘솔을 숨긴 채 갈아끼우고, (b) 사용자가
+/// 그 창에 답하면 창이 닫혀 `window-closed` → 세션 유실이 났다(2026-11-20 사용자 보고).
+/// 실측(2026-11-20, 꺼진 VM 콘솔): `style=0x16cb0000` — 캡션 + 최소화·최대화 버튼, 소유자 없음.
+/// 대화상자는 소유 창이거나, 캡션은 있는데 최소화·최대화 버튼이 둘 다 없다.
+/// 캡션 없는 창(전체 화면 콘솔은 테두리가 없을 수 있다)은 대화상자로 보지 않는다.
+fn is_dialog_like(style: u32, owned: bool) -> bool {
+    const WS_CAPTION: u32 = 0x00C0_0000;
+    const WS_MINIMIZEBOX: u32 = 0x0002_0000;
+    const WS_MAXIMIZEBOX: u32 = 0x0001_0000;
+    owned || (style & WS_CAPTION == WS_CAPTION && style & (WS_MINIMIZEBOX | WS_MAXIMIZEBOX) == 0)
+}
+
+/// 다른 창이 소유한 창인가 — **HyperDesk 자신이 소유한 창은 빼고.** 삼킨 세션 창은
+/// `GWLP_HWNDPARENT`로 우리 메인 창이 소유하므로, 이걸 빼지 않으면 이미 붙은 콘솔이
+/// "대화상자"로 판정돼 헌트 기한이 끝없이 밀렸다(리뷰 지적 2026-11-20).
+unsafe fn owned_by_foreign(hwnd: HWND) -> bool {
+    match GetWindow(hwnd, GW_OWNER) {
+        Ok(o) if !o.is_invalid() => {
+            let mut pid = 0u32;
+            let _ = GetWindowThreadProcessId(o, Some(&mut pid));
+            pid != std::process::id()
+        }
+        _ => false,
+    }
+}
+
+/// 제목에 `needle`이 든 대화상자형 창이 떠 있나 — 떠 있는 동안은 사용자가 답하는 중이므로
+/// 헌트 기한을 늘린다(안 그러면 20초 뒤 연결 실패로 끝난다). `needle`은 소문자.
+fn title_dialog_visible(needle: &str) -> bool {
+    struct P<'a> { needle: &'a str, found: bool }
+    extern "system" fn cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let p = unsafe { &mut *(lparam.0 as *mut P) };
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() { return BOOL::from(true); }
+            let mut tbuf = [0u16; 512];
+            let tlen = GetWindowTextW(hwnd, &mut tbuf);
+            if !String::from_utf16_lossy(&tbuf[..tlen as usize]).to_lowercase().contains(p.needle) {
+                return BOOL::from(true);
+            }
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+            let owned = owned_by_foreign(hwnd);
+            if is_dialog_like(style, owned) { p.found = true; return BOOL::from(false); }
+        }
+        BOOL::from(true)
+    }
+    let mut p = P { needle, found: false };
+    unsafe { let _ = EnumWindows(Some(cb), LPARAM(&mut p as *mut P as isize)); }
+    p.found
+}
+
 struct ChildParam {
     found: HWND
 }
@@ -751,6 +803,21 @@ fn find_vmconnect_video_rect(frame: HWND) -> Option<RECT> {
     find_child_rect_by_class(frame, "hwndwrapper[vmconnect")
 }
 
+/// 이 pid가 vmconnect.exe인가 — 창 트리 모양과 무관한 판정(perform_swallow 주석).
+fn is_vmconnect_process(pid: u32) -> bool {
+    use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::Foundation::CloseHandle;
+    if pid == 0 { return false; }
+    unsafe {
+        let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+        let mut buf = [0u16; 520];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+        let _ = CloseHandle(h);
+        ok && String::from_utf16_lossy(&buf[..len as usize]).to_lowercase().ends_with("\\vmconnect.exe")
+    }
+}
+
 /// The frame's own NON-CLIENT border thickness (left, top) in physical px — the
 /// gap between its window rect and its client rect. WinForms re-adds a ~2-3px
 /// border even after WS_THICKFRAME is stripped; in an Enhanced-session vmconnect
@@ -915,6 +982,10 @@ extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
                  let mut tbuf = [0u16; 512];
                  let tlen = GetWindowTextW(hwnd, &mut tbuf);
                  let title = String::from_utf16_lossy(&tbuf[..tlen as usize]).to_lowercase();
+                 // 대화상자는 후보에서 뺀다 — 일반 플로팅 창으로 남아 사용자가 답하게 둔다(is_dialog_like).
+                 let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+                 let owned = owned_by_foreign(hwnd);
+                 if is_dialog_like(style, owned) { return BOOL::from(true); }
                  let mut r = RECT::default();
                  if GetWindowRect(hwnd, &mut r).is_ok() {
                      let area = (r.right - r.left) as i64 * (r.bottom - r.top) as i64;
@@ -1160,7 +1231,8 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
                 // vmconnect windows, see the note at its SetParent call). The
                 // Result plumbing and match below are kept because the generation/
                 // claim-set logic around it (V5/V6 fixes) still needs the call
-                // site structure; Err is simply unreachable for now.
+                // site structure. Err is now returned for one case: UIPI denial
+                // ("access-denied", higher-integrity window) — see the match below.
                 let swallow_result = perform_swallow(&s_id, h_wrap, actual_parent, app.clone(), bounds);
                 lock_claimed().remove(&(h.0 as isize));
 
@@ -1218,10 +1290,11 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
                         // so it starts bounds-syncing, then keep hunting for the session.
                         let _ = app.emit("swallow-progress", s_id.clone());
                     }
-                    #[cfg(debug_assertions)]
-                    Err(e) => dlog!("[swallow] perform_swallow failed for hwnd={:?}: {}", h.0, e),
-                    #[cfg(not(debug_assertions))]
-                    Err(_) => {}
+                    Err(e) => {
+                        dlog!("[swallow] perform_swallow failed for hwnd={:?}: {}", h.0, e);
+                        // 프론트가 "관리자 권한으로 열린 창" 안내를 띄운다(헌트는 다른 창을 계속 찾는다).
+                        if e == "access-denied" { let _ = app.emit("swallow-denied", s_id.clone()); }
+                    }
                 }
             }
 
@@ -1232,6 +1305,13 @@ pub fn swallow(slot_id: &str, target_pid: u32, parent_hwnd: HWND, app_handle: Ap
             if is_horizon && last_dump.elapsed().as_secs() >= 5 {
                 last_dump = std::time::Instant::now();
                 dump_all_visible_windows();
+            }
+
+            // vmconnect 대화상자가 떠 있으면 사용자가 답하는 중이다 — 기한을 밀어 둔다.
+            if let Some(needle) = expected_title.as_deref() {
+                if title_dialog_visible(&needle.to_lowercase()) {
+                    deadline = deadline.max(std::time::Instant::now() + std::time::Duration::from_secs(20));
+                }
             }
 
             if unlock_at.is_some_and(|t| std::time::Instant::now() >= t) {
@@ -1453,7 +1533,14 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     dlog!("[swallow-tree] DECISION frame_class='{}' vmconnect_video={:?} get_offset={}",
         class_str, vmconnect_video.map(|r| r.top), offset);
     let mut offset_x = 0;
-    if let Some(vr) = vmconnect_video {
+    // 영상 자식만 보고 판정하면 **삼키는 순간** 그 자식이 없을 때(트리가 아직 안 만들어졌거나
+    // 이미 고급 세션 RDP 트리) vmconnect로 안 봐서 아래 크롬 재측정이 슬롯 목숨 내내 안 돈다 →
+    // 프레임의 클라이언트 테두리(WS_EX_CLIENTEDGE, 2px)가 왼쪽 흰 줄로 남고 화면이 그만큼
+    // 오른쪽으로 밀린 채 고정됐다("간헐적", 2026-11-20 사용자 보고). 프로세스 이름도 같이 본다.
+    let mut frame_pid = 0u32;
+    unsafe { let _ = GetWindowThreadProcessId(child_hwnd, Some(&mut frame_pid)); }
+    if vmconnect_video.is_some() || is_vmconnect_process(frame_pid) {
+        let vr = vmconnect_video.unwrap_or_default();
         if vr.top > 0 && vr.top < 200 {
             offset = vr.top;
             #[cfg(debug_assertions)]
@@ -1464,8 +1551,7 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
         if vr.left > 0 && vr.left <= 20 {
             offset_x = vr.left;
         }
-        let mut pid = 0u32;
-        unsafe { let _ = GetWindowThreadProcessId(child_hwnd, Some(&mut pid)); }
+        let pid = frame_pid;
         #[cfg(debug_assertions)]
         dump_owned_top_level_windows(pid, child_hwnd);
         hide_vmconnect_bbar(pid);
@@ -1525,7 +1611,14 @@ fn perform_swallow(slot_id: &str, child_h: SendHWND, actual_parent_h: SendHWND, 
     style |= WS_CLIPSIBLINGS.0 as isize;
 
     unsafe {
-        let _ = SetWindowLongPtrW(child_hwnd, GWL_STYLE, style);
+        // 대상이 우리보다 높은 무결성(관리자로 연 콘솔 등)이면 UIPI가 모든 창 조작을 err=5로
+        // 막아 슬롯이 조용히 빈 채로 남았다(CLAUDE.md). 첫 조작에서 그걸 판정해 이유를 알린다.
+        // GWL_STYLE의 이전 값은 0일 수 없으므로 "0 + ERROR_ACCESS_DENIED"는 거부뿐이다.
+        windows::Win32::Foundation::SetLastError(windows::Win32::Foundation::WIN32_ERROR(0));
+        let prev = SetWindowLongPtrW(child_hwnd, GWL_STYLE, style);
+        if prev == 0 && windows::Win32::Foundation::GetLastError() == windows::Win32::Foundation::ERROR_ACCESS_DENIED {
+            return Err("access-denied".to_string());
+        }
         let _ = SetWindowLongPtrW(child_hwnd, GWL_EXSTYLE, ex_style);
 
         // vmconnect's menu bar (파일/작업/미디어/클립보드/보기/도움말) is a real
@@ -2899,7 +2992,19 @@ pub fn mark_fullscreen_native(hwnd: HWND, on: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{framed_rect, chrome_region_rect, title_match_better, BOTTOM_BIAS, HORIZONTAL_BUFFER};
+    use super::{framed_rect, chrome_region_rect, title_match_better, is_dialog_like, BOTTOM_BIAS, HORIZONTAL_BUFFER};
+
+    #[test]
+    fn vmconnect_dialogs_are_not_swallow_candidates() {
+        // 실측 콘솔 스타일(2026-11-20) — 캡션 + 최소화·최대화, 소유자 없음 → 후보.
+        assert!(!is_dialog_like(0x16cb_0000, false));
+        // 테두리 없는 전체 화면 콘솔(캡션 없음)도 후보.
+        assert!(!is_dialog_like(0x1600_0000, false));
+        // 캡션 + 시스템 메뉴만 있는 대화상자 → 제외.
+        assert!(is_dialog_like(0x16c8_0000, false));
+        // 소유 창(콘솔이 띄운 모달) → 스타일과 무관하게 제외.
+        assert!(is_dialog_like(0x16cb_0000, true));
+    }
 
     // ── vmconnect console window selection (ground-truthed via live probe
     // 2026-07-21 against VM "Windows 10 MSIX packaging environment") ──────────

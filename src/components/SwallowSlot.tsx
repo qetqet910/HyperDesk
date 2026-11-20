@@ -37,9 +37,11 @@ interface SwallowSlotProps {
   onPillMove: (x: number) => void;
   /** 바깥(`rdp:` 링크)에서 이 슬롯에 연결하라는 요청. nonce당 한 번, 슬롯이 보일 때 처리한다. */
   connectRequest?: { nonce: number; conn: RemoteHost } | null;
+  /** 전체화면/몰입 중이면 참 — 필을 위로 접어 얇은 띠만 남기고, 띠에 마우스를 올리면 내린다. */
+  autoHidePill?: boolean;
 }
 
-export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange, pillX, onPillMove, connectRequest }: SwallowSlotProps) {
+export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible, isOverlayActive, isSyncLocked, headerControls, onConnectingChange, onConnectedChange, pillX, onPillMove, connectRequest, autoHidePill }: SwallowSlotProps) {
   // contentRef points to slot-content-area (below the fixed 36px header bar).
   // syncBounds and handleConnect both measure this div so the Win32 window
   // is positioned to fill exactly the content area, never under the header.
@@ -48,6 +50,10 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
   const [isConnecting, setIsConnecting] = useState(false);
   const { settings } = useSettings();
   const t = useT();
+  // 이벤트 리스너는 [id]로 한 번만 붙으므로 최신 콜백을 ref로 읽는다.
+  const onErrorRef = useRef(onError);
+  const tRef = useRef(t);
+  useEffect(() => { onErrorRef.current = onError; tRef.current = t; });
 
   // Keep refs in sync so the integrity-poll interval closure always reads current values.
   useEffect(() => { assignedIdRef.current = assignedId; }, [assignedId]);
@@ -143,7 +149,13 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
       }
     });
 
+    // 대상 창이 더 높은 권한(관리자로 연 콘솔)이라 가져올 수 없을 때 — 예전엔 슬롯이 이유 없이 비어 있었다.
+    const unlistenDenied = listen<string>("swallow-denied", (event) => {
+      if (event.payload === id) onErrorRef.current(tRef.current("slot.elevatedConsole"));
+    });
+
     return () => {
+      unlistenDenied.then(f => f());
       unlistenClosed.then(f => f());
       unlistenSuccess.then(f => f());
       unlistenProgress.then(f => f());
@@ -364,6 +376,33 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
   // 필이 움직이거나, 세션이 붙거나 떨어지거나, 슬롯이 숨겨질 때마다 갱신.
   // 헤더 내용(슬롯 전환 버튼 유무)에 따라 필 폭도 바뀌므로 headerControls도 본다.
   useEffect(() => { reportCutout(); }, [reportCutout, pillX, headerControls]);
+
+  /* ── 전체화면 자동 숨김 (2026-11-20 사용자 요청) ─────────────────────────────
+     예전 시도가 실패한 이유는 "VM 위에선 DOM이 마우스를 못 받는다"였다. 그래서 접어도 **띠는
+     구멍으로 남긴다** — 띠는 VM에서 도려낸 자리라 웹뷰가 마우스를 받고, 필을 벗어나 VM으로
+     가면 웹뷰가 pointerleave를 받는다. 접고 펴는 동안엔 구멍이 필을 따라가야 하므로 전환
+     시간(CSS transform 0.18s) 동안 매 프레임 reportCutout을 부른다(reportCutout은 이미
+     슬롯과 교차한 부분만 도려낸다). */
+  const tuckable = !!autoHidePill && isSwallowed && !isActuallyHidden && !dragging;
+  const [tucked, setTucked] = useState(false);
+  const tuckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleTuck = useCallback((ms: number) => {
+    if (tuckTimer.current) clearTimeout(tuckTimer.current);
+    tuckTimer.current = setTimeout(() => setTucked(true), ms);
+  }, []);
+  useEffect(() => {
+    if (tuckable) scheduleTuck(1500);   // 전체화면에 들어가면 잠깐 보여준 뒤 접는다
+    else { if (tuckTimer.current) clearTimeout(tuckTimer.current); setTucked(false); }
+    return () => { if (tuckTimer.current) clearTimeout(tuckTimer.current); };
+  }, [tuckable, scheduleTuck]);
+  const isTucked = tuckable && tucked;
+  useEffect(() => {
+    let raf = 0;
+    const end = performance.now() + 260;
+    const tick = () => { reportCutout(); if (performance.now() < end) raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isTucked, reportCutout]);
 
   /* (제거됨) 호버 드러남 전환 중 구멍을 따라가게 하던 추적기 — 자동 숨김 자체를
      폐기해서 필요 없어졌다. swallow된 VM 위에서는 DOM이 마우스를 못 받아
@@ -630,9 +669,11 @@ export function SwallowSlot({ id, assignedId, data, onAssign, onError, isVisible
       <div ref={contentRef} className="slot-content-area">
         <div
           ref={pillRef}
-          className={`slot-header-bar ${isSwallowed ? "slot-header-bar--active" : ""} ${dragging ? "dragging" : ""} ${pillX < 0 ? "centered" : ""}`}
+          className={`slot-header-bar ${isSwallowed ? "slot-header-bar--active" : ""} ${dragging ? "dragging" : ""} ${pillX < 0 ? "centered" : ""} ${isTucked ? "tucked" : ""}`}
           style={{ left: pillX }}
           onPointerDown={onPillPointerDown}
+          onPointerEnter={() => { if (tuckTimer.current) clearTimeout(tuckTimer.current); setTucked(false); }}
+          onPointerLeave={() => { if (tuckable) scheduleTuck(500); }}
         >
           {/* 전용 드래그 그립. 필 내부가 버튼(제목·슬롯전환·X)으로 꽉 차 있고
               onPillPointerDown은 버튼 위에서는 드래그를 시작하지 않으므로, 그립이
